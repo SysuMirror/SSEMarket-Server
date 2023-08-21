@@ -1,0 +1,29 @@
+services:
+  client-pc:
+    image: client-pc:latest
+    build: .
+    ports:
+      - 80:80
+  client-mobile:
+    image: client-mobile:latest
+    build: .
+    ports:
+      - 81:81
+  manager:
+    image: manager:latest
+    build: .
+    ports:
+      - 82:82
+  mysql:
+    image: mysql:latest
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=admin
+  redis:
+    image: redis:latest
+  SSE_market_server:
+    image: SSE_market_server:latest
+    build: .
+    ports:
+      - 8080:8080
