@@ -1,17 +1,17 @@
 services:
   client-pc:
     image: client-pc:latest
-    build: .
+    build: ../SSE_market_client
     ports:
       - 80:80
   client-mobile:
     image: client-mobile:latest
-    build: .
+    build: ../sse_market_mobile
     ports:
       - 81:81
   manager:
     image: manager:latest
-    build: .
+    build: ../sse_market_manager
     ports:
       - 82:82
   mysql:
