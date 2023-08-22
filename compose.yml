@@ -1,10 +1,10 @@
 services:
-  sse_market_client-pc:
+  sse_market_client_pc:
     image: sse_market_client-pc:latest
     build: ../SSE_market_client
     ports:
       - 80:80
-  sse_market_client-mobile:
+  sse_market_client_mobile:
     image: sse_market_client-mobile:latest
     build: ../sse_market_mobile
     ports:
