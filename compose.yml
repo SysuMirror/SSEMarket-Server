@@ -1,0 +1,29 @@
+services:
+  sse_market_client-pc:
+    image: sse_market_client-pc:latest
+    build: ../SSE_market_client
+    ports:
+      - 80:80
+  # sse_market_client-mobile:
+  #   image: sse_market_client-mobile:latest
+  #   build: ../sse_market_mobile
+  #   ports:
+  #     - 81:81
+  # sse_market_manager:
+  #   image: sse_market_manager:latest
+  #   build: ../sse_market_manager
+  #   ports:
+  #     - 82:82
+  mysql:
+    image: mysql:latest
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_ROOT_PASSWORD=admin
+  redis:
+    image: redis:latest
+  sse_market_server:
+    image: sse_market_server:latest
+    build: .
+    ports:
+      - 8080:8080
