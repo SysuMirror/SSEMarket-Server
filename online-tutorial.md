@@ -8,24 +8,24 @@
 
 
 ```bash
-# 阿里云服务器
-ip 120.79.77.160
+# 腾讯云服务器
+ip 114.132.75.27
 password SSE_Market
 
 # sse_market_client_pc: 
-http://120.79.77.160
+http://114.132.75.27
 
 # sse_market_client_mobile: 
-http://120.79.77.160:81
+http://114.132.75.27:81
 
 # sse_market_manager: 
-http://120.79.77.160:82
+http://114.132.75.27:82
 
 # sse_market_server: 
-http://120.79.77.160:8080
+http://114.132.75.27:8080
 
 # mysql:
-host 120.79.77.160
+host 114.132.75.27
 port 3506
 user root
 password admin
