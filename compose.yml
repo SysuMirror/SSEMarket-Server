@@ -4,26 +4,37 @@ services:
     build: ../SSE_market_client
     ports:
       - 80:80
+    environment:
+      - TZ=Asia/Shanghai
   sse_market_client_mobile:
     image: sse_market_client-mobile:latest
     build: ../sse_market_mobile
     ports:
       - 81:81
+    environment:
+      - TZ=Asia/Shanghai
   sse_market_manager:
     image: sse_market_manager:latest
     build: ../sse_market_manager
     ports:
       - 82:82
+    environment:
+      - TZ=Asia/Shanghai
   mysql:
     image: mysql:latest
     ports:
       - 3506:3306
     environment:
       - MYSQL_ROOT_PASSWORD=admin
+      - TZ=Asia/Shanghai
   redis:
     image: redis:latest
+    environment:
+      - TZ=Asia/Shanghai
   sse_market_server:
     image: sse_market_server:latest
     build: .
     ports:
       - 8080:8080
+    environment:
+      - TZ=Asia/Shanghai
