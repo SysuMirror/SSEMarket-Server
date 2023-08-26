@@ -40,4 +40,4 @@ services:
     environment:
       - TZ=Asia/Shanghai
     volumes:
-      - /root/SSE_Market/sse_market_server_resource:/app/public/uploads
+      - /root/SSE_Market/sse_market_server_resource:/app/public
