@@ -27,6 +27,7 @@ services:
     environment:
       - MYSQL_ROOT_PASSWORD=admin
       - TZ=Asia/Shanghai
+      - MYSQL_DATABASE=ssemarket
   redis:
     image: redis:latest
     environment:
