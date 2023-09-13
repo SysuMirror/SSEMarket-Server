@@ -3,7 +3,7 @@ module loginTest
 go 1.20
 
 require (
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible
+	github.com/brianvoe/gofakeit v2.2.0+incompatible
 	github.com/gin-gonic/gin v1.9.1
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/jinzhu/gorm v1.9.16
@@ -18,12 +18,10 @@ require (
 )
 
 require (
-	github.com/brianvoe/gofakeit v3.18.0+incompatible
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/disintegration/imaging v1.6.2
 	github.com/robfig/cron v1.2.0
 )
-
-require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
 
 require (
 	github.com/bytedance/sonic v1.9.1 // indirect
