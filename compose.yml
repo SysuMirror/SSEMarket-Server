@@ -1,11 +1,11 @@
 services:
-  # sse_market_client_pc:
-  #   image: sse_market_client-pc:latest
-  #   build: ../SSE_market_client
-  #   ports:
-  #     - 80:80
-  #   environment:
-  #     - TZ=Asia/Shanghai
+  sse_market_client_pc:
+    image: sse_market_client-pc:latest
+    build: ../SSE_market_client
+    ports:
+      - 881:881
+    environment:
+      - TZ=Asia/Shanghai
   temp_blog:
     image: temp_blog:latest
     build: ../VueBlogger
