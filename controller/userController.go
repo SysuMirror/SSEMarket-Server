@@ -448,6 +448,7 @@ func Info(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"user": dto.ToUserDto(user.(model.User))}})
 }
 
+// todo
 func UploadAvatar(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -478,6 +479,7 @@ func UploadAvatar(c *gin.Context) {
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
 
+// todo
 func UpdateAvatar(c *gin.Context) {
 	// 用于移动端
 	phone := c.PostForm("phone")
@@ -529,6 +531,7 @@ func UpdateAvatar(c *gin.Context) {
 }
 
 // GetAvatar 用于处理获取用户头像的请求
+// todo
 func GetAvatar(c *gin.Context) {
 	// 连接数据库
 	db := common.GetDB()
