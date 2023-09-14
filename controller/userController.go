@@ -471,11 +471,15 @@ func UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	// 更新用户头像URL
-	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	user.AvatarURL = "http://114.132.75.27:8080/uploads/" + filename
-	db.Save(&user)
+	// 更新用户头像到图床
+	user.AvatarURL, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
+		return
+	}
 
+	db.Save(&user)
+	
 	// 返回成功
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
@@ -521,8 +525,13 @@ func UpdateAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
-
-	user.AvatarURL = "http://114.132.75.27:8080/uploads/" + filename
+	
+	// 更新用户头像到图床
+	user.AvatarURL, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
+		return
+	}
 	if err := db.Save(&user).Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
 		return

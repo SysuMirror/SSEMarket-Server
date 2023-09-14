@@ -546,7 +546,6 @@ func ShowDetails(c *gin.Context) {
 	c.JSON(http.StatusOK, postDetailsResponse)
 }
 
-//TODO
 func UploadPhotos(c *gin.Context) {
 	// UserID := c.PostForm("UserID")
 	// 获取前端传过来的图片
