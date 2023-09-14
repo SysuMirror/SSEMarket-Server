@@ -548,8 +548,8 @@ func ShowDetails(c *gin.Context) {
 
 //TODO
 func UploadPhotos(c *gin.Context) {
-	//UserID := c.PostForm("UserID")
-	// 获取前端传过来 图片
+	// UserID := c.PostForm("UserID")
+	// 获取前端传过来的图片
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
@@ -565,6 +565,12 @@ func UploadPhotos(c *gin.Context) {
 	err = c.SaveUploadedFile(file, filepath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败"})
+		return
+	}
+
+	_, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
 		return
 	}
 
@@ -593,11 +599,14 @@ func UploadPhotos(c *gin.Context) {
 		return
 	}
 
-	fmt.Print(api.UploadImage("src/images/"+filename, resizedPath))
-
 	// 更新 Post 的 Photos 字段
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	fileURL := "http://114.132.75.27:8080/resized/" + filename
+	fileURL := ""
+	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		return
+	}
 
 	// 返回成功
 	c.JSON(http.StatusOK, gin.H{"fileURL": fileURL, "message": "上传成功"})

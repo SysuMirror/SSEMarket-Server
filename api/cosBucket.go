@@ -10,7 +10,7 @@ import (
 	"github.com/tencentyun/cos-go-sdk-v5"
 )
 
-func UploadImage(filepath string, localpath string) (string) {
+func UploadImage(filepath string, localpath string) (string, error) {
     // 存储桶名称，由 bucketname-appid 组成，appid 必须填入，可以在 COS 控制台查看存储桶名称。 https://console.cloud.tencent.com/cos5/bucket
     // 替换为用户的 region，存储桶 region 可以在 COS 控制台“存储桶概览”查看 https://console.cloud.tencent.com/ ，关于地域的详情见 https://cloud.tencent.com/document/product/436/6224 。
 	bucketName := viper.GetString("cos.bucketName")
@@ -31,8 +31,6 @@ func UploadImage(filepath string, localpath string) (string) {
     _, _, err := client.Object.Upload(
         context.Background(), filepath, localpath, nil,
     )
-    if err != nil {
-        panic(err)
-    }
-	return args + filepath
+
+	return args + filepath, err
 }
