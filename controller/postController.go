@@ -546,7 +546,7 @@ func ShowDetails(c *gin.Context) {
 	c.JSON(http.StatusOK, postDetailsResponse)
 }
 
-// todo
+//TODO
 func UploadPhotos(c *gin.Context) {
 	//UserID := c.PostForm("UserID")
 	// 获取前端传过来 图片
@@ -592,6 +592,8 @@ func UploadPhotos(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
 		return
 	}
+
+	fmt.Print(api.UploadImage("src/images/"+filename, resizedPath))
 
 	// 更新 Post 的 Photos 字段
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径

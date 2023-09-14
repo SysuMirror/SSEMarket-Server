@@ -3,10 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/brianvoe/gofakeit"
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	"golang.org/x/crypto/bcrypt"
 	"log"
 	"loginTest/api"
 	"loginTest/common"
@@ -17,6 +13,11 @@ import (
 	"net/http"
 	"path/filepath"
 	"time"
+
+	"github.com/brianvoe/gofakeit"
+	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func isTelephoneExist(db *gorm.DB, telephone string) bool {
@@ -448,7 +449,7 @@ func Info(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"user": dto.ToUserDto(user.(model.User))}})
 }
 
-// todo
+// TODO
 func UploadAvatar(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -479,7 +480,7 @@ func UploadAvatar(c *gin.Context) {
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
 
-// todo
+// TODO
 func UpdateAvatar(c *gin.Context) {
 	// 用于移动端
 	phone := c.PostForm("phone")
@@ -531,7 +532,7 @@ func UpdateAvatar(c *gin.Context) {
 }
 
 // GetAvatar 用于处理获取用户头像的请求
-// todo
+// TODO
 func GetAvatar(c *gin.Context) {
 	// 连接数据库
 	db := common.GetDB()

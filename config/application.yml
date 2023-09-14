@@ -17,3 +17,9 @@ datasource:
 redis:
   host: redis
   port: 6379
+# cos对象存储配置
+cos:
+  bucketName: sse-market-source
+  appid: 1320172928
+  secretId: AKID0yDPbghgaRG3lMF9zoP1gKtMrNq561qi
+  secretKey: 6GTZYODxYG3wlbo1KezDKH6ulSxJi3GR
