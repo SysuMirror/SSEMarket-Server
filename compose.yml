@@ -29,12 +29,16 @@ services:
       - TZ=Asia/Shanghai
   mysql:
     image: mysql:latest
-    ports:
+    ports: 
       - 3506:3306
     environment:
       - MYSQL_ROOT_PASSWORD=admin
       - TZ=Asia/Shanghai
       - MYSQL_DATABASE=ssemarket
+    volumes:
+      - type=volume
+        source=32d0f99853fd45de426ab76e11b16864579c19dc6564688c8dc201892a4a029a
+        target=/var/lib/mysql
   redis:
     image: redis:latest
     environment:
