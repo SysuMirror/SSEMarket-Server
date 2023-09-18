@@ -42,6 +42,7 @@ services:
       - TZ=Asia/Shanghai
   sse_market_server:
     image: sse_market_server:latest
+    restart: on-failure:3
     build: .
     ports:
       - 8080:8080
