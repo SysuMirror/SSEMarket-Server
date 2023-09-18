@@ -6,15 +6,9 @@ services:
       - 881:881
     environment:
       - TZ=Asia/Shanghai
-  # temp_blog:
-  #   image: temp_blog:latest
-  #   build: ../VueBlogger
-  #   ports:
-  #     - 80:80
-  #   environment:
-  #     - TZ=Asia/Shanghai
   sse_market_client_mobile:
     image: sse_market_client-mobile:latest
+    restart: always
     build: ../sse_market_mobile
     ports:
       - 81:81
@@ -29,6 +23,11 @@ services:
       - TZ=Asia/Shanghai
   mysql:
     image: mysql:latest
+    restart: on-failure:3
+    command:
+      --max_connections=1000
+      --default-authentication-plugin=mysql_native_password
+      --innodb_lock_wait_timeout=500
     ports: 
       - 3506:3306
     environment:
@@ -36,9 +35,7 @@ services:
       - TZ=Asia/Shanghai
       - MYSQL_DATABASE=ssemarket
     volumes:
-      - type=volume
-        source=32d0f99853fd45de426ab76e11b16864579c19dc6564688c8dc201892a4a029a
-        target=/var/lib/mysql
+      - my-vol:/var/lib/mysql
   redis:
     image: redis:latest
     environment:
@@ -52,3 +49,7 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - /root/SSE_Market/sse_market_server_resource:/app/public
+      - /root/SSE_Market/log/server:/app/log
+      - /root/SSE_Market/database:/app/database
+volumes:
+  my-vol:
