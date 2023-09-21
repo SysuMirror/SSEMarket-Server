@@ -10,6 +10,7 @@ import (
 	"loginTest/config"
 	"loginTest/middleware"
 	"loginTest/route"
+	"loginTest/heat"
 	"net/http"
 	"os/exec"
 	"time"
@@ -56,6 +57,8 @@ func main() {
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
 	route.CollectRoute(r)
+
+	heat.StartHeat()
 
 	log.Printf("Server started on port 8080")
 

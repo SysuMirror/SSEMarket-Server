@@ -1,17 +1,16 @@
-package main
+package heat
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"time"
 
 	// "loginTest/common"
+	"loginTest/common"
 	"loginTest/model"
 
 	// "github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/jinzhu/gorm"
 	"github.com/robfig/cron/v3"
 )
 
@@ -25,7 +24,7 @@ func (j MyJob) Run() {
 	fmt.Println(j.Heat, time.Now())
 }
 
-func main() {
+func StartHeat() {
 	// 执行启动时的操作
 	fmt.Println("项目启动中...")
 	// 创建 cron 实例并添加任务
@@ -38,10 +37,11 @@ func main() {
 
 func RefreshHeat(c *cron.Cron) {
 	// 初始化数据库连接
-	db, err := gorm.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/ssemarket")
-	if err != nil {
-		log.Fatal("Failed to connect to the database:", err)
-	}
+	db := common.GetDB()
+	// db, err := gorm.Open("mysql", "root:123456@tcp(127.0.0.1:3306)/ssemarket")
+	// if err != nil {
+	// 	log.Fatal("Failed to connect to the database:", err)
+	// }
 	defer db.Close()
 
 	// 获取所有帖子的热度值
