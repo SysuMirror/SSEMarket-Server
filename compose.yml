@@ -6,6 +6,8 @@ services:
       - 881:881
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      - /root/SSE_Market/Nginx:/etc/letsencrypt/
   sse_market_client_mobile:
     image: sse_market_client-mobile:latest
     restart: always
@@ -14,6 +16,8 @@ services:
       - 81:81
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      - /root/SSE_Market/Nginx:/etc/letsencrypt/
   sse_market_manager:
     image: sse_market_manager:latest
     build: ../sse_market_manager
@@ -52,5 +56,6 @@ services:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log
       - /root/SSE_Market/database:/app/database
+      - /root/SSE_Market/Nginx:/app/ssl
 volumes:
   my-vol:

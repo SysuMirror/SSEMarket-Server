@@ -54,17 +54,24 @@ func main() {
 	r.Use(middleware.LoggerToFile())
 	// 使用 http.FileServer 文件服务器处理 "/uploads/" 开头的请求，
 	// 文件服务器获取文件的位置在 "./public" 文件夹下。
+
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
-	route.CollectRoute(r)
 
 	heat.StartHeat()
 
-	log.Printf("Server started on port 8080")
-
-	port := viper.GetString("server.port")
-	if port != "" {
-		panic(r.Run(":" + port))
+	route.CollectRoute(r)
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
 	}
-	panic(r.Run())
+
+	go func() {
+		if err := srv.ListenAndServeTLS("./ssl/1_ssemarket.cn_bundle.crt", "./ssl/2_ssemarket.cn.key"); err != nil {
+			log.Fatal("ListenAndServeTLS: ", err)
+		}
+	}()
+
+	log.Printf("Server started on port 8080")
+	select {}
 }
