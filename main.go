@@ -10,7 +10,7 @@ import (
 	"loginTest/config"
 	"loginTest/middleware"
 	"loginTest/route"
-	"loginTest/heat"
+	// "loginTest/heat"
 	"net/http"
 	"os/exec"
 	"time"
@@ -45,7 +45,7 @@ var r *gin.Engine
 
 func main() {
 	config.InitConfig()
-	Copy()
+	go Copy()
 	db := common.InitDB()
 	rds := common.RedisInit()
 	defer rds.Close()
@@ -58,7 +58,7 @@ func main() {
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
 
-	heat.StartHeat()
+	// heat.StartHeat()
 
 	route.CollectRoute(r)
 	srv := &http.Server{
@@ -66,11 +66,18 @@ func main() {
 		Handler: r,
 	}
 
-	go func() {
-		if err := srv.ListenAndServeTLS("./ssl/1_ssemarket.cn_bundle.crt", "./ssl/2_ssemarket.cn.key"); err != nil {
-			log.Fatal("ListenAndServeTLS: ", err)
-		}
-	}()
+	crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
+	keyFile := "./ssl/2_ssemarket.cn.key"
+
+	// go func() {
+	// 	if err := srv.ListenAndServeTLS("./ssl/1_ssemarket.cn_bundle.crt", "./ssl/2_ssemarket.cn.key"); err != nil {
+	// 		log.Fatal("ListenAndServeTLS: ", err)
+	// 	}
+	// }()
+	
+	if err :=  ; err != nil {
+        log.Fatal("ListenAndServeTLS: ", err)
+    }
 
 	log.Printf("Server started on port 8080")
 	select {}

@@ -13,16 +13,16 @@ ip 114.132.75.27
 password SSE_Market
 
 # sse_market_client_pc: 
-http://114.132.75.27
+https://114.132.75.27
 
 # sse_market_client_mobile: 
-http://114.132.75.27:81
+https://114.132.75.27:81
 
 # sse_market_manager: 
-http://114.132.75.27:82
+https://114.132.75.27:82
 
 # sse_market_server: 
-http://114.132.75.27:8080
+https://114.132.75.27:8080
 
 # mysql:
 host 114.132.75.27
