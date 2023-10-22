@@ -456,10 +456,16 @@ func UploadAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件上传失败")
 		return
 	}
-
+	value, exists := c.Get("user")
+	if !exists {
+		return
+	}
 	db := common.GetDB()
 	var user model.User
-
+	user = value.(model.User)
+	if user.UserID == 0 {
+		return
+	}
 	timestamp := time.Now().UnixNano()
 	filename := fmt.Sprintf("%d_%s", timestamp, file.Filename)
 	filepath := "public/uploads/" + filename
@@ -479,7 +485,7 @@ func UploadAvatar(c *gin.Context) {
 	}
 
 	db.Save(&user)
-	
+
 	// 返回成功
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
@@ -525,7 +531,7 @@ func UpdateAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
-	
+
 	// 更新用户头像到图床
 	user.AvatarURL, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
 	if err != nil {
@@ -589,6 +595,7 @@ func GetInfo(c *gin.Context) {
 		"ban":       user.Banend,
 		"punishnum": user.Punishnum,
 		"avatarURL": user.AvatarURL,
+		"identity":  user.Identity,
 	})
 }
 

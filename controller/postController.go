@@ -109,6 +109,7 @@ type PostResponse struct {
 	UserName      string
 	UserTelephone string
 	UserAvatar    string
+	UserIdentity  string
 	Title         string
 	Content       string
 	Like          int
@@ -126,6 +127,7 @@ type BrowseMeg struct {
 	UserTelephone string
 	Partition     string
 	Searchinfo    string
+	Tag           string
 	Searchsort    string //用于分表查询 分为home,history,save三种
 	Limit         int
 	Offset        int
@@ -139,6 +141,7 @@ func Browse(c *gin.Context) {
 	userTelephone := requestBrowseMeg.UserTelephone
 	partition := requestBrowseMeg.Partition
 	searchinfo := requestBrowseMeg.Searchinfo
+	tag := requestBrowseMeg.Tag
 	searchsort := requestBrowseMeg.Searchsort
 	limit := requestBrowseMeg.Limit
 	offset := requestBrowseMeg.Offset
@@ -180,6 +183,7 @@ func Browse(c *gin.Context) {
 				UserName:      user.Name,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
+				UserIdentity:  user.Identity,
 				Title:         post.Title,
 				Content:       post.Ptext,
 				Like:          post.LikeNum,
@@ -201,10 +205,20 @@ func Browse(c *gin.Context) {
 				if len(searchinfo) == 0 {
 					db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
 				} else {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+					if tag == "" {
+						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+					} else {
+						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
+					}
 				}
 			} else {
-				db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts, "`partition` = ?", partition)
+				//fmt.Println("tag:", tag)
+				if tag == "" {
+					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts, "`partition` = ?", partition)
+				} else {
+					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag =?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts, "`partition` = ?", partition)
+
+				}
 			}
 		} else if searchsort == "history" {
 			// historys是用户的发帖记录
@@ -236,6 +250,7 @@ func Browse(c *gin.Context) {
 				UserName:      user.Name,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
+				UserIdentity:  user.Identity,
 				Title:         post.Title,
 				Content:       post.Ptext,
 				Like:          post.LikeNum,
@@ -476,6 +491,7 @@ type PostDetailsResponse struct {
 	UserName      string
 	UserTelephone string
 	UserAvatar    string
+	UserIdentity  string
 	Title         string
 	Content       string
 	Like          int
@@ -536,6 +552,7 @@ func ShowDetails(c *gin.Context) {
 		UserName:      user.Name,
 		UserTelephone: user.Phone,
 		UserAvatar:    user.AvatarURL,
+		UserIdentity:  user.Identity,
 		Title:         post.Title,
 		Content:       post.Ptext,
 		Like:          post.LikeNum,
@@ -777,4 +794,23 @@ func CalculateHeat(c *gin.Context) {
 		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
 	}
 	c.JSON(http.StatusOK, heatResponsesTop10)
+}
+func GetTags(c *gin.Context) {
+	//从中间件存入的user中获取userID
+	value, exists := c.Get("user")
+	if !exists {
+		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
+		return
+	}
+	var user model.User
+	user = value.(model.User)
+	if user.UserID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
+		return
+	}
+	db := common.GetDB()
+	// 读取tag表
+	var tags []model.Tag
+	db.Find(&tags)
+	response.Success(c, gin.H{"tags": tags}, "获取tag列表成功！")
 }

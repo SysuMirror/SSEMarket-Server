@@ -18,5 +18,5 @@ type Post struct {
 	PostTime   time.Time `gorm:"column:post_time;type:datetime"`
 	Heat       float64   `gorm:"column:heat;type:double"`
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
-	Tag        string    `gorm:"column:tag;type:set('大厂','实习','高工资')"`
+	Tag        string    `gorm:"column:tag;type:varchar(100)"`
 }

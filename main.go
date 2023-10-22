@@ -66,18 +66,18 @@ func main() {
 		Handler: r,
 	}
 
-	crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
-	keyFile := "./ssl/2_ssemarket.cn.key"
+	//crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
+	//keyFile := "./ssl/2_ssemarket.cn.key"
 
 	// go func() {
 	// 	if err := srv.ListenAndServeTLS("./ssl/1_ssemarket.cn_bundle.crt", "./ssl/2_ssemarket.cn.key"); err != nil {
 	// 		log.Fatal("ListenAndServeTLS: ", err)
 	// 	}
 	// }()
-	
-	if err :=  ; err != nil {
-        log.Fatal("ListenAndServeTLS: ", err)
-    }
+
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal("ListenAndServeTLS: ", err)
+	}
 
 	log.Printf("Server started on port 8080")
 	select {}
