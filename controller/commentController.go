@@ -19,6 +19,7 @@ type CommentResponse struct {
 	Author          string
 	AuthorTelephone string
 	AuthorAvatar    string
+	AuthorIdentity  string
 	CommentTime     time.Time
 	Content         string
 	LikeNum         int
@@ -34,6 +35,7 @@ type Subcomment struct {
 	Author          string    `json:"author"`
 	AuthorTelephone string    `json:"authorTelephone"`
 	AuthorAvatar    string    `json:"authorAvatar"`
+	AuthorIdentity  string    `json:"authorIdentity"`
 	CommentTime     time.Time `json:"commentTime"`
 	Content         string    `json:"content"`
 	LikeNum         int       `json:"likeNum"`
@@ -73,6 +75,7 @@ func GetComments(c *gin.Context) {
 			Author:          commentuser.Name,
 			AuthorTelephone: commentuser.Phone,
 			AuthorAvatar:    commentuser.AvatarURL,
+			AuthorIdentity:  commentuser.Identity,
 			CommentTime:     pcomment.Time,
 			Content:         pcomment.Pctext,
 			LikeNum:         pcomment.LikeNum,
@@ -184,6 +187,7 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 			Author:          commentuser.Name,
 			AuthorTelephone: commentuser.Phone,
 			AuthorAvatar:    commentuser.AvatarURL,
+			AuthorIdentity:  commentuser.Identity,
 			CommentTime:     ccomment.Time,
 			Content:         ccomment.Cctext,
 			LikeNum:         ccomment.LikeNum,
@@ -264,14 +268,15 @@ func PostPcomment(c *gin.Context) {
 	weightComment := float64(6)
 	db.Model(&post).Update("heat", post.Heat+weightComment)
 	comment := CommentResponse{
-		PcommentID:   pcomment.PcommentID,
-		Author:       user.Name,
-		AuthorAvatar: user.AvatarURL,
-		CommentTime:  pcomment.Time,
-		Content:      pcomment.Pctext,
-		LikeNum:      pcomment.LikeNum,
-		SubComments:  GetSubComments(pcomment, user.UserID),
-		IsLiked:      false,
+		PcommentID:     pcomment.PcommentID,
+		Author:         user.Name,
+		AuthorAvatar:   user.AvatarURL,
+		AuthorIdentity: user.Identity,
+		CommentTime:    pcomment.Time,
+		Content:        pcomment.Pctext,
+		LikeNum:        pcomment.LikeNum,
+		SubComments:    GetSubComments(pcomment, user.UserID),
+		IsLiked:        false,
 	}
 	c.JSON(http.StatusOK, comment)
 }

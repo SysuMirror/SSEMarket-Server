@@ -54,6 +54,13 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth.POST("/api/auth/modifyPassword", controller.ModifyPassword)
 	noauth.POST("/api/auth/validateEmail", controller.ValidateEmail)
 	auth.POST("/api/auth/identityValidate", controller.IdentityValidate)
+	auth.POST("/api/auth/getFileList", controller.GetFileList)
+	auth.POST("/api/auth/fileDelete", controller.DeleteFile)
+	auth.POST("/api/auth/folderDelete", controller.DeleteFolder)
+	auth.POST("/api/auth/uploadFile", controller.TeachUpload)
+	auth.POST("/api/auth/addFolder", controller.AddFolder)
+	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
+	auth.GET("/api/auth/getTags", controller.GetTags)
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())
