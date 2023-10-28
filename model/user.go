@@ -16,4 +16,5 @@ type User struct {
 	Punishnum int       `gorm:"column:punishnum;type:int"`
 	AvatarURL string    `gorm:"column:avatar_url;type:varchar(255)"`
 	Identity  string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
+	Score     int       `gorm:"column:score;type:int;default:0"`
 }

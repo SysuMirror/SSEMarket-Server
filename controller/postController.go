@@ -2,8 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
 	"image"
 	"loginTest/api"
 	"loginTest/common"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
 )
 
 type PostMsg struct {
@@ -80,6 +81,17 @@ func Post(c *gin.Context) {
 
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
+		return
+	}
+
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 
 	currentDateTime := time.Now()
 	if user.Banend.After(currentDateTime) {
@@ -101,12 +113,35 @@ func Post(c *gin.Context) {
 		Tag:        tagString,
 	}
 	db.Create(&newPost)
+	// 判断tag，看是否需要发通知
+	tempTag := model.Tag{}
+	db.Where("name = ?", tags[0]).First(&tempTag)
+	if tempTag.TagID == 0 || tempTag.Type != "course" {
+	} else {
+		receiver := model.User{}
+		db.Where("email = ?", tempTag.Value).First(&receiver)
+		fmt.Println("receiver:" + receiver.Name + " email:" + receiver.Email)
+		if receiver.UserID != 0 && receiver.Phone != userTelephone {
+			newNotice := model.Notice{
+				Receiver: receiver.UserID,
+				Sender:   user.UserID,
+				Type:     "post",
+				Ntext:    title,
+				Time:     time.Now(),
+				Read:     false,
+				Target:   newPost.PostID,
+			}
+			db.Create(&newNotice)
+		}
+
+	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
 
 type PostResponse struct {
 	PostID        uint
 	UserName      string
+	UserScore     int
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -148,6 +183,9 @@ func Browse(c *gin.Context) {
 	// 查询用户
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
+	if temUser.UserID == 0 {
+		return
+	}
 	// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
 	var posts []model.Post
 	var postResponses []PostResponse
@@ -161,7 +199,9 @@ func Browse(c *gin.Context) {
 		for _, save := range saves {
 			var post model.Post
 			db.Where("postID = ?", save.PtargetID).First(&post)
-			posts = append(posts, post)
+			if post.PostID != 0 {
+				posts = append(posts, post)
+			}
 		}
 		// 对每个帖子查询是否点赞
 		for _, post := range posts {
@@ -181,6 +221,7 @@ func Browse(c *gin.Context) {
 			postResponse := PostResponse{
 				PostID:        uint(post.PostID),
 				UserName:      user.Name,
+				UserScore:     user.Score,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
 				UserIdentity:  user.Identity,
@@ -226,6 +267,9 @@ func Browse(c *gin.Context) {
 		}
 		// 对每个帖子查询是否点赞和收藏
 		for _, post := range posts {
+			if post.PostID == 0 {
+				continue
+			}
 			isSaved := false
 			var save model.Psave
 			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&save)
@@ -248,6 +292,7 @@ func Browse(c *gin.Context) {
 			postResponse := PostResponse{
 				PostID:        uint(post.PostID),
 				UserName:      user.Name,
+				UserScore:     user.Score,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
 				UserIdentity:  user.Identity,
@@ -285,7 +330,10 @@ func GetPostNum(c *gin.Context) {
 			if len(searchinfo) == 0 {
 				db.Model(&model.Post{}).Count(&count)
 			} else {
-				db.Model(&model.Post{}).Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%").Count(&count)
+				db.Model(&model.Post{}).
+					Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%").
+					Where("postId != ?", 0).
+					Count(&count)
 			}
 		} else {
 			db.Model(&model.Post{}).Where("`partition` = ?", partition).Count(&count)
@@ -294,10 +342,19 @@ func GetPostNum(c *gin.Context) {
 		// 查询用户
 		var user model.User
 		db.Where("phone = ?", userTelephone).First(&user)
+		if user.UserID == 0 {
+			return
+		}
 		if searchsort == "save" {
-			db.Model(&model.Psave{}).Where("userID = ?", user.UserID).Count(&count)
+			db.Model(&model.Psave{}).
+				Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
+				Where("psaves.userID = ? AND posts.postID != ?", user.UserID, 0).
+				Count(&count)
 		} else if searchsort == "history" {
-			db.Model(&model.Post{}).Where("userID = ?", user.UserID).Count(&count)
+			db.Model(&model.Post{}).
+				Where("userID = ?", user.UserID).
+				Where("postId != ?", 0).
+				Count(&count)
 		}
 	}
 	// 将结果返回给客户端
@@ -322,8 +379,20 @@ func UpdateSave(c *gin.Context) {
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
 	var post model.Post
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	db.Where("postID = ?", postID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	if isSaved {
 		var save model.Psave
 		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
@@ -357,8 +426,20 @@ func UpdateLike(c *gin.Context) {
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
 	var post model.Post
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	db.Where("postID = ?", postID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	if isLiked {
 		// var liketime model.Plike
 		// var Time time.Time
@@ -418,8 +499,14 @@ func UpdateBrowseNum(c *gin.Context) {
 	// browseNum := requestBrowseMsg.BrowseNum 不用获取直接+1
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
 	var post model.Post
 	db.Where("postID = ?", postID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	db.Model(&post).Update("browse_num", post.BrowseNum+1)
 	// 在这里设置 浏览 的权重
 	weightBrowse := float64(1)
@@ -447,6 +534,12 @@ func DeletePost(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "需要删除的帖子不存在")
 		return
 	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != post.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	db.Delete(&post)
 	c.JSON(http.StatusOK, gin.H{"message": "帖子删除成功"})
 }
@@ -472,6 +565,15 @@ func SubmitReport(c *gin.Context) {
 	}
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	newSue := model.Sue{
 		Targettype: Targettype,
 		TargetID:   int(TargetID),
@@ -489,6 +591,7 @@ func SubmitReport(c *gin.Context) {
 type PostDetailsResponse struct {
 	PostID        uint
 	UserName      string
+	UserScore     int
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -540,6 +643,9 @@ func ShowDetails(c *gin.Context) {
 	}
 	var post model.Post
 	db.Where("postID = ?", postID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	var user model.User
 	if post.UserID == 0 {
 		user.Name = "管理员"
@@ -550,6 +656,7 @@ func ShowDetails(c *gin.Context) {
 	postDetailsResponse := PostDetailsResponse{
 		PostID:        uint(post.PostID),
 		UserName:      user.Name,
+		UserScore:     user.Score,
 		UserTelephone: user.Phone,
 		UserAvatar:    user.AvatarURL,
 		UserIdentity:  user.Identity,
@@ -611,7 +718,7 @@ func UploadPhotos(c *gin.Context) {
 	}
 
 	// 对图像进行缩略图处理
-	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	resizedImage := imaging.Thumbnail(img, 200, 200, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
 	err = imaging.Save(resizedImage, resizedPath)

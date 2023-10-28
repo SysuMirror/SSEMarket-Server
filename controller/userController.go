@@ -12,6 +12,7 @@ import (
 	"loginTest/util"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/brianvoe/gofakeit"
@@ -19,6 +20,22 @@ import (
 	"github.com/jinzhu/gorm"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func GetTokenUserID(c *gin.Context) int {
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
+		return 0
+	}
+	tokenString = tokenString[7:]
+	token, claims, err := common.ParseToken(tokenString)
+	if err != nil || !token.Valid {
+		return 0
+	}
+
+	// 获取token中的用户标识符
+	tokenUserID := claims.UserID
+	return tokenUserID
+}
 
 func isTelephoneExist(db *gorm.DB, telephone string) bool {
 	var user model.User
@@ -89,7 +106,6 @@ func DeleteMe(c *gin.Context) {
 	var checkUser model.User
 	db.Where("phone = ?", phone).First(&checkUser)
 	userID := checkUser.UserID
-
 	if checkUser.Email != email {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "请用注册时使用的email完成注销")
 		return
@@ -123,7 +139,8 @@ func Register(c *gin.Context) {
 	password2 := requestUser.Password2
 	password1 = util.Decrypt(password1)
 	password2 = util.Decrypt(password2)
-	email := requestUser.Email
+	email := strings.TrimSpace(requestUser.Email)
+	print(email)
 	//num := requestUser.Num
 	valiCode := requestUser.ValiCode
 	cdkey := requestUser.CDKey
@@ -449,23 +466,16 @@ func Info(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"user": dto.ToUserDto(user.(model.User))}})
 }
 
-// TODO
 func UploadAvatar(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件上传失败")
 		return
 	}
-	value, exists := c.Get("user")
-	if !exists {
-		return
-	}
+
 	db := common.GetDB()
 	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 {
-		return
-	}
+
 	timestamp := time.Now().UnixNano()
 	filename := fmt.Sprintf("%d_%s", timestamp, file.Filename)
 	filepath := "public/uploads/" + filename
@@ -477,25 +487,18 @@ func UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	// 更新用户头像到图床
-	user.AvatarURL, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
-		return
-	}
-
+	// 更新用户头像URL
+	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
+	user.AvatarURL = "https://localhost:8080/uploads/" + filename
 	db.Save(&user)
 
 	// 返回成功
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
 
-// TODO
 func UpdateAvatar(c *gin.Context) {
 	// 用于移动端
 	phone := c.PostForm("phone")
-	fmt.Println(phone)
-	fmt.Println(len(phone))
 	if len(phone) != 11 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "Invalid phone number")
 		return
@@ -521,7 +524,6 @@ func UpdateAvatar(c *gin.Context) {
 		response.Response(c, http.StatusNotFound, 404, nil, "User not found")
 		return
 	}
-
 	timestamp := time.Now().UnixNano()
 	filename := fmt.Sprintf("%d_%s", timestamp, filepath.Base(file.Filename)) // Use base to avoid path traversal
 	filepath := "public/uploads/" + filename
@@ -532,12 +534,7 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	// 更新用户头像到图床
-	user.AvatarURL, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
-		return
-	}
+	user.AvatarURL = "https://localhost:8080/uploads/" + filename
 	if err := db.Save(&user).Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
 		return
@@ -547,7 +544,6 @@ func UpdateAvatar(c *gin.Context) {
 }
 
 // GetAvatar 用于处理获取用户头像的请求
-// TODO
 func GetAvatar(c *gin.Context) {
 	// 连接数据库
 	db := common.GetDB()
@@ -564,7 +560,6 @@ func GetAvatar(c *gin.Context) {
 		}
 		return
 	}
-
 	// 返回用户的头像URL
 	response.Success(c, gin.H{"phone": user.Phone, "AvatarURL": user.AvatarURL}, "获取成功")
 }
@@ -592,10 +587,10 @@ func GetInfo(c *gin.Context) {
 		"name":   user.Name,
 		//"num":       user.Num,
 		"intro":     user.Intro,
+		"score":     user.Score,
 		"ban":       user.Banend,
 		"punishnum": user.Punishnum,
 		"avatarURL": user.AvatarURL,
-		"identity":  user.Identity,
 	})
 }
 
@@ -630,6 +625,12 @@ func UpdateUserInfo(c *gin.Context) {
 		}
 		return
 	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 
 	// 更新用户信息
 	user.Name = userInfo.Name
@@ -642,4 +643,61 @@ func UpdateUserInfo(c *gin.Context) {
 		return
 	}
 	response.Response(c, http.StatusOK, 200, nil, "用户信息更新成功")
+}
+
+func CalculateAndSaveScores() {
+	db := common.GetDB()
+	var users []model.User
+	db.Find(&users)
+	for _, user := range users { //对每个用户进行积分统计
+		if user.UserID == 0 {
+			continue
+		}
+		// 查询用户的post ID
+		var postIDs []int
+		db.Model(&model.Post{}).Where("userID = ?", user.UserID).Pluck("postID", &postIDs)
+		// 统计post被点赞个数
+		totalLikeNum := 0
+		for _, postID := range postIDs {
+			var likeNum int
+			db.Model(&model.Post{}).Where("postID = ?", postID).Select("like_num").Row().Scan(&likeNum)
+			totalLikeNum += likeNum
+		}
+		// 查询用户的 pcomment ID
+		var pcommentIDs []int
+		db.Model(&model.Pcomment{}).Where("userID = ?", user.UserID).Pluck("pcommentID", &pcommentIDs)
+		// 统计pcomment被点赞个数
+		for _, pcommentID := range pcommentIDs {
+			var likeNum int
+			db.Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).Select("like_num").Row().Scan(&likeNum)
+			totalLikeNum += likeNum
+		}
+		// 统计被收藏个数
+		var psaveCount int
+		db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&psaveCount)
+		// 统计帖子被评论个数
+		var commentedCount int
+		db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
+		// 统计评论被回复个数
+		var repliedCount int
+		db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
+		// 查询用户的 ccomment ID
+		var ccommentIDs []int
+		db.Model(&model.Ccomment{}).Where("userID = ?", user.UserID).Pluck("ccommentID", &ccommentIDs)
+		// 统计ccomment被点赞个数
+		for _, ccommentID := range ccommentIDs {
+			var likeNum int
+			db.Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).Select("like_num").Row().Scan(&likeNum)
+			totalLikeNum += likeNum
+		}
+		// 统计成功举报个数
+		var sueCount int
+		db.Model(&model.Sue{}).Where("status = ? AND finish = ? AND userID = ?", " ok", 1, user.UserID).
+			Select("DISTINCT targettype, targetID").
+			Count(&sueCount)
+		// 计算总积分并保存
+		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum + psaveCount*3 +
+			(commentedCount+repliedCount)*2 + sueCount*20 - (user.Punishnum)*20
+		db.Model(&user).Update("Score", totalScore)
+	}
 }
