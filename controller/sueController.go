@@ -33,15 +33,24 @@ func GetSues(c *gin.Context) {
 		if sue.Targettype == "post" {
 			var post model.Post
 			db.Where("postID = ?", sue.TargetID).First(&post)
+			if post.PostID == 0 {
+				continue
+			}
 			Targetdetail = post.Ptext
 			Targettitle = post.Title
 		} else if sue.Targettype == "pcomment" {
 			var pcomment model.Pcomment
 			db.Where("pcommentID = ?", sue.TargetID).First(&pcomment)
+			if pcomment.PcommentID == 0 {
+				continue
+			}
 			Targetdetail = pcomment.Pctext
 		} else if sue.Targettype == "ccomment" {
 			var ccomment model.Ccomment
 			db.Where("ccommentID = ?", sue.TargetID).First(&ccomment)
+			if ccomment.CcommentID == 0 {
+				continue
+			}
 			Targetdetail = ccomment.Cctext
 		}
 		suere := SueResponse{
@@ -108,17 +117,26 @@ func Violation(c *gin.Context) {
 		suetype = "帖子"
 		var post model.Post
 		db.Where("postID = ?", sue.TargetID).First(&post)
+		if post.PostID == 0 {
+			return
+		}
 		if len(post.Ptext) <= 30 {
 			content = post.Ptext
 		} else {
 			content = string([]rune(post.Ptext)[:30])
 		}
 		db.Where("userID = ?", post.UserID).First(&targetuser)
+		if targetuser.UserID == 0 {
+			return
+		}
 		db.Delete(&post)
 	} else if sue.Targettype == "pcomment" {
 		suetype = "评论"
 		var pcomment model.Pcomment
 		db.Where("pcommentID = ?", sue.TargetID).First(&pcomment)
+		if pcomment.PcommentID == 0 {
+			return
+		}
 		if len(pcomment.Pctext) <= 30 {
 			content = pcomment.Pctext
 		} else {
@@ -126,8 +144,14 @@ func Violation(c *gin.Context) {
 		}
 		var post model.Post
 		db.Where("userID = ?", pcomment.UserID).First(&targetuser)
+		if targetuser.UserID == 0 {
+			return
+		}
 		// 帖子评论数减相应数字
 		db.Where("postID = ?", pcomment.PtargetID).First(&post)
+		if post.PostID == 0 {
+			return
+		}
 		var ccomment model.Ccomment
 		var count int64
 		db.Model(&ccomment).Where("ctargetID = ?", pcomment.PcommentID).Count(&count)
@@ -153,6 +177,9 @@ func Violation(c *gin.Context) {
 		suetype = "评论"
 		var ccomment model.Ccomment
 		db.Where("ccommentID = ?", sue.TargetID).First(&ccomment)
+		if ccomment.CcommentID == 0 {
+			return
+		}
 		if len(ccomment.Cctext) <= 30 {
 			content = ccomment.Cctext
 		} else {
@@ -168,6 +195,9 @@ func Violation(c *gin.Context) {
 		db.Where("pcommentID= ?", ccomment.CtargetID).First(&targetcommentid)
 		var post model.Post
 		db.Where("postID = ?", targetcommentid.PtargetID).First(&post)
+		if post.PostID == 0 {
+			return
+		}
 		if days > 0 {
 			weightCommentPower := math.Pow(0.5, float64(days))
 			deleteHeat := math.Pow(weightComment, weightCommentPower)
@@ -177,6 +207,9 @@ func Violation(c *gin.Context) {
 		}
 		//
 		db.Where("userID = ?", ccomment.UserID).First(&targetuser)
+		if targetuser.UserID == 0 {
+			return
+		}
 		// 帖子评论数减一
 		db.Where("pcommentID= ?", ccomment.CtargetID).First(&targetcommentid)
 		db.Where("postID = ?", targetcommentid.PtargetID).First(&post)

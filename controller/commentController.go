@@ -57,7 +57,9 @@ func GetComments(c *gin.Context) {
 	}
 	var temUser model.User
 	db.Where("phone = ?", usertelephone).First(&temUser)
-
+	if temUser.UserID == 0 {
+		return
+	}
 	var comments []CommentResponse
 	var pcomments []model.Pcomment
 	db.Find(&pcomments, "ptargetID = ?", postid)
@@ -111,6 +113,9 @@ func DeletePcomment(c *gin.Context) {
 	weightComment := float64(6)
 	var post model.Post
 	db.Where("postID = ?", pcomment.PtargetID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	// 帖子评论数减相应数字
 	var ccomment model.Ccomment
 	var count int64
@@ -152,8 +157,14 @@ func DeleteCcomment(c *gin.Context) {
 	weightComment := float64(6)
 	var targetcommentid model.Pcomment
 	db.Where("pcommentID= ?", ccomment.CtargetID).First(&targetcommentid)
+	if targetcommentid.PcommentID == 0 {
+		return
+	}
 	var post model.Post
 	db.Where("postID = ?", targetcommentid.PtargetID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	// 帖子评论数减一
 	db.Model(&post).UpdateColumn("comment_num", gorm.Expr("comment_num - ?", 1))
 	if days > 0 {
@@ -230,12 +241,24 @@ func PostPcomment(c *gin.Context) {
 	var user model.User
 	var tempost model.Post
 	db.Where("phone = ?", msg.UserTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	currentDateTime := time.Now()
 	if user.Banend.After(currentDateTime) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
 		return
 	}
 	db.Where("postID =?", msg.PostID).First(&tempost)
+	if tempost.PostID == 0 {
+		return
+	}
 	pcomment := model.Pcomment{
 		UserID:    user.UserID,
 		PtargetID: msg.PostID,
@@ -263,6 +286,9 @@ func PostPcomment(c *gin.Context) {
 
 	var post model.Post
 	db.Where("postID = ?", msg.PostID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	db.Model(&post).Update("comment_num", post.CommentNum+1)
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)
@@ -315,7 +341,15 @@ func PostCcomment(c *gin.Context) {
 	}
 	var user model.User
 	db.Where("phone =?", msg.UserTelephone).First(&user)
-
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	currentDateTime := time.Now()
 	if user.Banend.After(currentDateTime) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
@@ -334,6 +368,9 @@ func PostCcomment(c *gin.Context) {
 	db.Create(&newCcomment)
 	var tempcomment model.Pcomment
 	db.Where("pcommentID =?", msg.PcommentID).First(&tempcomment)
+	if tempcomment.PcommentID == 0 {
+		return
+	}
 	// 如果是评论的评论
 	// 如果是用户在自己发的一级评论下发回复，那么不需要通知
 	if tempcomment.UserID != user.UserID {
@@ -354,6 +391,9 @@ func PostCcomment(c *gin.Context) {
 	if msg.UserTargetName != "" {
 		var temccomment model.Ccomment
 		db.Where("ccommentID =?", msg.CcommentID).First(&temccomment)
+		if temccomment.CcommentID == 0 {
+			return
+		}
 		// 如果是自己回复自己就不用发通知,还有一种情况，就是上面的一级回复已经发了通知，这里就不需要重发了
 		if temccomment.UserID != user.UserID && tempcomment.UserID != temccomment.UserID {
 			notice2 := model.Notice{
@@ -374,6 +414,9 @@ func PostCcomment(c *gin.Context) {
 
 	var post model.Post
 	db.Where("postID = ?", msg.PostID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
 	db.Model(&post).Update("comment_num", post.CommentNum+1)
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)
@@ -401,8 +444,20 @@ func UpdatePcommentLike(c *gin.Context) {
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	var pcomment model.Pcomment
 	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
+	if pcomment.PcommentID == 0 {
+		return
+	}
 	if isLiked {
 		db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
 		var like model.Pclike
@@ -442,8 +497,20 @@ func UpdateCcommentLike(c *gin.Context) {
 	// Find the user by ID
 	var user model.User
 	db.Where("phone =?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
 	var ccomment model.Ccomment
 	db.Where("ccommentID =?", ccommentID).First(&ccomment)
+	if ccomment.CcommentID == 0 {
+		return
+	}
 	if isLiked {
 		db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
 		var like model.Cclike
