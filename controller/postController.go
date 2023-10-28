@@ -101,6 +101,28 @@ func Post(c *gin.Context) {
 		Tag:        tagString,
 	}
 	db.Create(&newPost)
+	// 判断tag，看是否需要发通知
+	tempTag := model.Tag{}
+	db.Where("name = ?", tags[0]).First(&tempTag)
+	if tempTag.TagID == 0 || tempTag.Type != "course" {
+	} else {
+		receiver := model.User{}
+		db.Where("email = ?", tempTag.Value).First(&receiver)
+		fmt.Println("receiver:" + receiver.Name + " email:" + receiver.Email)
+		if receiver.UserID != 0 && receiver.Phone != userTelephone {
+			newNotice := model.Notice{
+				Receiver: receiver.UserID,
+				Sender:   user.UserID,
+				Type:     "post",
+				Ntext:    title,
+				Time:     time.Now(),
+				Read:     false,
+				Target:   newPost.PostID,
+			}
+			db.Create(&newNotice)
+		}
+
+	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
 
@@ -611,7 +633,7 @@ func UploadPhotos(c *gin.Context) {
 	}
 
 	// 对图像进行缩略图处理
-	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	resizedImage := imaging.Thumbnail(img, 200, 200, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
 	err = imaging.Save(resizedImage, resizedPath)
