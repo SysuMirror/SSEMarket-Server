@@ -18,6 +18,7 @@ type CommentResponse struct {
 	PcommentID      int
 	Author          string
 	AuthorTelephone string
+	AuthorScore     int
 	AuthorAvatar    string
 	AuthorIdentity  string
 	CommentTime     time.Time
@@ -33,6 +34,7 @@ type Commentsmsg struct {
 type Subcomment struct {
 	CcommentID      int       `json:"ccommentID"`
 	Author          string    `json:"author"`
+	AuthorScore     int       `json:"authorScore"`
 	AuthorTelephone string    `json:"authorTelephone"`
 	AuthorAvatar    string    `json:"authorAvatar"`
 	AuthorIdentity  string    `json:"authorIdentity"`
@@ -76,6 +78,7 @@ func GetComments(c *gin.Context) {
 			PcommentID:      pcomment.PcommentID,
 			Author:          commentuser.Name,
 			AuthorTelephone: commentuser.Phone,
+			AuthorScore:     commentuser.Score,
 			AuthorAvatar:    commentuser.AvatarURL,
 			AuthorIdentity:  commentuser.Identity,
 			CommentTime:     pcomment.Time,
@@ -196,6 +199,7 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 		comment := Subcomment{
 			CcommentID:      ccomment.CcommentID,
 			Author:          commentuser.Name,
+			AuthorScore:     commentuser.Score,
 			AuthorTelephone: commentuser.Phone,
 			AuthorAvatar:    commentuser.AvatarURL,
 			AuthorIdentity:  commentuser.Identity,
@@ -228,6 +232,10 @@ func PostPcomment(c *gin.Context) {
 	c.Bind(&msg)
 	if len(msg.Content) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
+		return
+	}
+	if len(msg.Content) > 1000 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
 	if len(msg.UserTelephone) == 0 {
@@ -329,6 +337,10 @@ func PostCcomment(c *gin.Context) {
 	content := msg.Content
 	if len(content) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
+		return
+	}
+	if len(content) > 100 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
 	if len(msg.UserTelephone) == 0 {

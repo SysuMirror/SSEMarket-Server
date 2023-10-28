@@ -141,6 +141,7 @@ func Post(c *gin.Context) {
 type PostResponse struct {
 	PostID        uint
 	UserName      string
+	UserScore     int
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -220,6 +221,7 @@ func Browse(c *gin.Context) {
 			postResponse := PostResponse{
 				PostID:        uint(post.PostID),
 				UserName:      user.Name,
+				UserScore:     user.Score,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
 				UserIdentity:  user.Identity,
@@ -290,6 +292,7 @@ func Browse(c *gin.Context) {
 			postResponse := PostResponse{
 				PostID:        uint(post.PostID),
 				UserName:      user.Name,
+				UserScore:     user.Score,
 				UserTelephone: user.Phone,
 				UserAvatar:    user.AvatarURL,
 				UserIdentity:  user.Identity,
@@ -588,6 +591,7 @@ func SubmitReport(c *gin.Context) {
 type PostDetailsResponse struct {
 	PostID        uint
 	UserName      string
+	UserScore     int
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -652,6 +656,7 @@ func ShowDetails(c *gin.Context) {
 	postDetailsResponse := PostDetailsResponse{
 		PostID:        uint(post.PostID),
 		UserName:      user.Name,
+		UserScore:     user.Score,
 		UserTelephone: user.Phone,
 		UserAvatar:    user.AvatarURL,
 		UserIdentity:  user.Identity,
