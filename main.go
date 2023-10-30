@@ -28,7 +28,7 @@ func Copy() {
 	backupDir := "/app/database"
 
 	c := cron.New()
-	c.AddFunc("@daily", func() {
+	c.AddFunc("@every 12h", func() {
 		backupFile := fmt.Sprintf("%s/backup_%s.sql", backupDir, time.Now().Format("2006-01-02 15:04:05"))
 		cmd := exec.Command("mysqldump", fmt.Sprintf("-h%s", dbHost), fmt.Sprintf("-P%d", dbPort), fmt.Sprintf("-u%s", dbUser), fmt.Sprintf("-p%s", dbPassword), dbName, "--result-file="+backupFile)
 		err := cmd.Run()
@@ -38,6 +38,7 @@ func Copy() {
 		}
 		log.Println("备份成功:", backupFile)
 	})
+	c.AddFunc("@daily", controller.CalculateAndSaveScores)
 	c.Start()
 }
 
@@ -66,18 +67,16 @@ func main() {
 		Handler: r,
 	}
 
-	//crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
-	//keyFile := "./ssl/2_ssemarket.cn.key"
+	crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
+	keyFile := "./ssl/2_ssemarket.cn.key"
 
-	// go func() {
-	// 	if err := srv.ListenAndServeTLS("./ssl/1_ssemarket.cn_bundle.crt", "./ssl/2_ssemarket.cn.key"); err != nil {
-	// 		log.Fatal("ListenAndServeTLS: ", err)
-	// 	}
-	// }()
-
-	if err := srv.ListenAndServe(); err != nil {
+	if err := srv.ListenAndServeTLS(crtFile, keyFile); err != nil {
 		log.Fatal("ListenAndServeTLS: ", err)
 	}
+
+	// if err :=  ; err != nil {
+	//     log.Fatal("ListenAndServeTLS: ", err)
+	// }
 
 	log.Printf("Server started on port 8080")
 	select {}

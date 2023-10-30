@@ -75,8 +75,7 @@ func Post(c *gin.Context) {
 	}
 
 	if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容含有不良信息,请重新编辑")
-		return
+		// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
 	}
 
 	var user model.User
@@ -790,7 +789,7 @@ func UploadZip(c *gin.Context) {
 
 	// 更新 Post 的 Photos 字段
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	fileURL := "https://114.132.75.27:8080/uploads/" + filename
+	fileURL := "https://ssemarket.cn:8080/uploads/" + filename
 
 	// 返回成功
 	c.JSON(http.StatusOK, gin.H{"zipURL": fileURL, "message": "上传成功"})

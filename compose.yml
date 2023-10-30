@@ -1,6 +1,7 @@
 services:
   sse_market_client_pc:
     image: sse_market_client-pc:latest
+    container_name: cilent_pc
     build: ../SSE_market_client
     ports:
       - 881:881
@@ -10,6 +11,7 @@ services:
       - /root/SSE_Market/Nginx:/etc/letsencrypt/
   sse_market_client_mobile:
     image: sse_market_client-mobile:latest
+    container_name: cilent_mobile
     restart: always
     build: ../sse_market_mobile
     ports:
@@ -20,6 +22,7 @@ services:
       - /root/SSE_Market/Nginx:/etc/letsencrypt/
   sse_market_manager:
     image: sse_market_manager:latest
+    container_name: manager
     build: ../sse_market_manager
     ports:
       - 82:82
@@ -27,6 +30,7 @@ services:
       - TZ=Asia/Shanghai
   mysql:
     image: mysql:latest
+    container_name: sse_market_db
     restart: on-failure:3
     command:
       --max_connections=1000
@@ -46,6 +50,7 @@ services:
       - TZ=Asia/Shanghai
   sse_market_server:
     image: sse_market_server:latest
+    container_name: server
     restart: on-failure:3
     build: .
     ports:
