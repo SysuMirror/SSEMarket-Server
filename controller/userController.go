@@ -646,6 +646,7 @@ func UpdateUserInfo(c *gin.Context) {
 }
 
 func CalculateAndSaveScores() {
+	log.Println("CalculateAndSaveScores")
 	db := common.GetDB()
 	var users []model.User
 	db.Find(&users)
@@ -700,4 +701,5 @@ func CalculateAndSaveScores() {
 			(commentedCount+repliedCount)*2 + sueCount*20 - (user.Punishnum)*20
 		db.Model(&user).Update("Score", totalScore)
 	}
+	log.Println("Score updated")
 }

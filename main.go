@@ -10,6 +10,7 @@ import (
 	"loginTest/config"
 	"loginTest/middleware"
 	"loginTest/route"
+	"loginTest/controller"
 	// "loginTest/heat"
 	"net/http"
 	"os/exec"
@@ -38,7 +39,7 @@ func Copy() {
 		}
 		log.Println("备份成功:", backupFile)
 	})
-	c.AddFunc("@daily", controller.CalculateAndSaveScores)
+	c.AddFunc("@every 1h", controller.CalculateAndSaveScores)
 	c.Start()
 }
 
