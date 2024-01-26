@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"github.com/jordan-wright/email"
 // 	"log"
@@ -51,8 +52,8 @@ func SendEmail(receiver string) error {
 	text, vcode := formVcode(text)
 	saveVcode(vcode, receiver)
 	e.Text = []byte(text)
-
-	err := e.Send(util.Addr, smtp.PlainAuth("", util.EmailUsername, util.Password, util.Host))
+	auth := smtp.PlainAuth("", util.EmailUsername, util.Password, util.Host)
+	err := e.SendWithTLS(util.Addr, auth, &tls.Config{ServerName: util.Host})
 	if err != nil {
 		fmt.Println(err)
 		return err
