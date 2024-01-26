@@ -9,7 +9,7 @@ import (
 	"math"
 	"net/http"
 	"time"
-
+	"unicode/utf8"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 )
@@ -234,7 +234,8 @@ func PostPcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	if len(msg.Content) > 1000 {
+	// 这里不能直接用len(),否则中文字符会计算错误
+	if utf8.RuneCountInString(msg.Content) > 1000 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
@@ -243,8 +244,8 @@ func PostPcomment(c *gin.Context) {
 		return
 	}
 	if api.GetSuggestion(msg.Content) == "Block" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-		return
+		// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
+		// return
 	}
 	var user model.User
 	var tempost model.Post
@@ -339,7 +340,8 @@ func PostCcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	if len(content) > 100 {
+	// 这里不能直接用len(),否则中文字符会计算错误
+	if utf8.RuneCountInString(content) > 100 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
@@ -348,8 +350,8 @@ func PostCcomment(c *gin.Context) {
 		return
 	}
 	if api.GetSuggestion(content) == "Block" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-		return
+		// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
+		// return
 	}
 	var user model.User
 	db.Where("phone =?", msg.UserTelephone).First(&user)

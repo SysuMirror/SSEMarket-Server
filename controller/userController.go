@@ -14,11 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
+	"image"
 	"github.com/brianvoe/gofakeit"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"github.com/disintegration/imaging"
 )
 
 func GetTokenUserID(c *gin.Context) int {
@@ -473,8 +474,8 @@ func UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var user model.User
+	// db := common.GetDB()
+	// var user model.User
 
 	timestamp := time.Now().UnixNano()
 	filename := fmt.Sprintf("%d_%s", timestamp, file.Filename)
@@ -486,14 +487,48 @@ func UploadAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
+	// 压缩头像
+	// 打开上传的文件
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
+		return
+	}
+	defer src.Close()
+	// 读取上传文件的内容，并解码为 image.Image 对象
+	img, _, err := image.Decode(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败"})
+		return
+	}
+
+	// 对图像进行压缩处理
+	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	// 这里似乎只支持绝对路径，这里要根据服务器修改
+	resizedPath := "public/resized/" + filename
+	// 服务器本地备份
+	err = imaging.Save(resizedImage, resizedPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		return
+	}
+
+	
+	fileURL := ""
+	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		return
+	}
 
 	// 更新用户头像URL
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
-	db.Save(&user)
+	// user.AvatarURL = fileURL
+	// user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
+	// db.Save(&user)
 
 	// 返回成功
-	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
+	response.Success(c, gin.H{"avatar_url": fileURL}, "上传成功")
 }
 
 func UpdateAvatar(c *gin.Context) {
@@ -533,8 +568,43 @@ func UpdateAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
+	// 压缩头像
+	// 打开上传的文件
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
+		return
+	}
+	defer src.Close()
+	// 读取上传文件的内容，并解码为 image.Image 对象
+	img, _, err := image.Decode(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败"})
+		return
+	}
 
-	user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
+	// 对图像进行压缩处理
+	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	// 这里似乎只支持绝对路径，这里要根据服务器修改
+	resizedPath := "public/resized/" + filename
+	// 服务器本地备份
+	err = imaging.Save(resizedImage, resizedPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		return
+	}
+
+	
+	fileURL := ""
+	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		return
+	}
+
+	// 更新 User 的 AvatarURL 字段
+	// user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
+	user.AvatarURL = fileURL
 	if err := db.Save(&user).Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
 		return

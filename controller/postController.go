@@ -13,7 +13,10 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
+	"io/ioutil"
+	"bytes"
+	"encoding/json"
+	"mime/multipart"
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 )
@@ -53,7 +56,7 @@ func Post(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题不能为空")
 		return
 	}
-
+	// 这里不能直接用len()否则会出现中文字符的计算错误
 	if utf8.RuneCountInString(title) > 15 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多为15个字")
 		return
@@ -132,7 +135,6 @@ func Post(c *gin.Context) {
 			}
 			db.Create(&newNotice)
 		}
-
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
@@ -697,7 +699,7 @@ func UploadPhotos(c *gin.Context) {
 
 	_, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "原图保存失败" + err.Error()})
 		return
 	}
 
@@ -919,4 +921,73 @@ func GetTags(c *gin.Context) {
 	var tags []model.Tag
 	db.Find(&tags)
 	response.Success(c, gin.H{"tags": tags}, "获取tag列表成功！")
+}
+func GetTitle(c *gin.Context) {
+	// 从中间件存入的user中获取userID
+	_, exists := c.Get("user")
+	if !exists {
+		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
+		return
+	}
+	text := c.PostForm("text")
+	if text == "" {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请输入正文内容")
+		return
+	}
+	// 构造POST请求的body
+	// 使用bytes.Buffer创建一个新的buffer
+	var requestBody bytes.Buffer
+
+	// 创建multipart.Writer实例，将文件流写入buffer
+	writer := multipart.NewWriter(&requestBody)
+
+	// 写入text字段
+	writer.WriteField("text", text)
+
+	// 关闭multipart.Writer以设置边界
+	writer.Close()
+
+
+	// 创建一个通道用于接收异步操作结果
+	resultChan := make(chan []byte, 1)
+
+	// 启动goroutine执行异步HTTP请求
+	go func() {
+		// 向ssemarket.cn:5000/title转发POST请求
+		resp, err := http.Post("http://ssemarket.cn:5000/title",writer.FormDataContentType(), &requestBody)
+		if err != nil {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "请求失败")
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "请求titlegpt失败")
+			return
+		}
+		// 读取response
+		respBody, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "读取响应失败")
+			return
+		}
+
+		// 将结果发送到通道
+		resultChan <- respBody
+	}()
+
+	// 设置超时时间，等待结果
+	select {
+	case result := <-resultChan:
+		var r map[string]map[string]string
+		err := json.Unmarshal(result, &r)
+		if err != nil {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "解析响应失败")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"title": r["data"]["title"]})
+	case <-time.After(60 * time.Second):
+		// 如果超时，返回超时信息
+		response.Response(c, http.StatusGatewayTimeout, 504, nil, "请求超时")
+	}
+
 }
