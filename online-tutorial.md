@@ -10,7 +10,7 @@
 ```bash
 # 腾讯云服务器
 ip 114.132.75.27
-password SSE_Market
+password xxxxxxxxxxxxxxxxxx
 
 # sse_market_client_pc: 
 https://114.132.75.27
