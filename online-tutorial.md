@@ -28,7 +28,7 @@ https://114.132.75.27:8080
 host 114.132.75.27
 port 3506
 user root
-password admin
+password xxxxxxxxxx
 ```
 
 ## docker的使用
