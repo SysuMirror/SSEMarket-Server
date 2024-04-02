@@ -14,6 +14,15 @@ SSE_MARKET又称软工集市，主要由21级本科生组成的 SSE_MARKET小组
 
 [官方博客](https://ssemarket.cn)
 
+软工集市各仓库：
+[SSE_market_server: 软件工程中级实训服务器后端gin项目](https://gitee.com/yang-peiyue/SSE_market_server)
+
+[SSE_market_client: 软件工程中级实训客户端前端vue项目](https://gitee.com/yang-peiyue/SSE_market_client)
+
+[SSE_market_mobile: 软工集市用户端移动端版本 ](https://gitee.com/yang-peiyue/sse_market_mobile)
+
+[SSE_market_manager: 软件工程中级实训管理员端前端vue项目](https://gitee.com/yang-peiyue/sse_market_manager)
+
 ### 视频讲解
 
 目前，软工集市现任技术顾问thinkerhui主导的B站软工集市教程已上线，将持续更新。
@@ -22,7 +31,6 @@ SSE_MARKET又称软工集市，主要由21级本科生组成的 SSE_MARKET小组
 
 ![image-20240402095909217](https://sse-market-source-1320172928.cos.ap-guangzhou.myqcloud.com/blog/image-20240402095909217.png)
 
-<iframe src="//player.bilibili.com/player.html?aid=1552449515&bvid=BV1P1421U775&cid=1485947354&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width: 100%; height: 500px; max-width: 100%；align:center; padding:20px 0;"> </iframe>
 
 ### 如何运行软工集市后端
 
@@ -54,13 +62,21 @@ ___
 
 ### 各个文件夹的作用
 
->## <font size=3> 1.`common`文件夹用于存放一些通用的功能模块或工具函数，如数据库 <br> 2.`config`文件夹用于存放配置文件 <br> 3.`controller`文件夹用于存放应用程序的控制器代码。控制器是应用程序的核心部分之一，它负责接收客户端请求并作出响应 <br> 4.`middleware`文件夹用于存放中间件代码，例如日志记录、认证、CORS等 <br> 5.`model`文件夹用于存放应用程序的数据模型定义，通常使用gorm库来实现对象关系映射 <br> 6.`util`文件夹用于存放工具函数文件 <br> 7.`main.go`是Gin应用程序的主入口文件 <br> 8.`routes.go`是Gin应用程序的路由定义文件
+1.`common`文件夹用于存放一些通用的功能模块或工具函数，如数据库  2.`config`文件夹用于存放配置文件 
+3.`controller`文件夹用于存放应用程序的控制器代码。控制器是应用程序的核心部分之一，它负责接收客户端请求并作出响应  4.`middleware`文件夹用于存放中间件代码，例如日志记录、认证、CORS等 
+5.`model`文件夹用于存放应用程序的数据模型定义，通常使用gorm库来实现对象关系映射 
+6.`util`文件夹用于存放工具函数文件
+7.`main.go`是Gin应用程序的主入口文件
+8.`routes.go`是Gin应用程序的路由定义文件
 
 ___
 
-># <font size=4> 三、如何创建一个需求处理函数，以注册功能为例
+### 如何创建一个需求处理函数，以注册功能为例
 
->## <font size=3> 1.首先在`controller`里添加对于函数，函数名大写如Register(),函数具体写法参见`controller/userController.go`的代码注释<br> 2.然后在`routes`中创建一个路由，并对接到`controller`对应的函数，如：
+1.首先在`controller`里添加对于函数，函数名大写如Register(),函数具体写法参见`controller/userController.go`的代码注释 
+
+2.然后在`routes`中创建一个路由，并对接到`controller`对应的函数，如：
+
 ``` go
 r.POST("/api/auth/register", controller.Register)
 ```
