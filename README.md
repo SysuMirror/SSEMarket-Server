@@ -22,7 +22,6 @@ SSE_MARKET又称软工集市，主要由21级本科生组成的 SSE_MARKET小组
 
 ![image-20240402095909217](https://sse-market-source-1320172928.cos.ap-guangzhou.myqcloud.com/blog/image-20240402095909217.png)
 
-<iframe src="//player.bilibili.com/player.html?aid=1552449515&bvid=BV1P1421U775&cid=1485947354&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width: 100%; height: 500px; max-width: 100%；align:center; padding:20px 0;"> </iframe>
 
 ### 如何运行软工集市后端
 
