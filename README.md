@@ -32,11 +32,11 @@ SSEMARKET后端为go项目，需要配置go开发的基本环境。此外，还�
 
 2. 选择自己喜欢的IDE配置开发环境，这里推荐vscode,goland
 
-3. 安装go项目依赖，http://t.csdnimg.cn/58BAd
+3. 安装go项目依赖
 
-4. 安装配置mysql8.0，http://t.csdnimg.cn/I17dQ
+4. 安装配置mysql8.0
 
-5. 安装配置redis，http://t.csdnimg.cn/0dQxP
+5. 安装配置redis
 
 6. 在`config/application.yml`改数据库配置
 
@@ -47,7 +47,7 @@ SSEMARKET后端为go项目，需要配置go开发的基本环境。此外，还�
    输入该命令即可运行项目。
 
 注意事项：1、2 、4、5主要是在配置基本环境，如果本来配置好了可以直接跳过。
-这里并没有给出具体的安装配置步骤，而是直接贴出了参考教程，这个一方面是由于Windows、MacOS和linux等操作系统的配置过程会有所不同，因此上面的一些教程也不一定适用（比如mysql，redis的教程是适用windows的）。
+这里并没有给出具体的安装配置步骤，而是直接贴出了参考教程，这个一方面是由于Windows、MacOS和linux等操作系统的配置过程会有所不同，因此给出教程也不一定适用（比如mysql，redis的教程是适用windows的）。
 
 ___
 
