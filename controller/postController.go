@@ -42,7 +42,7 @@ func Post(c *gin.Context) {
 	tagString := strings.Join(tags, ",")
 	// 验证数据
 	if len(userTelephone) == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "返回的手机号为空")
+		response.Response(c, http.StatusBadRequest, 400, nil, "返回的账号为空")
 		return
 	}
 	if !isTelephoneExist(db, userTelephone) {
@@ -74,9 +74,9 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
-		// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
-	}
+	// if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
+	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
+	// }
 
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)

@@ -161,7 +161,7 @@ func Register(c *gin.Context) {
 	}
 	//验证数据
 	if len(telephone) != 11 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "手机号必须为11位!!!")
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "必须为11位!!!")
 		println(telephone)
 		return
 	}
