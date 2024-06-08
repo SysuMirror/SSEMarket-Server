@@ -46,6 +46,7 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Notice{})
 	db.AutoMigrate(&model.Sue{})
 	db.AutoMigrate(&model.CDKey{})
+	db.AutoMigrate(&model.Tag{})
 	db.Model(&model.Pcomment{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccomment{}).AddForeignKey("ctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")

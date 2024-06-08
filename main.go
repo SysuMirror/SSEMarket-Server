@@ -2,19 +2,19 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"loginTest/common"
-	"loginTest/config"
-	"loginTest/controller"
-	"loginTest/middleware"
-	"loginTest/route"
-	"net/http"
-	"os/exec"
-	"time"
-
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron"
 	"github.com/spf13/viper"
+	"log"
+	"loginTest/common"
+	"loginTest/config"
+	"loginTest/middleware"
+	"loginTest/route"
+	"loginTest/controller"
+	// "loginTest/heat"
+	"net/http"
+	"os/exec"
+	"time"
 )
 
 func Copy() {
@@ -29,7 +29,7 @@ func Copy() {
 	backupDir := "/app/database"
 
 	c := cron.New()
-	c.AddFunc("@daily", func() {
+	c.AddFunc("@every 12h", func() {
 		backupFile := fmt.Sprintf("%s/backup_%s.sql", backupDir, time.Now().Format("2006-01-02 15:04:05"))
 		cmd := exec.Command("mysqldump", fmt.Sprintf("-h%s", dbHost), fmt.Sprintf("-P%d", dbPort), fmt.Sprintf("-u%s", dbUser), fmt.Sprintf("-p%s", dbPassword), dbName, "--result-file="+backupFile)
 		err := cmd.Run()
@@ -39,7 +39,7 @@ func Copy() {
 		}
 		log.Println("备份成功:", backupFile)
 	})
-	c.AddFunc("@daily", controller.CalculateAndSaveScores)
+	c.AddFunc("@every 1h", controller.CalculateAndSaveScores)
 	c.Start()
 }
 
@@ -47,7 +47,7 @@ var r *gin.Engine
 
 func main() {
 	config.InitConfig()
-	Copy()
+	go Copy()
 	db := common.InitDB()
 	rds := common.RedisInit()
 	defer rds.Close()
@@ -56,25 +56,29 @@ func main() {
 	r.Use(middleware.LoggerToFile())
 	// 使用 http.FileServer 文件服务器处理 "/uploads/" 开头的请求，
 	// 文件服务器获取文件的位置在 "./public" 文件夹下。
+
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
+
+	// heat.StartHeat()
+
 	route.CollectRoute(r)
 	srv := &http.Server{
 		Addr:    ":8080",
 		Handler: r,
 	}
 
-	go func() {
-		if err := srv.ListenAndServeTLS("ssl/cert.crt", "ssl/cert.key"); err != nil {
-			log.Fatal("ListenAndServeTLS: ", err)
-		}
-	}()
+	crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
+	keyFile := "./ssl/2_ssemarket.cn.key"
+
+	if err := srv.ListenAndServeTLS(crtFile, keyFile); err != nil {
+		log.Fatal("ListenAndServeTLS: ", err)
+	}
+
+	// if err :=  ; err != nil {
+	//     log.Fatal("ListenAndServeTLS: ", err)
+	// }
 
 	log.Printf("Server started on port 8080")
 	select {}
-	// port := viper.GetString("server.port")
-	// if port != "" {
-	// 	panic(r.Run(":" + port))
-	// }
-	// panic(r.Run())
 }

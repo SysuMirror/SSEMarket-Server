@@ -2,10 +2,12 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/jordan-wright/email"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
 	"net/http"
+	"net/smtp"
 	"strconv"
 	"time"
 )
@@ -108,6 +110,19 @@ func GetNotice(c *gin.Context) {
 				PostID:       tempcomment.PtargetID,
 				Time:         tempcomment.Time,
 			})
+		} else if notice.Type == "post" {
+			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
+				NoticeID:     notice.NoticeID,
+				ReceiverName: user.Name,
+				SenderName:   temuser.Name,
+				SenderAvatar: temuser.AvatarURL,
+				Type:         notice.Type,
+				Content:      notice.Ntext,
+				Read:         notice.Read,
+				Target:       notice.Target,
+				PostID:       notice.Target,
+				Time:         notice.Time,
+			})
 		} else {
 			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
 				NoticeID:     notice.NoticeID,
@@ -159,4 +174,26 @@ func ReadNotice(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"status": "success"})
+}
+
+func EmailNotice(c *gin.Context) {
+	value, exists := c.Get("admin")
+	var admin model.Admin
+	if exists == false {
+		response.Fail(c, nil, "验证错误")
+		return
+	}
+	admin = value.(model.Admin)
+	if admin.AdminID == 0 {
+		response.Fail(c, nil, "管理员不存在")
+	}
+	e := email.NewEmail()
+	e.From = "软工集市 <1142200122@qq.com>"
+	e.To = []string{"1142200122@qq.com"}
+	e.Subject = "软工集市version2.0升级部署通知"
+	e.HTML = []byte("<!DOCTYPE html>\n<html>\n<head>\n    <title>软工集市平台升级维护通知</title>\n</head>\n<body>\n    <h1>软工集市平台升级维护通知</h1>\n    <p>尊敬的软工集市用户，</p>\n    <p>为了提供更好的服务和功能，我们计划进行软工集市平台的升级维护。这次升级将带来一些重要的改进和新功能，以增强您的使用体验。</p>\n    <p>升级维护计划如下：</p>\n    <ul>\n        <li>维护开始时间：[维护开始日期和时间]</li>\n        <li>维护结束时间：[维护结束日期和时间]</li>\n        <li>期间软工集市将无法访问，为了不影响您的工作，请在维护前备份您的数据。</li>\n    </ul>\n    <p>升级后，您可以期待以下改进：</p>\n    <ul>\n        <li>[列出将引入的新功能和改进]</li>\n        <li>[列出其他相关信息]</li>\n    </ul>\n    <p>我们对给您带来的不便深感抱歉，但我们相信这些改进将使您更加满意。在维护期间，如果您有任何疑问或需要帮助，请随时联系我们的客户支持团队。</p>\n    <p>感谢您一直以来对软工集市的支持和信任。</p>\n    <p>祝您使用愉快！</p>\n    <p>谨启</p>\n    <p>软工集市团队</p>\n</body>\n</html>\n")
+	err := e.Send("smtp.qq.com:25", smtp.PlainAuth("", "1142200122@qq.com", "luwcucmfmgrggefh", "smtp.qq.com"))
+	if err != nil {
+		return
+	}
 }

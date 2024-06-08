@@ -489,7 +489,7 @@ func UploadAvatar(c *gin.Context) {
 
 	// 更新用户头像URL
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	user.AvatarURL = "https://localhost:8080/uploads/" + filename
+	user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
 	db.Save(&user)
 
 	// 返回成功
@@ -534,7 +534,7 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	user.AvatarURL = "https://localhost:8080/uploads/" + filename
+	user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
 	if err := db.Save(&user).Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
 		return
@@ -646,6 +646,7 @@ func UpdateUserInfo(c *gin.Context) {
 }
 
 func CalculateAndSaveScores() {
+	log.Println("CalculateAndSaveScores")
 	db := common.GetDB()
 	var users []model.User
 	db.Find(&users)
@@ -700,4 +701,5 @@ func CalculateAndSaveScores() {
 			(commentedCount+repliedCount)*2 + sueCount*20 - (user.Punishnum)*20
 		db.Model(&user).Update("Score", totalScore)
 	}
+	log.Println("Score updated")
 }

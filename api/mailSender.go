@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/jordan-wright/email"
-	"log"
+// 	"log"
 	"loginTest/common"
 	"loginTest/util"
 	"math/rand"
@@ -54,7 +54,7 @@ func SendEmail(receiver string) error {
 
 	err := e.Send(util.Addr, smtp.PlainAuth("", util.EmailUsername, util.Password, util.Host))
 	if err != nil {
-		log.Println(err)
+		fmt.Println(err)
 		return err
 	}
 	fmt.Println("Send Successfully")
