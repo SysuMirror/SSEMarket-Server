@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"image"
+	"log"
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
@@ -182,7 +183,55 @@ func Browse(c *gin.Context) {
 	// 查询用户
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
-	if temUser.UserID == 0 {
+	if userTelephone == "00000000000" {
+		log.Printf("用户不存在,按照游客方式处理")
+		// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
+		var posts []model.Post
+		var postResponses []PostResponse
+		if len(searchinfo) == 0 {
+			db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+		} else {
+			if tag == "" {
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+			} else {
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
+			}
+		}
+		for _, post := range posts {
+			if post.PostID == 0 {
+				continue
+			}
+			isSaved := false
+			isLiked := false
+			var user model.User
+			if post.UserID == 0 {
+				user.Name = "管理员"
+				user.Phone = "11111111111"
+			} else {
+				db.Where("userID = ?", post.UserID).First(&user)
+			}
+			postResponse := PostResponse{
+				PostID:        uint(post.PostID),
+				UserName:      user.Name,
+				UserScore:     user.Score,
+				UserTelephone: user.Phone,
+				UserAvatar:    user.AvatarURL,
+				UserIdentity:  user.Identity,
+				Title:         post.Title,
+				Content:       post.Ptext,
+				Like:          post.LikeNum,
+				Comment:       post.CommentNum,
+				Browse:        post.BrowseNum,
+				Heat:          post.Heat,
+				PostTime:      post.PostTime,
+				IsSaved:       isSaved,
+				IsLiked:       isLiked,
+				Photos:        post.Photos,
+				Tag:           post.Tag,
+			}
+			postResponses = append(postResponses, postResponse)
+		}
+		c.JSON(http.StatusOK, postResponses)
 		return
 	}
 	// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
@@ -620,21 +669,21 @@ func ShowDetails(c *gin.Context) {
 	postID := requestPostDetailsMsg.PostID
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
-	if temUser.UserID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "无法解析当前用户")
-		return
-	}
+	// if temUser.UserID == 0 {
+	// 	response.Response(c, http.StatusNotFound, 404, nil, "无法解析当前用户")
+	// 	return
+	// }
 	if postID == 0 {
 		response.Response(c, http.StatusBadRequest, 404, nil, "接收到的postID为空")
 		return
 	}
 	isLiked := false
+	isSaved := false
 	var like model.Plike
 	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
 	if like.PlikeID != 0 {
 		isLiked = true
 	}
-	isSaved := false
 	var save model.Psave
 	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
 	if save.PsaveID != 0 {

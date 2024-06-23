@@ -2,9 +2,11 @@ package controller
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"log"
-	"loginTest/api"
+
+	"github.com/gin-gonic/gin"
+
+	// "loginTest/api"
 	"loginTest/common"
 	"loginTest/dto"
 	"loginTest/model"
@@ -295,10 +297,10 @@ func AdminPost(c *gin.Context) {
 		return
 	}
 
-	if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容含有不良信息,请重新编辑")
-		return
-	}
+	// if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
+	// 	response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容含有不良信息,请重新编辑")
+	// 	return
+	// }
 
 	newPost := model.Post{
 		UserID:     0,

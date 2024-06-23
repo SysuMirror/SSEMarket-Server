@@ -1,10 +1,11 @@
 package route
 
 import (
-	"github.com/gin-gonic/gin"
 	"loginTest/api"
 	"loginTest/controller"
 	"loginTest/middleware"
+
+	"github.com/gin-gonic/gin"
 )
 
 // 创建路由
@@ -21,18 +22,18 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth.POST("/api/auth/login", controller.Login)
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
-	auth.POST("/api/auth/browse", controller.Browse)
+	noauth.POST("/api/auth/browse", controller.Browse)
 	auth.POST("/api/auth/getPostNum", controller.GetPostNum)
 	auth.POST("/api/auth/deleteMe", controller.DeleteMe)
 	auth.POST("/api/auth/updateLike", controller.UpdateLike)
-	auth.POST("/api/auth/showDetails", controller.ShowDetails)
-	auth.POST("api/auth/showPcomments", controller.GetComments)
+	noauth.POST("/api/auth/showDetails", controller.ShowDetails)
+	noauth.POST("api/auth/showPcomments", controller.GetComments)
 	auth.POST("api/auth/postPcomment", controller.PostPcomment)
 	auth.POST("api/auth/postCcomment", controller.PostCcomment)
 	auth.POST("api/auth/updateCcommentLike", controller.UpdateCcommentLike)
 	auth.POST("api/auth/updatePcommentLike", controller.UpdatePcommentLike)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
-	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
+	noauth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
 	auth.POST("/api/auth/deletePcomment", controller.DeletePcomment)
 	auth.POST("/api/auth/deleteCcomment", controller.DeleteCcomment)
