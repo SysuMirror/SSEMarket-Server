@@ -68,12 +68,16 @@ func main() {
 		Handler: r,
 	}
 
-	crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
-	keyFile := "./ssl/2_ssemarket.cn.key"
+	// crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
+	// keyFile := "./ssl/2_ssemarket.cn.key"
 
-	if err := srv.ListenAndServeTLS(crtFile, keyFile); err != nil {
-		log.Fatal("ListenAndServeTLS: ", err)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal("ListenAndServe: ", err)
 	}
+
+	// if err := srv.ListenAndServeTLS(crtFile, keyFile); err != nil {
+	// 	log.Fatal("ListenAndServeTLS: ", err)
+	// }
 
 	// if err :=  ; err != nil {
 	//     log.Fatal("ListenAndServeTLS: ", err)

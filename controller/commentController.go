@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
@@ -243,10 +242,10 @@ func PostPcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
 		return
 	}
-	if api.GetSuggestion(msg.Content) == "Block" {
-		// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-		// return
-	}
+	// if api.GetSuggestion(msg.Content) == "Block" {
+	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
+	// 	// return
+	// }
 	var user model.User
 	var tempost model.Post
 	db.Where("phone = ?", msg.UserTelephone).First(&user)
@@ -349,10 +348,10 @@ func PostCcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
 		return
 	}
-	if api.GetSuggestion(content) == "Block" {
-		// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-		// return
-	}
+	// if api.GetSuggestion(content) == "Block" {
+	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
+	// 	// return
+	// }
 	var user model.User
 	db.Where("phone =?", msg.UserTelephone).First(&user)
 	if user.UserID == 0 {

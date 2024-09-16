@@ -57,8 +57,8 @@ func Post(c *gin.Context) {
 		return
 	}
 	// 这里不能直接用len()否则会出现中文字符的计算错误
-	if utf8.RuneCountInString(title) > 15 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多为15个字")
+	if utf8.RuneCountInString(title) > 30 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多为30个字")
 		return
 	}
 
@@ -77,9 +77,9 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
-		// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
-	}
+	// if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
+	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
+	// }
 
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
@@ -791,7 +791,7 @@ func UploadZip(c *gin.Context) {
 
 	// 更新 Post 的 Photos 字段
 	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	fileURL := "https://ssemarket.cn:8080/uploads/" + filename
+	fileURL := "https://ssemarket.cn/api/uploads/" + filename
 
 	// 返回成功
 	c.JSON(http.StatusOK, gin.H{"zipURL": fileURL, "message": "上传成功"})
