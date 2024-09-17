@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"github.com/eatmoreapple/openwechat"
 	"github.com/skip2/go-qrcode"
+	"sync"
 )
 
 
 //目标群
 var targetGroup *openwechat.Group
+var mu sync.Mutex
 
 //打印二维码到控制台
 func consoleQrcode(uuid string) {
@@ -69,5 +71,7 @@ func StartBot(targetGroupName string){
 
 //看数据库好像是这样返回的而不是直接使用全局变量？
 func GetGroup() *openwechat.Group {
+	mu.Lock()
+	defer mu.Unlock()
 	return targetGroup
 }
