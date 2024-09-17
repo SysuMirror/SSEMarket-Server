@@ -115,6 +115,16 @@ func Post(c *gin.Context) {
 		Tag:        tagString,
 	}
 	db.Create(&newPost)
+	
+	// 让机器人发送消息
+	go func(){
+		targetGroup := common.GetGroup()
+		msg := "用户" + user.Name + "发布了新帖：" + title + "标签：" + tagString
+		if _,err := targetGroup.SendText(msg); err != nil {
+			fmt.Println(err)
+		}
+	}()
+
 	// 判断tag，看是否需要发通知
 	tempTag := model.Tag{}
 	db.Where("name = ?", tags[0]).First(&tempTag)
@@ -134,6 +144,7 @@ func Post(c *gin.Context) {
 				Target:   newPost.PostID,
 			}
 			db.Create(&newNotice)
+
 		}
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
