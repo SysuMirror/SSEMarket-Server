@@ -37,12 +37,12 @@ func StartBot(targetGroupName string){
 
 	//消息处理函数,单聊或者@ta/所有人时会触发
 	//之后可以考虑接入大模型/连接数据库
-	bot.MessageHandler = func(msg *openwechat.Message) {
-		if msg.IsText() {
-			fmt.Println(msg.Content)
-			msg.ReplyText("你好")
-		}
-	}
+	// bot.MessageHandler = func(msg *openwechat.Message) {
+	// 	if msg.IsText() {
+	// 		fmt.Println(msg.Content)
+	// 		msg.ReplyText("你好")
+	// 	}
+	// }
 
 	//获取登录的用户
 	self, err := bot.GetCurrentUser()
