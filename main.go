@@ -49,6 +49,10 @@ func main() {
 	config.InitConfig()
 	go Copy()
 	db := common.InitDB()
+
+	//要转发的群名
+	go common.StartBot("软工集市(试推文)")
+
 	rds := common.RedisInit()
 	defer rds.Close()
 	defer db.Close()
