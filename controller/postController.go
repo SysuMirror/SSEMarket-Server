@@ -1,23 +1,22 @@
 package controller
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"image"
-	"io/ioutil"	
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
 	"math"
-	"mime/multipart"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
-
+	"io/ioutil"
+	"bytes"
+	"encoding/json"
+	"mime/multipart"
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 )
@@ -116,17 +115,6 @@ func Post(c *gin.Context) {
 		Tag:        tagString,
 	}
 	db.Create(&newPost)
-	
-	// 让机器人发送消息
-	go func(newPost model.Post) {
-		targetGroup := common.GetGroup()
-		urlmb := fmt.Sprintf("https://ssemarket.cn/mb/#/postDetails?id=%d", newPost.PostID)
-		msg := fmt.Sprintf("有新帖：%s\n移动端网址：%s", title, urlmb)
-		if _,err := targetGroup.SendText(msg); err != nil {
-			fmt.Println(err)
-		}
-	}(newPost)
-
 	// 判断tag，看是否需要发通知
 	tempTag := model.Tag{}
 	db.Where("name = ?", tags[0]).First(&tempTag)
@@ -146,7 +134,6 @@ func Post(c *gin.Context) {
 				Target:   newPost.PostID,
 			}
 			db.Create(&newNotice)
-
 		}
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
