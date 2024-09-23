@@ -3,6 +3,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/brianvoe/gofakeit"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	"golang.org/x/crypto/bcrypt"
+	"image"
 	"log"
 	"loginTest/api"
 	"loginTest/common"
@@ -14,12 +20,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"image"
-	"github.com/brianvoe/gofakeit"
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	"golang.org/x/crypto/bcrypt"
-	"github.com/disintegration/imaging"
+)
+
+const (
+	VALIDATESUCCESS = 0
+	EMAILERROR      = 1
+	EMAILNOTEXIST   = 2
+	VALIDATEFAILED  = 3
 )
 
 func GetTokenUserID(c *gin.Context) int {
@@ -86,6 +93,7 @@ type ModifyUser struct {
 	Phone     string `gorm:"type:varchar(11);not null"`
 	Password  string `gorm:"size:255;not null"`
 	Password2 string `gorm:"size:255;not null"`
+	ValiCode  string
 }
 
 type requestEmail struct {
@@ -269,14 +277,30 @@ func Register(c *gin.Context) {
 }
 
 func IdentityValidate(c *gin.Context) {
-	db := common.GetDB()
+	//db := common.GetDB()
 	// 从前端获取信息
 	var requestUser = identity{}
 	c.Bind(&requestUser)
 	//获取参数
+
 	email := requestUser.Email
 	valiCode := requestUser.ValiCode
+	//响应码规则：
+	resCode := IdentityValidateService(email, valiCode)
+	if resCode == VALIDATEFAILED {
+		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+	} else if resCode == EMAILERROR {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
+	} else if resCode == EMAILNOTEXIST {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
+	} else {
+		response.Response(c, http.StatusOK, 200, nil, "身份验证成功")
+	}
+}
 
+// 验证码校验服务
+func IdentityValidateService(email string, valiCode string) int {
+	db := common.GetDB()
 	check := false
 	for i := 0; i < len(email); i++ {
 		if email[i] == '@' {
@@ -284,35 +308,24 @@ func IdentityValidate(c *gin.Context) {
 		}
 	}
 
-	//arr := strings.Split(email, "@")
-	//fmt.Println(arr[1])
-	//if arr[1] != "mail2.sysu.edu.cn" && arr[1] != "mail.sysu.edu.cn" {
-	//	response.Response(c, http.StatusBadRequest, 400, nil, "请使用中大邮箱！")
-	//	return
-	//}
-
 	if !check {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-		return
+		return EMAILERROR
 	}
 	if !isEmailExist(db, email) {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
-		return
+		return EMAILNOTEXIST
 	}
 	rds := common.MyRedis
 	ctx := context.Background()
 	correctValiCode, err := rds.Get(ctx, email).Result()
 	if err != nil {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
+		return VALIDATEFAILED
 	}
 	if correctValiCode != valiCode {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
+		return VALIDATEFAILED
 	}
 	//返回结果
-	response.Response(c, http.StatusOK, 200, nil, "身份验证成功")
 	rds.Del(ctx, email)
+	return VALIDATESUCCESS
 }
 
 type loginuser struct {
@@ -395,9 +408,7 @@ func ModifyPassword(c *gin.Context) {
 	password = util.Decrypt(password)
 	password2 := inputUser.Password2
 	password2 = util.Decrypt(password2)
-	fmt.Println(email)
-	fmt.Println(password)
-	fmt.Println(password2)
+	valiCode := inputUser.ValiCode
 	if password != password2 {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码输入不一致")
 		return
@@ -419,9 +430,24 @@ func ModifyPassword(c *gin.Context) {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户不存在")
 		return
 	}
-	user.Password = string(hasedPassword)
-	db.Save(&user)
-	response.Success(c, gin.H{"data": user}, "修改密码成功")
+
+	//校验验证码是否正确
+	resCode := IdentityValidateService(email, valiCode)
+	if resCode == VALIDATEFAILED {
+		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		return
+	} else if resCode == EMAILERROR {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
+		return
+	} else if resCode == EMAILNOTEXIST {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
+		return
+	} else {
+		user.Password = string(hasedPassword)
+		db.Save(&user)
+		response.Success(c, gin.H{"data": user}, "修改密码成功")
+		return
+	}
 }
 
 func ValidateEmail(c *gin.Context) {
@@ -513,7 +539,6 @@ func UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	
 	fileURL := ""
 	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
 	if err != nil {
@@ -594,7 +619,6 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	
 	fileURL := ""
 	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
 	if err != nil {
