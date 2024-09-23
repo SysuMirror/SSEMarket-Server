@@ -108,9 +108,7 @@ func DeleteMe(c *gin.Context) {
 	c.Bind(&requestUser)
 	phone := requestUser.Phone
 	email := requestUser.Email
-
-	fmt.Println("phone = ", phone)
-	fmt.Println("email = ", email)
+	valiCode := requestUser.ValiCode
 
 	var checkUser model.User
 	db.Where("phone = ?", phone).First(&checkUser)
@@ -124,9 +122,20 @@ func DeleteMe(c *gin.Context) {
 		return
 	}
 
+	resCode := IdentityValidateService(email, valiCode)
+	if resCode == VALIDATEFAILED {
+		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		return
+	} else if resCode == EMAILERROR {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
+		return
+	} else if resCode == EMAILNOTEXIST {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
+		return
+	}
+
 	checkUser.Name = "用户已注销"
 	checkUser.Phone = "0"
-	//checkUser.Num = 0
 	checkUser.Email = ""
 	checkUser.AvatarURL = ""
 
@@ -285,7 +294,6 @@ func IdentityValidate(c *gin.Context) {
 
 	email := requestUser.Email
 	valiCode := requestUser.ValiCode
-	//响应码规则：
 	resCode := IdentityValidateService(email, valiCode)
 	if resCode == VALIDATEFAILED {
 		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")

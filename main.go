@@ -8,9 +8,9 @@ import (
 	"log"
 	"loginTest/common"
 	"loginTest/config"
+	"loginTest/controller"
 	"loginTest/middleware"
 	"loginTest/route"
-	"loginTest/controller"
 	// "loginTest/heat"
 	"net/http"
 	"os/exec"
@@ -50,6 +50,7 @@ func main() {
 	go Copy()
 	db := common.InitDB()
 	rds := common.RedisInit()
+	common.InitJWTkey()
 	defer rds.Close()
 	defer db.Close()
 	r = gin.Default()
