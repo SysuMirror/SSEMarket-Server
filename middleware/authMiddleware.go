@@ -12,15 +12,29 @@ import (
 func AuthMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		//获取authorization header
+		isWs := false //ws需要query获得token
 		tokenString := ctx.GetHeader("Authorization")
-		//若token为空或token格式不正确
-		if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
-            // 如果请求头中没有Authorization信息，或者信息不合法，则视为游客访问。
-            ctx.Set("user", nil)
-            ctx.Next()
-            return
-        }
-		tokenString = tokenString[7:]
+		if tokenString == "" {
+			tokenString = ctx.Query("token")
+			isWs = true
+		}
+		//若不是ws连接并且token为空或token格式不正确
+		if !isWs && (tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ")) {
+			// 如果请求头中没有Authorization信息，或者信息不合法，则视为游客访问。
+			ctx.Set("user", nil)
+			ctx.Next()
+			return
+		}
+		//当ws连接并且token小于7
+		if isWs && len(tokenString) <= 7 {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			ctx.Abort()
+			return
+		}
+		//若不是ws连接，表示有bearer
+		if !isWs {
+			tokenString = tokenString[7:]
+		}
 		token, claims, err := common.ParseToken(tokenString)
 		if err != nil || !token.Valid {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
@@ -55,9 +69,9 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 		tokenString := ctx.GetHeader("Authorization")
 		//若token为空或token格式不正确
 		if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
-            ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
-            return
-        }
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			return
+		}
 		tokenString = tokenString[7:]
 		token, claims_admin, err := common.ParseToken_admin(tokenString)
 		if err != nil || !token.Valid {

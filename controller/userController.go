@@ -3,6 +3,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/brianvoe/gofakeit"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	"golang.org/x/crypto/bcrypt"
+	"image"
 	"log"
 	"loginTest/api"
 	"loginTest/common"
@@ -14,12 +20,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"image"
-	"github.com/brianvoe/gofakeit"
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	"golang.org/x/crypto/bcrypt"
-	"github.com/disintegration/imaging"
 )
 
 func GetTokenUserID(c *gin.Context) int {
@@ -214,6 +214,7 @@ func Register(c *gin.Context) {
 	}
 	var key model.CDKey
 	db.Where("content =? AND used = 0", cdkey).First(&key)
+	fmt.Println("激活码：", key.Content)
 	if key.CDKeyID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "激活码错误")
 		return
@@ -513,7 +514,6 @@ func UploadAvatar(c *gin.Context) {
 		return
 	}
 
-	
 	fileURL := ""
 	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
 	if err != nil {
@@ -594,7 +594,6 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	
 	fileURL := ""
 	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
 	if err != nil {
@@ -639,6 +638,7 @@ func GetInfo(c *gin.Context) {
 	var requestUser = model.User{}
 	c.Bind(&requestUser)
 	phone := requestUser.Phone
+	fmt.Println(phone)
 	// 在数据库中查找用户
 	var user model.User
 	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
