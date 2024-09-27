@@ -3,12 +3,13 @@ package common
 
 import (
 	"github.com/dgrijalva/jwt-go"
+	"github.com/spf13/viper"
 	"loginTest/model"
 	"time"
 )
 
 // 采用jwt方式生成token
-var jwtKey = []byte("a_secret_crect")
+var jwtKey []byte
 
 type Claims struct {
 	UserID int
@@ -18,6 +19,10 @@ type Claims struct {
 type Claims_admin struct {
 	AdminID int
 	jwt.StandardClaims
+}
+
+func InitJWTkey() {
+	jwtKey = []byte(viper.GetString("crypto.jwtKey"))
 }
 
 func ReleaseToken(user model.User) (string, error) {
