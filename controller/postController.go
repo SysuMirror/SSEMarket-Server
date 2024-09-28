@@ -1,24 +1,24 @@
 package controller
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
 	"image"
+	"io/ioutil"
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
-	"io/ioutil"
-	"bytes"
-	"encoding/json"
-	"mime/multipart"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
 )
 
 type PostMsg struct {
@@ -140,23 +140,22 @@ func Post(c *gin.Context) {
 }
 
 type PostResponse struct {
-	PostID        uint
-	UserName      string
-	UserScore     int
-	UserTelephone string
-	UserAvatar    string
-	UserIdentity  string
-	Title         string
-	Content       string
-	Like          int
-	Comment       int
-	Browse        int
-	Heat          float64
-	PostTime      time.Time
-	IsSaved       bool
-	IsLiked       bool
-	Photos        string
-	Tag           string
+	PostID       uint
+	UserName     string
+	UserScore    int
+	UserAvatar   string
+	UserIdentity string
+	Title        string
+	Content      string
+	Like         int
+	Comment      int
+	Browse       int
+	Heat         float64
+	PostTime     time.Time
+	IsSaved      bool
+	IsLiked      bool
+	Photos       string
+	Tag          string
 }
 
 type BrowseMeg struct {
@@ -174,7 +173,6 @@ func Browse(c *gin.Context) {
 	// 获取参数
 	var requestBrowseMeg BrowseMeg
 	c.Bind(&requestBrowseMeg)
-	userTelephone := requestBrowseMeg.UserTelephone
 	partition := requestBrowseMeg.Partition
 	searchinfo := requestBrowseMeg.Searchinfo
 	tag := requestBrowseMeg.Tag
@@ -183,8 +181,12 @@ func Browse(c *gin.Context) {
 	offset := requestBrowseMeg.Offset
 	// 查询用户
 	var temUser model.User
-	db.Where("phone = ?", userTelephone).First(&temUser)
-	if temUser.UserID == 0 {
+	val, ok := c.Get("user")
+	if !ok {
+		return
+	}
+	temUser, ok = val.(model.User)
+	if !ok {
 		return
 	}
 	// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
@@ -220,23 +222,22 @@ func Browse(c *gin.Context) {
 				db.Where("userID = ?", post.UserID).First(&user)
 			}
 			postResponse := PostResponse{
-				PostID:        uint(post.PostID),
-				UserName:      user.Name,
-				UserScore:     user.Score,
-				UserTelephone: user.Phone,
-				UserAvatar:    user.AvatarURL,
-				UserIdentity:  user.Identity,
-				Title:         post.Title,
-				Content:       post.Ptext,
-				Like:          post.LikeNum,
-				Comment:       post.CommentNum,
-				Browse:        post.BrowseNum,
-				Heat:          post.Heat,
-				PostTime:      post.PostTime,
-				IsSaved:       true,
-				IsLiked:       isLiked,
-				Photos:        post.Photos,
-				Tag:           post.Tag,
+				PostID:       uint(post.PostID),
+				UserName:     user.Name,
+				UserScore:    user.Score,
+				UserAvatar:   user.AvatarURL,
+				UserIdentity: user.Identity,
+				Title:        post.Title,
+				Content:      post.Ptext,
+				Like:         post.LikeNum,
+				Comment:      post.CommentNum,
+				Browse:       post.BrowseNum,
+				Heat:         post.Heat,
+				PostTime:     post.PostTime,
+				IsSaved:      true,
+				IsLiked:      isLiked,
+				Photos:       post.Photos,
+				Tag:          post.Tag,
 			}
 			postResponses = append(postResponses, postResponse)
 		}
@@ -291,23 +292,22 @@ func Browse(c *gin.Context) {
 				db.Where("userID = ?", post.UserID).First(&user)
 			}
 			postResponse := PostResponse{
-				PostID:        uint(post.PostID),
-				UserName:      user.Name,
-				UserScore:     user.Score,
-				UserTelephone: user.Phone,
-				UserAvatar:    user.AvatarURL,
-				UserIdentity:  user.Identity,
-				Title:         post.Title,
-				Content:       post.Ptext,
-				Like:          post.LikeNum,
-				Comment:       post.CommentNum,
-				Browse:        post.BrowseNum,
-				Heat:          post.Heat,
-				PostTime:      post.PostTime,
-				IsSaved:       isSaved,
-				IsLiked:       isLiked,
-				Photos:        post.Photos,
-				Tag:           post.Tag,
+				PostID:       uint(post.PostID),
+				UserName:     user.Name,
+				UserScore:    user.Score,
+				UserAvatar:   user.AvatarURL,
+				UserIdentity: user.Identity,
+				Title:        post.Title,
+				Content:      post.Ptext,
+				Like:         post.LikeNum,
+				Comment:      post.CommentNum,
+				Browse:       post.BrowseNum,
+				Heat:         post.Heat,
+				PostTime:     post.PostTime,
+				IsSaved:      isSaved,
+				IsLiked:      isLiked,
+				Photos:       post.Photos,
+				Tag:          post.Tag,
 			}
 			postResponses = append(postResponses, postResponse)
 		}
@@ -947,14 +947,13 @@ func GetTitle(c *gin.Context) {
 	// 关闭multipart.Writer以设置边界
 	writer.Close()
 
-
 	// 创建一个通道用于接收异步操作结果
 	resultChan := make(chan []byte, 1)
 
 	// 启动goroutine执行异步HTTP请求
 	go func() {
 		// 向ssemarket.cn:5000/title转发POST请求
-		resp, err := http.Post("http://ssemarket.cn:5000/title",writer.FormDataContentType(), &requestBody)
+		resp, err := http.Post("http://ssemarket.cn:5000/title", writer.FormDataContentType(), &requestBody)
 		if err != nil {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "请求失败")
 			return
