@@ -9,6 +9,7 @@ import (
 	"loginTest/common"
 	"loginTest/config"
 	"loginTest/controller"
+	"loginTest/heat"
 	"loginTest/middleware"
 	"loginTest/route"
 	// "loginTest/heat"
@@ -71,7 +72,7 @@ func main() {
 
 	// crtFile := "./ssl/1_ssemarket.cn_bundle.crt"
 	// keyFile := "./ssl/2_ssemarket.cn.key"
-
+	go heat.StartHeat()
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
