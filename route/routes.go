@@ -37,7 +37,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/deletePcomment", controller.DeletePcomment)
 	auth.POST("/api/auth/deleteCcomment", controller.DeleteCcomment)
 	auth.POST("/api/auth/submitReport", controller.SubmitReport)
-	auth.GET("/api/auth/info", middleware.AuthMiddleware(), controller.Info)
+	auth.GET("/api/auth/info", controller.Info)
 	noauth.POST("/api/auth/uploadPhotos", controller.UploadPhotos)
 	noauth.POST("/api/auth/uploadAvatar", controller.UploadAvatar)
 	noauth.POST("/api/auth/updateAvatar", controller.UpdateAvatar)
@@ -61,7 +61,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/addFolder", controller.AddFolder)
 	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
 	auth.GET("/api/auth/getTags", controller.GetTags)
-	auth.POST("/api/auth/gettitle",controller.GetTitle)
+	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())
