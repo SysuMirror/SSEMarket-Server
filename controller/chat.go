@@ -88,11 +88,11 @@ func GetChatHistory(c *gin.Context) {
 
 // 获得聊天记录服务
 type chatResp struct {
-	ChatMsgID    int       `json:"chatMsgID"`
-	TargetUserID int       `json:"targetUserID"`
-	SenderUserID int       `json:"senderUserID"`
-	Content      string    `json:"content"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ChatMsgID    int       `gorm:"column:chatMsgID" json:"chatMsgID"`
+	TargetUserID int       `gorm:"column:targetUserID" json:"targetUserID"`
+	SenderUserID int       `gorm:"column:senderUserID" json:"senderUserID"`
+	Content      string    `gorm:"column:content" json:"content"`
+	CreatedAt    time.Time `gorm:"column:createdAt" json:"createdAt"`
 }
 
 func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatResp, error) {
@@ -227,6 +227,9 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 func dispatch(data []byte, userID int) error {
 	msg := model.ChatMsg{}
 	err := json.Unmarshal(data, &msg)
+	if msg.ChatMsgID != 0 {
+		return errors.New("非法操作！")
+	}
 	if msg.SenderUserID != userID {
 		return errors.New("非法操作！")
 	}
