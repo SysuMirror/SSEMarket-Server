@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -105,6 +106,36 @@ func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatResp, error)
 	return messageList, nil
 }
 
+// 取消用户redis里所有的在线状态
+func removeChatViewInRedis(userID int) error {
+	ctx := context.Background()
+	prefix := fmt.Sprintf("%dTo*IsExist", userID) // 构建键前缀
+	cursor := uint64(0)
+	redisClient := common.MyRedis // 使用你的 Redis 客户端实例
+
+	// 遍历所有以 userIDTo 为前缀的键
+	for {
+		keys, cursor, err := redisClient.Scan(ctx, cursor, prefix, 100).Result() // 扫描符合条件的键
+		if err != nil {
+			return err
+		}
+
+		if len(keys) > 0 {
+			// 删除找到的键
+			if _, err := redisClient.Del(ctx, keys...).Result(); err != nil {
+				return err
+			}
+		}
+
+		// 如果 cursor 为 0，表示扫描结束
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return nil
+}
+
 // 聊天ws
 func ChatHandler(c *gin.Context) {
 	//获得当前操作用户的userID
@@ -121,6 +152,9 @@ func ChatHandler(c *gin.Context) {
 		user := userInterface.(model.User)
 		userID = user.UserID
 	}
+
+	//取消用户redis里所有的在线状态
+	removeChatViewInRedis(userID)
 
 	chatFunc(c.Request, c.Writer, userID)
 }
@@ -191,6 +225,9 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 		if err != nil {
 			// 检查是否是超时错误
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				//取消用户redis里所有的在线状态
+				removeChatViewInRedis(userID)
+
 				return
 			}
 			// 其他错误，直接退出
