@@ -89,7 +89,7 @@ func GetChatHistory(c *gin.Context) {
 }
 
 // 获得聊天记录服务
-type chatResp struct {
+type chatHistoryResp struct {
 	ChatMsgID    int       `gorm:"column:chatMsgID" json:"chatMsgID"`
 	TargetUserID int       `gorm:"column:targetUserID" json:"targetUserID"`
 	SenderUserID int       `gorm:"column:senderUserID" json:"senderUserID"`
@@ -97,8 +97,8 @@ type chatResp struct {
 	CreatedAt    time.Time `gorm:"column:createdAt" json:"createdAt"`
 }
 
-func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatResp, error) {
-	var messageList []chatResp
+func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatHistoryResp, error) {
+	var messageList []chatHistoryResp
 	if err := common.DB.Model(model.ChatMsg{}).Where("(targetUserID = ? AND senderUserID = ?) OR (targetUserID = ? AND senderUserID = ?)", userIdTarget, fromUserId, fromUserId, userIdTarget).
 		Order("createdAt").
 		Scan(&messageList).Error; err != nil {
@@ -279,6 +279,18 @@ func dispatch(data []byte, userID int) error {
 	//添加聊天记录到数据库
 	db := common.GetDB()
 	db.Create(&msg)
+	chatResp := ChatMsgResp{
+		ChatMsgID:    msg.ChatMsgID,
+		TargetUserID: msg.TargetUserID,
+		SenderUserID: msg.SenderUserID,
+		Content:      msg.Content,
+		CreatedAt:    msg.CreatedAt,
+	}
+
+	data, err = json.Marshal(chatResp)
+	if err != nil {
+		return err
+	}
 	//发送消息
 	sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
 	return nil
@@ -299,10 +311,10 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
 	val, ok := clientMap.Load(userID)
 	//如果不存在表示一定是消息而不是相关用户的获得
+	if err := json.Unmarshal(msg, &chatMsg); err != nil {
+		return
+	}
 	if !ok {
-		if err := json.Unmarshal(msg, &chatMsg); err != nil {
-			return
-		}
 		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
