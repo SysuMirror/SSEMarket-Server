@@ -68,6 +68,7 @@ func GetChatHistory(c *gin.Context) {
 		response.Fail(c, gin.H{}, "没有权利查看他人聊天记录")
 		return
 	}
+	removeChatViewInRedis(chatQuery.SenderUserID)
 
 	//设置redis表示用户存在当前聊天界面
 	if err := common.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 0).Err(); err != nil {
@@ -231,6 +232,7 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 				return
 			}
 			// 其他错误，直接退出
+			removeChatViewInRedis(userID)
 			return
 		}
 
@@ -293,20 +295,25 @@ type ChatMsgResp struct {
 
 // 发送消息到对应用户的消息队列
 func sendMsg(chatMsgID, userID int, msg []byte) {
+	chatMsg := ChatMsgResp{}
 	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
 	val, ok := clientMap.Load(userID)
+	//如果不存在表示一定是消息而不是相关用户的获得
 	if !ok {
+		if err := json.Unmarshal(msg, &chatMsg); err != nil {
+			return
+		}
+		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
 	node, ok := val.(*ChatNode)
 	if ok {
 		//如果消息接受者用户确实在ws链接中，判断消息接受者用户是否在聊天界面里
-		chatMsg := ChatMsgResp{}
 		//如果是聊天信息而不是返回聊天用户列表
-		if err := json.Unmarshal(msg, &chatMsg); err == nil && chatMsgID != 0 {
+		if chatMsgID != 0 {
 			//检查接受者是否在聊天界面
 			chatMsg.ChatMsgID = chatMsgID
-			err = common.MyRedis.Get(context.Background(), util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
+			err := common.MyRedis.Get(context.Background(), util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
 			if err == redis.Nil { //不在聊天界面,添加未读
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
@@ -353,7 +360,7 @@ func GetRelevantUser(userID int) ([]byte, error) {
 	for relevantUser := range relevantRespUsersMap {
 		unreadStr, err := common.MyRedis.Get(context.Background(), util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
 		unreadNum, _ := strconv.Atoi(unreadStr)
-		if err != redis.Nil {
+		if err != nil && err != redis.Nil {
 			return nil, err
 		}
 		relevantARespUser := ChatRespUser{
