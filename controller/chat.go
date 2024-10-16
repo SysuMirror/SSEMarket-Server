@@ -71,7 +71,7 @@ func GetChatHistory(c *gin.Context) {
 	removeChatViewInRedis(chatQuery.SenderUserID)
 
 	//设置redis表示用户存在当前聊天界面
-	if err := common.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 0).Err(); err != nil {
+	if err := common.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 24*time.Hour).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 	}
 	//清空redis的未读情况

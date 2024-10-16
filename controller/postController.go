@@ -591,6 +591,7 @@ func SubmitReport(c *gin.Context) {
 
 type PostDetailsResponse struct {
 	PostID        uint
+	UserID        int
 	UserName      string
 	UserScore     int
 	UserTelephone string
@@ -656,6 +657,7 @@ func ShowDetails(c *gin.Context) {
 	}
 	postDetailsResponse := PostDetailsResponse{
 		PostID:        uint(post.PostID),
+		UserID:        user.UserID,
 		UserName:      user.Name,
 		UserScore:     user.Score,
 		UserTelephone: user.Phone,
