@@ -429,3 +429,65 @@ func LeaveChatView(c *gin.Context) {
 		response.Success(c, gin.H{}, "操作成功")
 	}
 }
+
+func GetChatNotice(c *gin.Context) {
+	userIDStr := c.Query("userID")
+	userID, err := strconv.Atoi(userIDStr)
+	userFromCtx, ok := c.Get("user")
+	user := userFromCtx.(model.User)
+	if err != nil || userID == 0 || !ok || user.UserID != userID {
+		response.Fail(c, gin.H{}, "操作异常")
+		return
+	}
+
+	// 生成 Redis key 的前缀
+	keyPrefix := fmt.Sprintf("%dRecvUnread", userID)
+
+	var cursor uint64
+	var totalUnread int // 总的未读数
+
+	// 使用 SCAN 进行分页遍历
+	for {
+		scanKeys, nextCursor, err := common.MyRedis.Scan(c, cursor, keyPrefix+"*", 10).Result()
+		if err != nil {
+			response.Fail(c, gin.H{}, "操作异常")
+			return
+		}
+
+		// 遍历所有匹配的键
+		for _, key := range scanKeys {
+			// 获取 key 对应的 value
+			unreadStr, err := common.MyRedis.Get(c, key).Result()
+			if err != nil && err != redis.Nil {
+				response.Fail(c, gin.H{}, "获取未读消息失败")
+				return
+			}
+
+			if unreadStr == "" {
+				continue // 如果没有找到值，跳过
+			}
+
+			// 将 value 转换为整数并累加
+			unreadCount, err := strconv.Atoi(unreadStr)
+			if err != nil {
+				response.Fail(c, gin.H{}, "无效的未读消息格式")
+				return
+			}
+
+			totalUnread += unreadCount
+		}
+
+		// 更新 cursor，继续扫描下一批 keys
+		cursor = nextCursor
+
+		// 如果 cursor 为 0，说明扫描结束
+		if cursor == 0 {
+			break
+		}
+	}
+
+	// 返回累加后的未读消息总数
+	response.Success(c, gin.H{
+		"noticeNum": totalUnread,
+	}, "获取未读消息成功")
+}
