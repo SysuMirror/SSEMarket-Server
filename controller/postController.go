@@ -20,13 +20,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-	"io/ioutil"
-	"bytes"
-	"encoding/json"
 	"math/rand"
-	"mime/multipart"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
 )
 
 type PostMsg struct {
