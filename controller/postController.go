@@ -1,13 +1,20 @@
 package controller
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
 	"image"
+	"io/ioutil"
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"sort"
 	"strings"
@@ -884,29 +891,47 @@ type HeatResponse struct {
 	Heat   float64
 }
 
+// 表示存在zset的val
+type PostInfo struct {
+	PostID    uint    `json:"postID"`
+	Title     string  `json:"title"`
+	BrowseNum float64 `json:"browseNum"`
+}
+
 func CalculateHeat(c *gin.Context) {
-	// 获取所有帖子的 postID, likenum, commentnum, browsenum
-	db := common.GetDB()
-	// 从数据库中获取所有的帖子，并将结果存储在posts切片中。
-	var posts []model.Post
-	db.Find(&posts)
-	// 对 postStats 切片按热度进行排序
-	sort.Slice(posts, func(i, j int) bool {
-		return posts[i].Heat > posts[j].Heat
-	})
+	// Redis ZSet的key
+	redisKey := "hot_posts_zset"
+	ctx := context.Background()
+
+	// 从Redis中获取热度前10的帖子
+	topPosts, err := common.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取热度前10帖子失败"})
+		return
+	}
+
 	var heatResponsesTop10 []HeatResponse
-	// 只返回前10个帖子
-	for i := 0; i < 10 && i < len(posts); i++ {
-		post := posts[i]
+
+	// 处理 Redis 返回的数据
+	for _, post := range topPosts {
+		var postInfo PostInfo
+		err := json.Unmarshal([]byte(post.Member.(string)), &postInfo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "解析帖子信息失败"})
+			return
+		}
+
 		heatResponse := HeatResponse{
-			PostID: uint(post.PostID),
-			Title:  post.Title,
-			Heat:   post.Heat,
+			PostID: postInfo.PostID,
+			Title:  postInfo.Title,
+			Heat:   postInfo.BrowseNum, // 使用从Redis中获取的热度分数
 		}
 		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
 	}
+
 	c.JSON(http.StatusOK, heatResponsesTop10)
 }
+
 func GetTags(c *gin.Context) {
 	//从中间件存入的user中获取userID
 	value, exists := c.Get("user")
@@ -951,14 +976,13 @@ func GetTitle(c *gin.Context) {
 	// 关闭multipart.Writer以设置边界
 	writer.Close()
 
-
 	// 创建一个通道用于接收异步操作结果
 	resultChan := make(chan []byte, 1)
 
 	// 启动goroutine执行异步HTTP请求
 	go func() {
 		// 向ssemarket.cn:5000/title转发POST请求
-		resp, err := http.Post("http://ssemarket.cn:5000/title",writer.FormDataContentType(), &requestBody)
+		resp, err := http.Post("http://ssemarket.cn:5000/title", writer.FormDataContentType(), &requestBody)
 		if err != nil {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "请求失败")
 			return
