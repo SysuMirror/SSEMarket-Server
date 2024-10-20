@@ -89,6 +89,7 @@ services:
       - /root/SSE_Market/SSE_market_client/dist:/usr/share/nginx/pc
       - /root/SSE_Market/sse_market_client_public/dist:/usr/share/nginx/open
       - /root/SSE_Market/hexo_blog/public:/usr/share/nginx/blog
+      - /root/SSE_Market/sse_market_new_client/newSSE/dist:/usr/share/nginx/new
   # db:
   #   image: mysql:5.7
   #   volumes:
@@ -130,6 +131,7 @@ services:
   #     WORDPRESS_DATABASE_USER: wordpress
   #     WORDPRESS_DATABASE_PASSWORD: wordpress
   #     WORDPRESS_DATABASE_NAME: wordpress
+
 volumes:
   my-vol:
   blog_db_data: 
@@ -137,6 +139,13 @@ volumes:
   wordpress_data: 
   blog_wordpress_data:
     external: true
+  # --------------
+  # db-data:
+  # event-data:
+  # event-logs:
+  # plausible-data:
+  # --------------
+
 networks:
   sse_market_network:
     driver: bridge

@@ -16,6 +16,7 @@ import (
 	"io/ioutil"
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"mime/multipart"
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
@@ -508,7 +509,10 @@ func UpdateBrowseNum(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
-	db.Model(&post).Update("browse_num", post.BrowseNum+1)
+	// 随机增加浏览量
+	rand.Seed(time.Now().UnixNano())
+	r := rand.Intn(3)
+	db.Model(&post).Update("browse_num", post.BrowseNum+r+1)
 	// 在这里设置 浏览 的权重
 	weightBrowse := float64(1)
 	db.Model(&post).Update("heat", post.Heat+weightBrowse)
