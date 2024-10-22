@@ -3,11 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/brianvoe/gofakeit"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	"golang.org/x/crypto/bcrypt"
 	"image"
 	"log"
 	"loginTest/api"
@@ -20,6 +15,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/brianvoe/gofakeit"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	"golang.org/x/crypto/bcrypt"
+	//"golang.org/x/image/webp"
 )
 
 const (
