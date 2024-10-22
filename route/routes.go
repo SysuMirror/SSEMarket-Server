@@ -64,6 +64,14 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
 	auth.GET("/api/auth/getTags", controller.GetTags)
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
+	//获得所有聊天用户列表，并且建立ws链接
+	auth.GET("/api/auth/chat", controller.ChatHandler)
+	//点击与某人聊天主页的接口，需要监听用户是否在聊天页面
+	//auth.GET("/api/auth/intoChatView", controller.IntoChatView)
+	//退出与某人聊天主页的接口，需要监听用户是否在聊天页面
+	//auth.POST("/api/auth/leaveChatView", controller.LeaveChatView)
+	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
+	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())

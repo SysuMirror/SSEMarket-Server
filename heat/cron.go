@@ -18,6 +18,7 @@ import (
 
 // 启动热度计算定时任务
 func StartHeat() {
+	RefreshHeat()
 	// 创建 cron 实例并添加任务
 	c := cron.New()
 
