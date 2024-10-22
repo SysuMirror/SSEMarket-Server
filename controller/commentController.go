@@ -16,6 +16,7 @@ import (
 
 type CommentResponse struct {
 	PcommentID      int
+	AuthorID        int
 	Author          string
 	AuthorTelephone string
 	AuthorScore     int
@@ -34,6 +35,7 @@ type Commentsmsg struct {
 type Subcomment struct {
 	CcommentID      int       `json:"ccommentID"`
 	Author          string    `json:"author"`
+	AuthorID        int       `json:"authorID"`
 	AuthorScore     int       `json:"authorScore"`
 	AuthorTelephone string    `json:"authorTelephone"`
 	AuthorAvatar    string    `json:"authorAvatar"`
@@ -77,6 +79,7 @@ func GetComments(c *gin.Context) {
 		comment := CommentResponse{
 			PcommentID:      pcomment.PcommentID,
 			Author:          commentuser.Name,
+			AuthorID:        commentuser.UserID,
 			AuthorTelephone: commentuser.Phone,
 			AuthorScore:     commentuser.Score,
 			AuthorAvatar:    commentuser.AvatarURL,
@@ -199,6 +202,7 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 		comment := Subcomment{
 			CcommentID:      ccomment.CcommentID,
 			Author:          commentuser.Name,
+			AuthorID:        commentuser.UserID,
 			AuthorScore:     commentuser.Score,
 			AuthorTelephone: commentuser.Phone,
 			AuthorAvatar:    commentuser.AvatarURL,
