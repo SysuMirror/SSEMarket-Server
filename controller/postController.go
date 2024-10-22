@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/disintegration/imaging"
@@ -140,22 +141,23 @@ func Post(c *gin.Context) {
 }
 
 type PostResponse struct {
-	PostID       uint
-	UserName     string
-	UserScore    int
-	UserAvatar   string
-	UserIdentity string
-	Title        string
-	Content      string
-	Like         int
-	Comment      int
-	Browse       int
-	Heat         float64
-	PostTime     time.Time
-	IsSaved      bool
-	IsLiked      bool
-	Photos       string
-	Tag          string
+	PostID        uint
+	UserName      string
+	UserScore     int
+	UserTelephone string
+	UserAvatar    string
+	UserIdentity  string
+	Title         string
+	Content       string
+	Like          int
+	Comment       int
+	Browse        int
+	Heat          float64
+	PostTime      time.Time
+	IsSaved       bool
+	IsLiked       bool
+	Photos        string
+	Tag           string
 }
 
 type BrowseMeg struct {
@@ -173,6 +175,7 @@ func Browse(c *gin.Context) {
 	// 获取参数
 	var requestBrowseMeg BrowseMeg
 	c.Bind(&requestBrowseMeg)
+	userTelephone := requestBrowseMeg.UserTelephone
 	partition := requestBrowseMeg.Partition
 	searchinfo := requestBrowseMeg.Searchinfo
 	tag := requestBrowseMeg.Tag
@@ -181,12 +184,8 @@ func Browse(c *gin.Context) {
 	offset := requestBrowseMeg.Offset
 	// 查询用户
 	var temUser model.User
-	val, ok := c.Get("user")
-	if !ok {
-		return
-	}
-	temUser, ok = val.(model.User)
-	if !ok {
+	db.Where("phone = ?", userTelephone).First(&temUser)
+	if temUser.UserID == 0 {
 		return
 	}
 	// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
@@ -222,22 +221,23 @@ func Browse(c *gin.Context) {
 				db.Where("userID = ?", post.UserID).First(&user)
 			}
 			postResponse := PostResponse{
-				PostID:       uint(post.PostID),
-				UserName:     user.Name,
-				UserScore:    user.Score,
-				UserAvatar:   user.AvatarURL,
-				UserIdentity: user.Identity,
-				Title:        post.Title,
-				Content:      post.Ptext,
-				Like:         post.LikeNum,
-				Comment:      post.CommentNum,
-				Browse:       post.BrowseNum,
-				Heat:         post.Heat,
-				PostTime:     post.PostTime,
-				IsSaved:      true,
-				IsLiked:      isLiked,
-				Photos:       post.Photos,
-				Tag:          post.Tag,
+				PostID:        uint(post.PostID),
+				UserName:      user.Name,
+				UserScore:     user.Score,
+				UserTelephone: user.Phone,
+				UserAvatar:    user.AvatarURL,
+				UserIdentity:  user.Identity,
+				Title:         post.Title,
+				Content:       post.Ptext,
+				Like:          post.LikeNum,
+				Comment:       post.CommentNum,
+				Browse:        post.BrowseNum,
+				Heat:          post.Heat,
+				PostTime:      post.PostTime,
+				IsSaved:       true,
+				IsLiked:       isLiked,
+				Photos:        post.Photos,
+				Tag:           post.Tag,
 			}
 			postResponses = append(postResponses, postResponse)
 		}
@@ -292,22 +292,23 @@ func Browse(c *gin.Context) {
 				db.Where("userID = ?", post.UserID).First(&user)
 			}
 			postResponse := PostResponse{
-				PostID:       uint(post.PostID),
-				UserName:     user.Name,
-				UserScore:    user.Score,
-				UserAvatar:   user.AvatarURL,
-				UserIdentity: user.Identity,
-				Title:        post.Title,
-				Content:      post.Ptext,
-				Like:         post.LikeNum,
-				Comment:      post.CommentNum,
-				Browse:       post.BrowseNum,
-				Heat:         post.Heat,
-				PostTime:     post.PostTime,
-				IsSaved:      isSaved,
-				IsLiked:      isLiked,
-				Photos:       post.Photos,
-				Tag:          post.Tag,
+				PostID:        uint(post.PostID),
+				UserName:      user.Name,
+				UserScore:     user.Score,
+				UserTelephone: user.Phone,
+				UserAvatar:    user.AvatarURL,
+				UserIdentity:  user.Identity,
+				Title:         post.Title,
+				Content:       post.Ptext,
+				Like:          post.LikeNum,
+				Comment:       post.CommentNum,
+				Browse:        post.BrowseNum,
+				Heat:          post.Heat,
+				PostTime:      post.PostTime,
+				IsSaved:       isSaved,
+				IsLiked:       isLiked,
+				Photos:        post.Photos,
+				Tag:           post.Tag,
 			}
 			postResponses = append(postResponses, postResponse)
 		}
@@ -591,7 +592,6 @@ func SubmitReport(c *gin.Context) {
 
 type PostDetailsResponse struct {
 	PostID        uint
-	UserID        int
 	UserName      string
 	UserScore     int
 	UserTelephone string
@@ -657,7 +657,6 @@ func ShowDetails(c *gin.Context) {
 	}
 	postDetailsResponse := PostDetailsResponse{
 		PostID:        uint(post.PostID),
-		UserID:        user.UserID,
 		UserName:      user.Name,
 		UserScore:     user.Score,
 		UserTelephone: user.Phone,
@@ -882,29 +881,47 @@ type HeatResponse struct {
 	Heat   float64
 }
 
+// 表示存在zset的val
+type PostInfo struct {
+	PostID    uint    `json:"postID"`
+	Title     string  `json:"title"`
+	BrowseNum float64 `json:"browseNum"`
+}
+
 func CalculateHeat(c *gin.Context) {
-	// 获取所有帖子的 postID, likenum, commentnum, browsenum
-	db := common.GetDB()
-	// 从数据库中获取所有的帖子，并将结果存储在posts切片中。
-	var posts []model.Post
-	db.Find(&posts)
-	// 对 postStats 切片按热度进行排序
-	sort.Slice(posts, func(i, j int) bool {
-		return posts[i].Heat > posts[j].Heat
-	})
+	// Redis ZSet的key
+	redisKey := "hot_posts_zset"
+	ctx := context.Background()
+
+	// 从Redis中获取热度前10的帖子
+	topPosts, err := common.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取热度前10帖子失败"})
+		return
+	}
+
 	var heatResponsesTop10 []HeatResponse
-	// 只返回前10个帖子
-	for i := 0; i < 10 && i < len(posts); i++ {
-		post := posts[i]
+
+	// 处理 Redis 返回的数据
+	for _, post := range topPosts {
+		var postInfo PostInfo
+		err := json.Unmarshal([]byte(post.Member.(string)), &postInfo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "解析帖子信息失败"})
+			return
+		}
+
 		heatResponse := HeatResponse{
-			PostID: uint(post.PostID),
-			Title:  post.Title,
-			Heat:   post.Heat,
+			PostID: postInfo.PostID,
+			Title:  postInfo.Title,
+			Heat:   postInfo.BrowseNum, // 使用从Redis中获取的热度分数
 		}
 		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
 	}
+
 	c.JSON(http.StatusOK, heatResponsesTop10)
 }
+
 func GetTags(c *gin.Context) {
 	//从中间件存入的user中获取userID
 	value, exists := c.Get("user")

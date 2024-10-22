@@ -345,7 +345,7 @@ func PostCcomment(c *gin.Context) {
 		return
 	}
 	// 这里不能直接用len(),否则中文字符会计算错误
-	if utf8.RuneCountInString(content) > 100 {
+	if utf8.RuneCountInString(content) > 1000 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
