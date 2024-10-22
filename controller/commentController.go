@@ -24,8 +24,10 @@ type CommentResponse struct {
 	CommentTime     time.Time
 	Content         string
 	LikeNum         int
+	DenyNum			int
 	SubComments     []Subcomment
 	IsLiked         bool
+	IsDeny			bool
 }
 type Commentsmsg struct {
 	UserTelephone string `json:"userTelephone"`
@@ -41,7 +43,9 @@ type Subcomment struct {
 	CommentTime     time.Time `json:"commentTime"`
 	Content         string    `json:"content"`
 	LikeNum         int       `json:"likeNum"`
+	DenyNum 		int		  `json:"denyNum"`
 	IsLiked         bool      `json:"isLiked"`
+	IsDeny			bool	  `json:"isDeny"`
 	UserTargetName  string    `json:"userTargetName"`
 	ShowMenu        bool      `json:"showMenu"`
 }
@@ -67,10 +71,17 @@ func GetComments(c *gin.Context) {
 	db.Find(&pcomments, "ptargetID = ?", postid)
 	for _, pcomment := range pcomments {
 		isLike := false
+		isDeny := false
 		var like model.Pclike
-		db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
-		if like.PclikeID != 0 {
-			isLike = true
+		var deny model.Pcdeny
+		db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
+		if(deny.PcdenyID != 0){
+			isDeny = true;
+		}else{
+			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
+			if like.PclikeID != 0 {
+				isLike = true
+			}
 		}
 		var commentuser model.User
 		db.Where("userID = ?", pcomment.UserID).First(&commentuser)
@@ -84,8 +95,10 @@ func GetComments(c *gin.Context) {
 			CommentTime:     pcomment.Time,
 			Content:         pcomment.Pctext,
 			LikeNum:         pcomment.LikeNum,
+			DenyNum: 		 pcomment.DenyNum,
 			SubComments:     GetSubComments(pcomment, temUser.UserID),
 			IsLiked:         isLike,
+			IsDeny: 		 isDeny,
 		}
 		comments = append(comments, comment)
 	}
@@ -491,6 +504,61 @@ func UpdatePcommentLike(c *gin.Context) {
 	}
 }
 
+type PcDeny struct{
+	UserTelephone string `json:"userTelephone"`
+	PcommentID    uint   `json:"pcommentID"`
+	IsDeny      bool   `json:"isDeny"`
+}
+
+func UpdatePcommentDeny(c *gin.Context){
+	db := common.GetDB()
+	var requestDenyMsg PcDeny
+	c.Bind(&requestDenyMsg)
+	userTelephone := requestDenyMsg.UserTelephone
+	pcommentID := requestDenyMsg.PcommentID
+	isDeny := requestDenyMsg.IsDeny
+	if len(userTelephone) == 0 || pcommentID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
+		return
+	}
+	// Find the user by telephone
+	var user model.User
+	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		//找不到用户
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	var pcomment model.Pcomment
+	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
+	if pcomment.PcommentID == 0 {
+		//找不到评论
+		return
+	}
+	if isDeny {
+		db.Model(&pcomment).Update("deny_num", pcomment.DenyNum - 1)
+		var deny model.Pcdeny
+		db.Where("userID = ? AND pctargetID = ?", user.UserID,pcomment.PcommentID).First(&deny)
+		if deny.PcdenyID != 0{
+			db.Delete(&deny)
+		}
+	}else{
+		newDeny := model.Pcdeny{
+			UserID:		user.UserID,
+			PctargetID: pcomment.PcommentID,
+		}
+		if newDeny.UserID != 0 && newDeny.PctargetID != 0{
+			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum + 1)
+			db.Create(&newDeny)
+		}
+	}
+}
+
 type CclikeMsg struct {
 	UserTelephone string `json:"userTelephone"`
 	CcommentID    uint   `json:"ccommentID"`
@@ -540,6 +608,59 @@ func UpdateCcommentLike(c *gin.Context) {
 		if newLike.UserID != 0 && newLike.CctargetID != 0 {
 			db.Model(&ccomment).Update("like_num", ccomment.LikeNum+1)
 			db.Create(&newLike)
+		}
+	}
+}
+
+type CcDeny struct{
+	UserTelephone string `json:"userTelephone"`
+	CcommentID    uint   `json:"ccommentID"`
+	IsDeny      bool   `json:"isDeny"`
+}
+func UpdateCcommentDeny(c *gin.Context){
+	db := common.GetDB()
+	var requestDenyMsg CcDeny
+	c.Bind(&requestDenyMsg)
+	userTelephone := requestDenyMsg.UserTelephone
+	ccommentID := requestDenyMsg.CcommentID
+	isDeny := requestDenyMsg.IsDeny
+	if len(userTelephone) == 0 || ccommentID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
+		return
+	}
+	// Find the user by telephone
+	var user model.User
+	db.Where("phone = ?", userTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	var ccomment model.Ccomment
+	db.Where("ccommentID = ?", ccommentID).First(&ccomment)
+	if ccomment.CcommentID == 0 {
+		//找不到评论
+		return
+	}
+	if isDeny {
+		db.Model(&ccomment).Update("deny_num", ccomment.DenyNum - 1)
+		var deny model.Ccdeny
+		db.Where("userID = ? AND cctargetID = ?", user.UserID,ccomment.CcommentID).First(&deny)
+		if deny.CcdenyID != 0{
+			db.Delete(&deny)
+		}
+	}else{
+		newDeny := model.Ccdeny{
+			UserID:		user.UserID,
+			CctargetID: ccomment.CcommentID,
+		}
+		if newDeny.UserID != 0 && newDeny.CctargetID != 0{
+			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum + 1)
+			db.Create(&newDeny)
 		}
 	}
 }
