@@ -205,11 +205,20 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 	var subcomments []Subcomment
 	for _, ccomment := range ccomments {
 		isLike := false
+		isDeny := false
 		var like model.Cclike
-		db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&like)
-		if like.CclikeID != 0 {
-			isLike = true
+		var deny model.Ccdeny
+		db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&deny)
+		if deny.CcdenyID != 0 {
+			isDeny = true
+		}else{	
+			db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&like)
+			if like.CclikeID != 0 {
+				isLike = true
+			}
 		}
+		
+		
 		var commentuser model.User
 		db.Where("userID =?", ccomment.UserID).First(&commentuser)
 		comment := Subcomment{
@@ -223,7 +232,9 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 			CommentTime:     ccomment.Time,
 			Content:         ccomment.Cctext,
 			LikeNum:         ccomment.LikeNum,
+			DenyNum: 		 ccomment.DenyNum,
 			IsLiked:         isLike,
+			IsDeny:  		 isDeny,
 			UserTargetName:  ccomment.UserTargetName,
 			ShowMenu:        false,
 		}
@@ -291,6 +302,7 @@ func PostPcomment(c *gin.Context) {
 		Pctext:    msg.Content,
 		Time:      time.Now(),
 		LikeNum:   0,
+		DenyNum:   0,
 	}
 	// 创建一条帖子评论
 	db.Create(&pcomment)
@@ -327,6 +339,7 @@ func PostPcomment(c *gin.Context) {
 		CommentTime:    pcomment.Time,
 		Content:        pcomment.Pctext,
 		LikeNum:        pcomment.LikeNum,
+		DenyNum:  		pcomment.DenyNum,
 		SubComments:    GetSubComments(pcomment, user.UserID),
 		IsLiked:        false,
 	}
@@ -393,6 +406,7 @@ func PostCcomment(c *gin.Context) {
 		Cctext:         msg.Content,
 		Time:           time.Now(),
 		LikeNum:        0,
+		DenyNum: 		0,
 		UserTargetName: msg.UserTargetName,
 	}
 	// 数据库创建一条新的评论的评论
@@ -455,19 +469,31 @@ func PostCcomment(c *gin.Context) {
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
 
-type PclikeMsg struct {
+// type PclikeMsg struct {
+// 	UserTelephone string `json:"userTelephone"`
+// 	PcommentID    uint   `json:"pcommentID"`
+// 	IsLiked       bool   `json:"isLiked"`
+// }
+type PcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	PcommentID    uint   `json:"pcommentID"`
-	IsLiked       bool   `json:"isLiked"`
+	IsLiked		bool   `json:"isliked"`
+	IsDeny      bool   `json:"isDeny"`
 }
 
 func UpdatePcommentLike(c *gin.Context) {
 	db := common.GetDB()
-	var requestLikeMsg PclikeMsg
-	c.Bind(&requestLikeMsg)
-	userTelephone := requestLikeMsg.UserTelephone
-	pcommentID := requestLikeMsg.PcommentID
-	isLiked := requestLikeMsg.IsLiked
+	// var requestLikeMsg PclikeMsg
+	// c.Bind(&requestLikeMsg)
+	var requestMsg PcMsg
+	// userTelephone := requestLikeMsg.UserTelephone
+	// pcommentID := requestLikeMsg.PcommentID
+	// isLiked := requestLikeMsg.IsLiked
+	userTelephone := requestMsg.UserTelephone
+	pcommentID := requestMsg.PcommentID
+	isLiked := requestMsg.IsLiked
+	isDeny := requestMsg.IsDeny
+
 	if len(userTelephone) == 0 || pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
@@ -497,6 +523,15 @@ func UpdatePcommentLike(c *gin.Context) {
 			db.Delete(&like)
 		}
 	} else {
+
+		if isDeny {
+			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
+			var deny model.Pcdeny
+			db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&deny)
+			if deny.PcdenyID != 0 {
+				db.Delete(&deny)
+			}
+		}
 		newLike := model.Pclike{
 			UserID:     user.UserID,
 			PctargetID: pcomment.PcommentID,
@@ -508,19 +543,14 @@ func UpdatePcommentLike(c *gin.Context) {
 	}
 }
 
-type PcDeny struct{
-	UserTelephone string `json:"userTelephone"`
-	PcommentID    uint   `json:"pcommentID"`
-	IsDeny      bool   `json:"isDeny"`
-}
-
 func UpdatePcommentDeny(c *gin.Context){
 	db := common.GetDB()
-	var requestDenyMsg PcDeny
-	c.Bind(&requestDenyMsg)
-	userTelephone := requestDenyMsg.UserTelephone
-	pcommentID := requestDenyMsg.PcommentID
-	isDeny := requestDenyMsg.IsDeny
+	var requestMsg PcMsg
+	c.Bind(&requestMsg)
+	userTelephone := requestMsg.UserTelephone
+	pcommentID := requestMsg.PcommentID
+	isDeny := requestMsg.IsDeny
+	isLiked := requestMsg.IsLiked
 	if len(userTelephone) == 0 || pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
@@ -552,6 +582,14 @@ func UpdatePcommentDeny(c *gin.Context){
 			db.Delete(&deny)
 		}
 	}else{
+		if	isLiked {
+			db.Model(&pcomment).Update("like_num", pcomment.LikeNum - 1)
+			var like model.Pclike
+			db.Where("userID = ? AND pctargetID = ?", user.UserID,pcomment.PcommentID).First(&like)
+			if like.PclikeID != 0{
+				db.Delete(&like)
+			}
+		}
 		newDeny := model.Pcdeny{
 			UserID:		user.UserID,
 			PctargetID: pcomment.PcommentID,
@@ -563,19 +601,32 @@ func UpdatePcommentDeny(c *gin.Context){
 	}
 }
 
-type CclikeMsg struct {
+// type CclikeMsg struct {
+// 	UserTelephone string `json:"userTelephone"`
+// 	CcommentID    uint   `json:"ccommentID"`
+// 	IsLiked       bool   `json:"isLiked"`
+// }
+
+type CcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	CcommentID    uint   `json:"ccommentID"`
-	IsLiked       bool   `json:"isLiked"`
+	IsLiked		bool   `json:"isLiked"`
+	IsDeny      bool   `json:"isDeny"`
 }
 
 func UpdateCcommentLike(c *gin.Context) {
 	db := common.GetDB()
-	var requestLikeMsg CclikeMsg
-	c.Bind(&requestLikeMsg)
-	userTelephone := requestLikeMsg.UserTelephone
-	ccommentID := requestLikeMsg.CcommentID
-	isLiked := requestLikeMsg.IsLiked
+	// var requestLikeMsg CclikeMsg
+	// c.Bind(&requestLikeMsg)
+	var requestMsg CcMsg
+	c.Bind(&requestMsg)
+	// userTelephone := requestLikeMsg.UserTelephone
+	// ccommentID := requestLikeMsg.CcommentID
+	// isLiked := requestLikeMsg.IsLiked
+	userTelephone := requestMsg.UserTelephone
+	ccommentID := requestMsg.CcommentID
+	isLiked := requestMsg.IsLiked
+	isDeny := requestMsg.IsDeny
 	if len(userTelephone) == 0 || ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
@@ -605,6 +656,14 @@ func UpdateCcommentLike(c *gin.Context) {
 			db.Delete(&like)
 		}
 	} else {
+		if isDeny {
+			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
+			var deny model.Ccdeny
+			db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&deny)
+			if deny.CcdenyID != 0 {
+				db.Delete(&deny)
+			}
+		}
 		newLike := model.Cclike{
 			UserID:     user.UserID,
 			CctargetID: ccomment.CcommentID,
@@ -616,18 +675,13 @@ func UpdateCcommentLike(c *gin.Context) {
 	}
 }
 
-type CcDeny struct{
-	UserTelephone string `json:"userTelephone"`
-	CcommentID    uint   `json:"ccommentID"`
-	IsDeny      bool   `json:"isDeny"`
-}
 func UpdateCcommentDeny(c *gin.Context){
 	db := common.GetDB()
-	var requestDenyMsg CcDeny
-	c.Bind(&requestDenyMsg)
-	userTelephone := requestDenyMsg.UserTelephone
-	ccommentID := requestDenyMsg.CcommentID
-	isDeny := requestDenyMsg.IsDeny
+	var requestMsg CcMsg
+	userTelephone := requestMsg.UserTelephone
+	ccommentID := requestMsg.CcommentID
+	isDeny := requestMsg.IsDeny
+	isLiked := requestMsg.IsLiked
 	if len(userTelephone) == 0 || ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
@@ -658,6 +712,14 @@ func UpdateCcommentDeny(c *gin.Context){
 			db.Delete(&deny)
 		}
 	}else{
+		if isLiked {
+			db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
+			var like model.Cclike
+			db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&like)
+			if like.CclikeID != 0 {
+				db.Delete(&like)
+			}
+		}
 		newDeny := model.Ccdeny{
 			UserID:		user.UserID,
 			CctargetID: ccomment.CcommentID,
