@@ -1005,7 +1005,7 @@ func GetTitle(c *gin.Context) {
 	// 启动goroutine执行异步HTTP请求
 	go func() {
 		// 向ssemarket.cn:5000/title转发POST请求
-		resp, err := http.Post("http://localhost:8080/title", writer.FormDataContentType(), &requestBody)
+		resp, err := http.Post("http://ssemarket.cn:5000/title", writer.FormDataContentType(), &requestBody)
 		if err != nil {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "请求失败")
 			return
