@@ -469,11 +469,6 @@ func PostCcomment(c *gin.Context) {
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
 
-// type PclikeMsg struct {
-// 	UserTelephone string `json:"userTelephone"`
-// 	PcommentID    uint   `json:"pcommentID"`
-// 	IsLiked       bool   `json:"isLiked"`
-// }
 type PcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	PcommentID    uint   `json:"pcommentID"`
@@ -483,12 +478,9 @@ type PcMsg struct{
 
 func UpdatePcommentLike(c *gin.Context) {
 	db := common.GetDB()
-	// var requestLikeMsg PclikeMsg
-	// c.Bind(&requestLikeMsg)
 	var requestMsg PcMsg
-	// userTelephone := requestLikeMsg.UserTelephone
-	// pcommentID := requestLikeMsg.PcommentID
-	// isLiked := requestLikeMsg.IsLiked
+	c.Bind(&requestMsg)
+
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 	isLiked := requestMsg.IsLiked
@@ -523,7 +515,7 @@ func UpdatePcommentLike(c *gin.Context) {
 			db.Delete(&like)
 		}
 	} else {
-
+		//没点过赞的话则先检查是否有过踩,有的话取消
 		if isDeny {
 			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
 			var deny model.Pcdeny
@@ -547,6 +539,7 @@ func UpdatePcommentDeny(c *gin.Context){
 	db := common.GetDB()
 	var requestMsg PcMsg
 	c.Bind(&requestMsg)
+
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 	isDeny := requestMsg.IsDeny
@@ -582,6 +575,7 @@ func UpdatePcommentDeny(c *gin.Context){
 			db.Delete(&deny)
 		}
 	}else{
+		//没踩过的话先检查是否有过赞,有的话取消
 		if	isLiked {
 			db.Model(&pcomment).Update("like_num", pcomment.LikeNum - 1)
 			var like model.Pclike
@@ -601,12 +595,6 @@ func UpdatePcommentDeny(c *gin.Context){
 	}
 }
 
-// type CclikeMsg struct {
-// 	UserTelephone string `json:"userTelephone"`
-// 	CcommentID    uint   `json:"ccommentID"`
-// 	IsLiked       bool   `json:"isLiked"`
-// }
-
 type CcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	CcommentID    uint   `json:"ccommentID"`
@@ -616,13 +604,9 @@ type CcMsg struct{
 
 func UpdateCcommentLike(c *gin.Context) {
 	db := common.GetDB()
-	// var requestLikeMsg CclikeMsg
-	// c.Bind(&requestLikeMsg)
 	var requestMsg CcMsg
 	c.Bind(&requestMsg)
-	// userTelephone := requestLikeMsg.UserTelephone
-	// ccommentID := requestLikeMsg.CcommentID
-	// isLiked := requestLikeMsg.IsLiked
+
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
 	isLiked := requestMsg.IsLiked
@@ -656,6 +640,7 @@ func UpdateCcommentLike(c *gin.Context) {
 			db.Delete(&like)
 		}
 	} else {
+		//没点过赞的话则先检查是否有过踩,有的话取消
 		if isDeny {
 			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
 			var deny model.Ccdeny
@@ -678,6 +663,8 @@ func UpdateCcommentLike(c *gin.Context) {
 func UpdateCcommentDeny(c *gin.Context){
 	db := common.GetDB()
 	var requestMsg CcMsg
+	c.Bind(&requestMsg)
+
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
 	isDeny := requestMsg.IsDeny
@@ -712,6 +699,7 @@ func UpdateCcommentDeny(c *gin.Context){
 			db.Delete(&deny)
 		}
 	}else{
+		//没踩过的话先检查是否有过赞,有的话取消
 		if isLiked {
 			db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
 			var like model.Cclike

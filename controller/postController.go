@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
 	"image"
 	"io/ioutil"
 	"loginTest/api"
@@ -14,12 +12,16 @@ import (
 	"loginTest/model"
 	"loginTest/response"
 	"math"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
 )
 
 type PostMsg struct {
@@ -492,34 +494,6 @@ type BrowseMsg struct {
 	// BrowseNum     int
 }
 
-// func UpdateBrowseNum(c *gin.Context) {
-// 	db := common.GetDB()
-// 	var requestBrowseMsg BrowseMsg
-// 	c.Bind(&requestBrowseMsg)
-// 	userTelephone := requestBrowseMsg.UserTelephone
-// 	postID := requestBrowseMsg.PostID
-// 	// browseNum := requestBrowseMsg.BrowseNum 不用获取直接+1
-// 	var user model.User
-// 	db.Where("phone = ?", userTelephone).First(&user)
-// 	if user.UserID == 0 {
-// 		return
-// 	}
-// 	var post model.Post
-// 	db.Where("postID = ?", postID).First(&post)
-// 	if post.PostID == 0 {
-// 		return
-// 	}
-// 	db.Model(&post).Update("browse_num", post.BrowseNum+1)
-// 	// 在这里设置 浏览 的权重
-// 	weightBrowse := float64(1)
-// 	db.Model(&post).Update("heat", post.Heat+weightBrowse)
-// 	newBrowse := model.Pbrowse{
-// 		UserID:    user.UserID,
-// 		PtargetID: post.PostID,
-// 		Time:      time.Now(),
-// 	}
-// 	db.Create(&newBrowse)
-// }
 
 //修改浏览量为浏览用户数量,原本为浏览人次
 func UpdateBrowseNum(c *gin.Context) {
@@ -541,7 +515,9 @@ func UpdateBrowseNum(c *gin.Context) {
 	var browsed model.Pbrowse
 	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
 	if browsed.PbrowseID == 0 {
-		db.Model(&post).Update("browse_num", post.BrowseNum+1)
+		rand.Seed(time.Now().UnixNano())
+		r := rand.Intn(4)
+		db.Model(&post).Update("browse_num", post.BrowseNum+r+1)
 		// 在这里设置 浏览 的权重
 		weightBrowse := float64(1)
 		db.Model(&post).Update("heat", post.Heat+weightBrowse)
