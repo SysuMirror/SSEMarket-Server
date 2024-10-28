@@ -20,7 +20,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-	//"golang.org/x/image/webp"
 )
 
 type PostMsg struct {
@@ -109,7 +108,6 @@ func Post(c *gin.Context) {
 		Title:      title,
 		Ptext:      content,
 		LikeNum:    0,
-//		DenyNum: 	0,
 		CommentNum: 0,
 		BrowseNum:  0,
 		Heat:       0,
@@ -152,14 +150,12 @@ type PostResponse struct {
 	Title         string
 	Content       string
 	Like          int
-//	Deny 		  int
 	Comment       int
 	Browse        int
 	Heat          float64
 	PostTime      time.Time
 	IsSaved       bool
 	IsLiked       bool
-//	IsDeny		  bool
 	Photos        string
 	Tag           string
 }
@@ -212,19 +208,11 @@ func Browse(c *gin.Context) {
 		// 对每个帖子查询是否点赞
 		for _, post := range posts {
 			isLiked := false
-			// isDeny := false
-			// var deny model.Pdeny
-			// db.Where("userID = ? AND ptargetId = ?", temUser.UserID, post.PostID).First(&deny)
-			// if(deny.PdenyID != 0){
-			// 	isDeny = true;
-			// 	isLiked = false;
-			// }else{
 			var like model.Plike
 			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
 			if like.PlikeID != 0 {
 				isLiked = true
 			}
-			//}
 			var user model.User
 			if post.UserID == 0 {
 				user.Name = "管理员"
@@ -242,14 +230,12 @@ func Browse(c *gin.Context) {
 				Title:         post.Title,
 				Content:       post.Ptext,
 				Like:          post.LikeNum,
-//				Deny: 		   post.DenyNum,
 				Comment:       post.CommentNum,
 				Browse:        post.BrowseNum,
 				Heat:          post.Heat,
 				PostTime:      post.PostTime,
 				IsSaved:       true,
 				IsLiked:       isLiked,
-//				IsDeny:		   isDeny,
 				Photos:        post.Photos,
 				Tag:           post.Tag,
 			}
@@ -292,20 +278,12 @@ func Browse(c *gin.Context) {
 			if save.PsaveID != 0 {
 				isSaved = true
 			}
-//			isDeny := false
 			isLiked := false
-			// var deny model.Pdeny
-			// db.Where("userID = ? AND ptargetId = ?", temUser.UserID, post.PostID).First(&deny)
-			// if(deny.PdenyID != 0){
-			// 	isDeny = true;
-			// 	isLiked = false;
-			//}else{
 			var like model.Plike
 			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
 			if like.PlikeID != 0 {
 				isLiked = true
 			}
-			//}
 			var user model.User
 			if post.UserID == 0 {
 				user.Name = "管理员"
@@ -323,14 +301,12 @@ func Browse(c *gin.Context) {
 				Title:         post.Title,
 				Content:       post.Ptext,
 				Like:          post.LikeNum,
-//				Deny: 		   post.DenyNum,
 				Comment:       post.CommentNum,
 				Browse:        post.BrowseNum,
 				Heat:          post.Heat,
 				PostTime:      post.PostTime,
 				IsSaved:       isSaved,
 				IsLiked:       isLiked,
-//				IsDeny: 	   isDeny,	
 				Photos:        post.Photos,
 				Tag:           post.Tag,
 			}
@@ -509,45 +485,6 @@ func UpdateLike(c *gin.Context) {
 		}
 	}
 }
-// type DenyMsg struct {
-// 	UserTelephone string
-// 	PostID        uint
-// 	IsDeny       bool
-// }
-
-// func UpdateDeny(c *gin.Context){
-// 	db := common.GetDB()
-// 	var requestDenymsg DenyMsg
-// 	c.Bind(&requestDenymsg)
-// 	userTelephone := requestDenymsg.UserTelephone
-// 	postID := requestDenymsg.PostID
-// 	isDeny := requestDenymsg.IsDeny
-// 	// Find the user by telephone
-// 	var user model.User
-// 	db.Where("phone = ?", userTelephone).First(&user)
-// 	if user.UserID == 0 {
-// 		return
-// 	}
-// 	var post model.Post
-// 	// 获取token中的用户标识符
-// 	tokenUserID := GetTokenUserID(c)
-// 	if tokenUserID != user.UserID {
-// 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
-// 		return
-// 	}
-// 	db.Where("postID = ?", postID).First(&post)
-// 	if post.PostID == 0 {
-// 		return
-// 	}
-// 	if isDeny{
-// 		var deny model.Pdeny
-// 		db.Where("userID = ? AND ptarget = ?", user.UserID, post.PostID).First(&deny)
-// 		if(deny.PdenyID != 0){
-
-// 		}
-// 	}
-
-// }
 
 type BrowseMsg struct {
 	UserTelephone string
@@ -555,13 +492,42 @@ type BrowseMsg struct {
 	// BrowseNum     int
 }
 
+// func UpdateBrowseNum(c *gin.Context) {
+// 	db := common.GetDB()
+// 	var requestBrowseMsg BrowseMsg
+// 	c.Bind(&requestBrowseMsg)
+// 	userTelephone := requestBrowseMsg.UserTelephone
+// 	postID := requestBrowseMsg.PostID
+// 	// browseNum := requestBrowseMsg.BrowseNum 不用获取直接+1
+// 	var user model.User
+// 	db.Where("phone = ?", userTelephone).First(&user)
+// 	if user.UserID == 0 {
+// 		return
+// 	}
+// 	var post model.Post
+// 	db.Where("postID = ?", postID).First(&post)
+// 	if post.PostID == 0 {
+// 		return
+// 	}
+// 	db.Model(&post).Update("browse_num", post.BrowseNum+1)
+// 	// 在这里设置 浏览 的权重
+// 	weightBrowse := float64(1)
+// 	db.Model(&post).Update("heat", post.Heat+weightBrowse)
+// 	newBrowse := model.Pbrowse{
+// 		UserID:    user.UserID,
+// 		PtargetID: post.PostID,
+// 		Time:      time.Now(),
+// 	}
+// 	db.Create(&newBrowse)
+// }
+
+//修改浏览量为浏览用户数量,原本为浏览人次
 func UpdateBrowseNum(c *gin.Context) {
 	db := common.GetDB()
 	var requestBrowseMsg BrowseMsg
 	c.Bind(&requestBrowseMsg)
 	userTelephone := requestBrowseMsg.UserTelephone
 	postID := requestBrowseMsg.PostID
-	// browseNum := requestBrowseMsg.BrowseNum 不用获取直接+1
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
 	if user.UserID == 0 {
@@ -572,16 +538,20 @@ func UpdateBrowseNum(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
-	db.Model(&post).Update("browse_num", post.BrowseNum+1)
-	// 在这里设置 浏览 的权重
-	weightBrowse := float64(1)
-	db.Model(&post).Update("heat", post.Heat+weightBrowse)
-	newBrowse := model.Pbrowse{
-		UserID:    user.UserID,
-		PtargetID: post.PostID,
-		Time:      time.Now(),
+	var browsed model.Pbrowse
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
+	if browsed.PbrowseID == 0 {
+		db.Model(&post).Update("browse_num", post.BrowseNum+1)
+		// 在这里设置 浏览 的权重
+		weightBrowse := float64(1)
+		db.Model(&post).Update("heat", post.Heat+weightBrowse)
+		newBrowse := model.Pbrowse{
+			UserID:    user.UserID,
+			PtargetID: post.PostID,
+			Time:      time.Now(),
+		}
+		db.Create(&newBrowse)
 	}
-	db.Create(&newBrowse)
 }
 
 type IDmsg struct {
