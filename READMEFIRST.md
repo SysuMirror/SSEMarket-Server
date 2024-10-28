@@ -2,7 +2,7 @@
 
 后端代码中验证码实现部分需要用到redis
 
-包括common/redis.go, troller, main.go
+包括common/redis.go, userController, main.go
 
 如果想要实现邮箱发送验证码的功能，可以将someConst/mailConst中的EmailUsername和Password进行更改
 
