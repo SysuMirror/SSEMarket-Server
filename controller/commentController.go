@@ -539,7 +539,7 @@ func UpdatePcommentDeny(c *gin.Context){
 	db := common.GetDB()
 	var requestMsg PcMsg
 	c.Bind(&requestMsg)
-
+	
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 	isDeny := requestMsg.IsDeny
