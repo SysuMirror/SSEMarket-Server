@@ -28,7 +28,7 @@ type CommentResponse struct {
 	DenyNum			int
 	SubComments     []Subcomment
 	IsLiked         bool
-	IsDeny			bool
+	IsDenied			bool
 }
 type Commentsmsg struct {
 	UserTelephone string `json:"userTelephone"`
@@ -47,7 +47,7 @@ type Subcomment struct {
 	LikeNum         int       `json:"likeNum"`
 	DenyNum 		int		  `json:"denyNum"`
 	IsLiked         bool      `json:"isLiked"`
-	IsDeny			bool	  `json:"isDeny"`
+	IsDenied		bool	  `json:"isDenied"`
 	UserTargetName  string    `json:"userTargetName"`
 	ShowMenu        bool      `json:"showMenu"`
 }
@@ -101,7 +101,7 @@ func GetComments(c *gin.Context) {
 			DenyNum: 		 pcomment.DenyNum,
 			SubComments:     GetSubComments(pcomment, temUser.UserID),
 			IsLiked:         isLike,
-			IsDeny: 		 isDeny,
+			IsDenied: 		 isDeny,
 		}
 		comments = append(comments, comment)
 	}
@@ -234,7 +234,7 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 			LikeNum:         ccomment.LikeNum,
 			DenyNum: 		 ccomment.DenyNum,
 			IsLiked:         isLike,
-			IsDeny:  		 isDeny,
+			IsDenied:  		 isDeny,
 			UserTargetName:  ccomment.UserTargetName,
 			ShowMenu:        false,
 		}
@@ -472,8 +472,8 @@ func PostCcomment(c *gin.Context) {
 type PcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	PcommentID    uint   `json:"pcommentID"`
-	IsLiked		bool   `json:"isliked"`
-	IsDeny      bool   `json:"isDeny"`
+	IsLiked		bool   `json:"isLiked"`
+	IsDenied      bool   `json:"isDenied"`
 }
 
 func UpdatePcommentLike(c *gin.Context) {
@@ -484,7 +484,7 @@ func UpdatePcommentLike(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 	isLiked := requestMsg.IsLiked
-	isDeny := requestMsg.IsDeny
+	isDenied := requestMsg.IsDenied
 
 	if len(userTelephone) == 0 || pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
@@ -516,7 +516,7 @@ func UpdatePcommentLike(c *gin.Context) {
 		}
 	} else {
 		//没点过赞的话则先检查是否有过踩,有的话取消
-		if isDeny {
+		if isDenied {
 			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
 			var deny model.Pcdeny
 			db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&deny)
@@ -542,7 +542,7 @@ func UpdatePcommentDeny(c *gin.Context){
 	
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
-	isDeny := requestMsg.IsDeny
+	isDenied := requestMsg.IsDenied
 	isLiked := requestMsg.IsLiked
 	if len(userTelephone) == 0 || pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
@@ -567,7 +567,7 @@ func UpdatePcommentDeny(c *gin.Context){
 		//找不到评论
 		return
 	}
-	if isDeny {
+	if isDenied {
 		db.Model(&pcomment).Update("deny_num", pcomment.DenyNum - 1)
 		var deny model.Pcdeny
 		db.Where("userID = ? AND pctargetID = ?", user.UserID,pcomment.PcommentID).First(&deny)
@@ -599,7 +599,7 @@ type CcMsg struct{
 	UserTelephone string `json:"userTelephone"`
 	CcommentID    uint   `json:"ccommentID"`
 	IsLiked		bool   `json:"isLiked"`
-	IsDeny      bool   `json:"isDeny"`
+	IsDenied      bool   `json:"isDenied"`
 }
 
 func UpdateCcommentLike(c *gin.Context) {
@@ -610,7 +610,7 @@ func UpdateCcommentLike(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
 	isLiked := requestMsg.IsLiked
-	isDeny := requestMsg.IsDeny
+	isDenied := requestMsg.IsDenied
 	if len(userTelephone) == 0 || ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
@@ -641,7 +641,7 @@ func UpdateCcommentLike(c *gin.Context) {
 		}
 	} else {
 		//没点过赞的话则先检查是否有过踩,有的话取消
-		if isDeny {
+		if isDenied {
 			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
 			var deny model.Ccdeny
 			db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&deny)
@@ -667,7 +667,7 @@ func UpdateCcommentDeny(c *gin.Context){
 
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
-	isDeny := requestMsg.IsDeny
+	isDenied := requestMsg.IsDenied
 	isLiked := requestMsg.IsLiked
 	if len(userTelephone) == 0 || ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
@@ -691,7 +691,7 @@ func UpdateCcommentDeny(c *gin.Context){
 		//找不到评论
 		return
 	}
-	if isDeny {
+	if isDenied {
 		db.Model(&ccomment).Update("deny_num", ccomment.DenyNum - 1)
 		var deny model.Ccdeny
 		db.Where("userID = ? AND cctargetID = ?", user.UserID,ccomment.CcommentID).First(&deny)
