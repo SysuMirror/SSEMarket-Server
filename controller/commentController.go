@@ -476,10 +476,11 @@ func UpdatePcommentLike(c *gin.Context) {
 	if pcomment.PcommentID == 0 {
 		return
 	}
+	var like model.Pclike
+	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&like)
+	isLiked = like.PclikeID != 0
 	if isLiked {
 		db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
-		var like model.Pclike
-		db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&like)
 		if like.PclikeID != 0 {
 			db.Delete(&like)
 		}
@@ -529,10 +530,11 @@ func UpdateCcommentLike(c *gin.Context) {
 	if ccomment.CcommentID == 0 {
 		return
 	}
+	var like model.Cclike
+	db.Where("userID =? AND cctargetID =?", user.UserID, ccomment.CcommentID).First(&like)
+	isLiked = like.CclikeID != 0
 	if isLiked {
 		db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
-		var like model.Cclike
-		db.Where("userID =? AND cctargetID =?", user.UserID, ccomment.CcommentID).First(&like)
 		if like.CclikeID != 0 {
 			db.Delete(&like)
 		}

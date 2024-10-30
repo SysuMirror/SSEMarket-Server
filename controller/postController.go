@@ -13,7 +13,6 @@ import (
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
-	"math"
 	"mime/multipart"
 	"net/http"
 	"sort"
@@ -395,9 +394,10 @@ func UpdateSave(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
+	var save model.Psave
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
+	isSaved = save.PsaveID != 0
 	if isSaved {
-		var save model.Psave
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
 		if save.PsaveID != 0 {
 			db.Delete(&save)
 		}
@@ -442,35 +442,16 @@ func UpdateLike(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
+	var like model.Plike
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
+	isLiked = like.PlikeID != 0
+	//已点赞
 	if isLiked {
-		// var liketime model.Plike
-		// var Time time.Time
-		// db.Where("time = ?", Time).First(&liketime)
-		var like model.Plike
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
-		// fmt.Println("likeID ", like.PlikeID)
 		if like.PlikeID != 0 {
-			currentTime := time.Now()
-			fmt.Println("currentTime", currentTime)
-			fmt.Println("likeTime", like.Time)
-			timedif := currentTime.Sub(like.Time)
-			hours := timedif.Hours()
-			days := int(hours / 24)
-			fmt.Println("days ", days)
-			if days > 0 {
-				weightlikePower := math.Pow(0.5, float64(days))
-				weightLike := float64(3)
-				deleteHeat := math.Pow(weightLike, weightlikePower)
-				fmt.Println("deleteHeat ", deleteHeat)
-				db.Model(&post).Update("heat", post.Heat-deleteHeat)
-			} else {
-				weightLike := float64(3)
-				db.Model(&post).Update("heat", post.Heat-weightLike)
-			}
 			db.Model(&post).Update("like_num", post.LikeNum-1)
 			db.Delete(&like)
 		}
-	} else {
+	} else { //未点赞
 		newLike := model.Plike{
 			UserID:    user.UserID,
 			PtargetID: post.PostID,
