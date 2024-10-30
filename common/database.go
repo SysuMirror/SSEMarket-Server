@@ -37,7 +37,9 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Plike{})
 	db.AutoMigrate(&model.Psave{})
 	db.AutoMigrate(&model.Cclike{})
+	db.AutoMigrate(&model.Ccdeny{})
 	db.AutoMigrate(&model.Pclike{})
+	db.AutoMigrate(&model.Pcdeny{})
 	db.AutoMigrate(&model.Pcomment{})
 	db.AutoMigrate(&model.Ccomment{})
 	db.AutoMigrate(&model.Pbrowse{})
@@ -53,6 +55,8 @@ func InitDB() *gorm.DB {
 	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
 	db.Model(&model.Cclike{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Pclike{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
+	db.Model(&model.Ccdeny{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
+	db.Model(&model.Pcdeny{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 
 	//db.Model(&model.Post{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
 	//db.Model(&model.Pcomment{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")

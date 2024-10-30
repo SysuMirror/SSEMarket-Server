@@ -5,6 +5,7 @@ import (
 )
 
 // 使用viper从配置文件中读取配置
+
 func InitConfig() {
 	viper.SetConfigName("application")
 	viper.SetConfigType("yml")
