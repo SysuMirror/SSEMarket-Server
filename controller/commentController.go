@@ -503,13 +503,28 @@ func UpdatePcommentLike(c *gin.Context) {
 	if pcomment.PcommentID == 0 {
 		return
 	}
+    //数据库查询点赞和踩的记录
+	isLiked := false
+	isDenied := false
 	var like model.Pclike
 	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&like)
-	isLiked = like.PclikeID != 0
+	if like.PclikeID != 0 {
+		isLiked = true
+	}
+	var deny model.Pcdeny
+	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&deny)
+	if deny.PcdenyID != 0 {
+		isDenied = true
+	}
+
 	if isLiked {
 		db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
-		if like.PclikeID != 0 {
-			db.Delete(&like)
+		db.Delete(&like)
+	}else{
+		//没点过赞的话则先检查是否有过踩,有的话取消
+		if isDenied {
+			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
+			db.Delete(&deny)
 		}
 		newLike := model.Pclike{
 			UserID:     user.UserID,
@@ -621,14 +636,23 @@ func UpdateCcommentLike(c *gin.Context) {
 	if ccomment.CcommentID == 0 {
 		return
 	}
+
+	isLiked := false
+	isDenied := false
 	var like model.Cclike
-	db.Where("userID =? AND cctargetID =?", user.UserID, ccomment.CcommentID).First(&like)
-	isLiked = like.CclikeID != 0
+	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&like)
+	if like.CclikeID != 0 {
+		isLiked = true
+	}
+	var deny model.Ccdeny
+	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&deny)
+	if deny.CcdenyID != 0 {
+		isDenied = true
+	}
+
 	if isLiked {
 		db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
-		if like.CclikeID != 0 {
-			db.Delete(&like)
-		}
+		db.Delete(&like)
 	} else {
 		//没点过赞的话则先检查是否有过踩,有的话取消
 		if isDenied {
