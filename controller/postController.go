@@ -11,7 +11,6 @@ import (
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
-	"math"
 	"math/rand"
 	"mime/multipart"
 	"net/http"
@@ -370,7 +369,7 @@ func GetPostNum(c *gin.Context) {
 type SaveMsg struct {
 	UserTelephone string
 	PostID        uint
-	IsSaved       bool
+	//IsSaved       bool
 }
 
 func UpdateSave(c *gin.Context) {
@@ -379,7 +378,8 @@ func UpdateSave(c *gin.Context) {
 	c.Bind(&requestSaveMsg)
 	userTelephone := requestSaveMsg.UserTelephone
 	postID := requestSaveMsg.PostID
-	isSaved := requestSaveMsg.IsSaved
+	//isSaved := requestSaveMsg.IsSaved
+
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
@@ -397,12 +397,16 @@ func UpdateSave(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
+
+	isSaved := false
+	var save model.Psave
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
+	if save.PsaveID != 0 {
+		isSaved = true
+	}
+
 	if isSaved {
-		var save model.Psave
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
-		if save.PsaveID != 0 {
-			db.Delete(&save)
-		}
+		db.Delete(&save)
 	} else {
 		newSave := model.Psave{
 			UserID:    user.UserID,
@@ -417,7 +421,7 @@ func UpdateSave(c *gin.Context) {
 type LikeMsg struct {
 	UserTelephone string
 	PostID        uint
-	IsLiked       bool
+	//IsLiked       bool
 }
 
 func UpdateLike(c *gin.Context) {
@@ -426,7 +430,7 @@ func UpdateLike(c *gin.Context) {
 	c.Bind(&requestLikeMsg)
 	userTelephone := requestLikeMsg.UserTelephone
 	postID := requestLikeMsg.PostID
-	isLiked := requestLikeMsg.IsLiked
+
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
@@ -444,35 +448,18 @@ func UpdateLike(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
-	if isLiked {
-		// var liketime model.Plike
-		// var Time time.Time
-		// db.Where("time = ?", Time).First(&liketime)
-		var like model.Plike
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
-		// fmt.Println("likeID ", like.PlikeID)
-		if like.PlikeID != 0 {
-			currentTime := time.Now()
-			fmt.Println("currentTime", currentTime)
-			fmt.Println("likeTime", like.Time)
-			timedif := currentTime.Sub(like.Time)
-			hours := timedif.Hours()
-			days := int(hours / 24)
-			fmt.Println("days ", days)
-			if days > 0 {
-				weightlikePower := math.Pow(0.5, float64(days))
-				weightLike := float64(3)
-				deleteHeat := math.Pow(weightLike, weightlikePower)
-				fmt.Println("deleteHeat ", deleteHeat)
-				db.Model(&post).Update("heat", post.Heat-deleteHeat)
-			} else {
-				weightLike := float64(3)
-				db.Model(&post).Update("heat", post.Heat-weightLike)
-			}
+
+	isLiked := false
+	var like model.Plike
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
+	if like.PlikeID != 0 {
+		isLiked = true
+	}
+
+	if isLiked {//已点赞
 			db.Model(&post).Update("like_num", post.LikeNum-1)
 			db.Delete(&like)
-		}
-	} else {
+	} else {//未点赞
 		newLike := model.Plike{
 			UserID:    user.UserID,
 			PtargetID: post.PostID,
