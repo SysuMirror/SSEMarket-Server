@@ -54,7 +54,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		//用户不存在
 		if user.UserID == 0 {
 			// 如果用户不存在，则将user设置为nil，表示当前用户为游客。
-			ctx.Set("user", nil)
+			ctx.Abort()
 		} else {
 			// 用户存在，将user的信息写入上下文
 			ctx.Set("user", user)
