@@ -1,22 +1,24 @@
 package controller
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"image"
+	"io/ioutil"
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
-	"math"
+	"math/rand"
+	"mime/multipart"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
-	"io/ioutil"
-	"bytes"
-	"encoding/json"
-	"mime/multipart"
+
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 )
@@ -367,7 +369,7 @@ func GetPostNum(c *gin.Context) {
 type SaveMsg struct {
 	UserTelephone string
 	PostID        uint
-	IsSaved       bool
+	//IsSaved       bool
 }
 
 func UpdateSave(c *gin.Context) {
@@ -376,7 +378,8 @@ func UpdateSave(c *gin.Context) {
 	c.Bind(&requestSaveMsg)
 	userTelephone := requestSaveMsg.UserTelephone
 	postID := requestSaveMsg.PostID
-	isSaved := requestSaveMsg.IsSaved
+	//isSaved := requestSaveMsg.IsSaved
+
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
@@ -394,12 +397,16 @@ func UpdateSave(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
+
+	isSaved := false
+	var save model.Psave
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
+	if save.PsaveID != 0 {
+		isSaved = true
+	}
+
 	if isSaved {
-		var save model.Psave
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
-		if save.PsaveID != 0 {
-			db.Delete(&save)
-		}
+		db.Delete(&save)
 	} else {
 		newSave := model.Psave{
 			UserID:    user.UserID,
@@ -414,7 +421,7 @@ func UpdateSave(c *gin.Context) {
 type LikeMsg struct {
 	UserTelephone string
 	PostID        uint
-	IsLiked       bool
+	//IsLiked       bool
 }
 
 func UpdateLike(c *gin.Context) {
@@ -423,7 +430,7 @@ func UpdateLike(c *gin.Context) {
 	c.Bind(&requestLikeMsg)
 	userTelephone := requestLikeMsg.UserTelephone
 	postID := requestLikeMsg.PostID
-	isLiked := requestLikeMsg.IsLiked
+
 	// Find the user by telephone
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
@@ -441,35 +448,18 @@ func UpdateLike(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
-	if isLiked {
-		// var liketime model.Plike
-		// var Time time.Time
-		// db.Where("time = ?", Time).First(&liketime)
-		var like model.Plike
-		db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
-		// fmt.Println("likeID ", like.PlikeID)
-		if like.PlikeID != 0 {
-			currentTime := time.Now()
-			fmt.Println("currentTime", currentTime)
-			fmt.Println("likeTime", like.Time)
-			timedif := currentTime.Sub(like.Time)
-			hours := timedif.Hours()
-			days := int(hours / 24)
-			fmt.Println("days ", days)
-			if days > 0 {
-				weightlikePower := math.Pow(0.5, float64(days))
-				weightLike := float64(3)
-				deleteHeat := math.Pow(weightLike, weightlikePower)
-				fmt.Println("deleteHeat ", deleteHeat)
-				db.Model(&post).Update("heat", post.Heat-deleteHeat)
-			} else {
-				weightLike := float64(3)
-				db.Model(&post).Update("heat", post.Heat-weightLike)
-			}
+
+	isLiked := false
+	var like model.Plike
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
+	if like.PlikeID != 0 {
+		isLiked = true
+	}
+
+	if isLiked {//已点赞
 			db.Model(&post).Update("like_num", post.LikeNum-1)
 			db.Delete(&like)
-		}
-	} else {
+	} else {//未点赞
 		newLike := model.Plike{
 			UserID:    user.UserID,
 			PtargetID: post.PostID,
@@ -491,13 +481,14 @@ type BrowseMsg struct {
 	// BrowseNum     int
 }
 
+
+//修改浏览量为浏览用户数量,原本为浏览人次
 func UpdateBrowseNum(c *gin.Context) {
 	db := common.GetDB()
 	var requestBrowseMsg BrowseMsg
 	c.Bind(&requestBrowseMsg)
 	userTelephone := requestBrowseMsg.UserTelephone
 	postID := requestBrowseMsg.PostID
-	// browseNum := requestBrowseMsg.BrowseNum 不用获取直接+1
 	var user model.User
 	db.Where("phone = ?", userTelephone).First(&user)
 	if user.UserID == 0 {
@@ -508,16 +499,22 @@ func UpdateBrowseNum(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
-	db.Model(&post).Update("browse_num", post.BrowseNum+1)
-	// 在这里设置 浏览 的权重
-	weightBrowse := float64(1)
-	db.Model(&post).Update("heat", post.Heat+weightBrowse)
-	newBrowse := model.Pbrowse{
-		UserID:    user.UserID,
-		PtargetID: post.PostID,
-		Time:      time.Now(),
+	var browsed model.Pbrowse
+	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
+	if browsed.PbrowseID == 0 {
+		rand.Seed(time.Now().UnixNano())
+		r := rand.Intn(4)
+		db.Model(&post).Update("browse_num", post.BrowseNum+r+1)
+		// 在这里设置 浏览 的权重
+		weightBrowse := float64(1)
+		db.Model(&post).Update("heat", post.Heat+weightBrowse)
+		newBrowse := model.Pbrowse{
+			UserID:    user.UserID,
+			PtargetID: post.PostID,
+			Time:      time.Now(),
+		}
+		db.Create(&newBrowse)
 	}
-	db.Create(&newBrowse)
 }
 
 type IDmsg struct {
@@ -880,29 +877,47 @@ type HeatResponse struct {
 	Heat   float64
 }
 
+// 表示存在zset的val
+type PostInfo struct {
+	PostID    uint    `json:"postID"`
+	Title     string  `json:"title"`
+	BrowseNum float64 `json:"browseNum"`
+}
+
 func CalculateHeat(c *gin.Context) {
-	// 获取所有帖子的 postID, likenum, commentnum, browsenum
-	db := common.GetDB()
-	// 从数据库中获取所有的帖子，并将结果存储在posts切片中。
-	var posts []model.Post
-	db.Find(&posts)
-	// 对 postStats 切片按热度进行排序
-	sort.Slice(posts, func(i, j int) bool {
-		return posts[i].Heat > posts[j].Heat
-	})
+	// Redis ZSet的key
+	redisKey := "hot_posts_zset"
+	ctx := context.Background()
+
+	// 从Redis中获取热度前10的帖子
+	topPosts, err := common.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取热度前10帖子失败"})
+		return
+	}
+
 	var heatResponsesTop10 []HeatResponse
-	// 只返回前10个帖子
-	for i := 0; i < 10 && i < len(posts); i++ {
-		post := posts[i]
+
+	// 处理 Redis 返回的数据
+	for _, post := range topPosts {
+		var postInfo PostInfo
+		err := json.Unmarshal([]byte(post.Member.(string)), &postInfo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "解析帖子信息失败"})
+			return
+		}
+
 		heatResponse := HeatResponse{
-			PostID: uint(post.PostID),
-			Title:  post.Title,
-			Heat:   post.Heat,
+			PostID: postInfo.PostID,
+			Title:  postInfo.Title,
+			Heat:   postInfo.BrowseNum, // 使用从Redis中获取的热度分数
 		}
 		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
 	}
+
 	c.JSON(http.StatusOK, heatResponsesTop10)
 }
+
 func GetTags(c *gin.Context) {
 	//从中间件存入的user中获取userID
 	value, exists := c.Get("user")
@@ -947,14 +962,13 @@ func GetTitle(c *gin.Context) {
 	// 关闭multipart.Writer以设置边界
 	writer.Close()
 
-
 	// 创建一个通道用于接收异步操作结果
 	resultChan := make(chan []byte, 1)
 
 	// 启动goroutine执行异步HTTP请求
 	go func() {
 		// 向ssemarket.cn:5000/title转发POST请求
-		resp, err := http.Post("http://ssemarket.cn:5000/title",writer.FormDataContentType(), &requestBody)
+		resp, err := http.Post("http://ssemarket.cn:5000/title", writer.FormDataContentType(), &requestBody)
 		if err != nil {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "请求失败")
 			return

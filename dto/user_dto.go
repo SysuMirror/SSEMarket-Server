@@ -4,17 +4,21 @@ package dto
 import "loginTest/model"
 
 type UserDto struct {
-	Name     string `json:"name"`
-	Phone    string `json:"phone"`
-	Email    string `json:"email"`
-	Identity string `json:"identity"`
+	UserID    int    `json:"userID"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarURL"`
+	Phone     string `json:"phone"`
+	Email     string `json:"email"`
+	Identity  string `json:"identity"`
 }
 
 func ToUserDto(user model.User) UserDto {
 	return UserDto{
-		Name:     user.Name,
-		Phone:    user.Phone,
-		Email:    user.Email,
-		Identity: user.Identity,
+		UserID:    user.UserID,
+		Name:      user.Name,
+		Phone:     user.Phone,
+		AvatarURL: user.AvatarURL,
+		Email:     user.Email,
+		Identity:  user.Identity,
 	}
 }

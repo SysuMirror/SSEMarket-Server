@@ -671,9 +671,10 @@ func GetInfo(c *gin.Context) {
 	var requestUser = model.User{}
 	c.Bind(&requestUser)
 	phone := requestUser.Phone
+	userID := requestUser.UserID
 	// 在数据库中查找用户
 	var user model.User
-	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
+	if err := db.Where("phone = ? or userID = ?", phone, userID).First(&user).Error; err != nil {
 		if gorm.IsRecordNotFoundError(err) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
 		} else {

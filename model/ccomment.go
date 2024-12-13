@@ -12,6 +12,7 @@ type Ccomment struct {
 	CtargetID      int       `gorm:"index:ccommenttarget;column:ctargetID;type:int;not null"`
 	Pcomment       Pcomment  `gorm:"association_foreignkey:ctargetID;foreignkey:pcommentID"`
 	LikeNum        int       `gorm:"column:like_num;type:int"`
+	DenyNum		   int  	 `gorm:"column:deny_num;type:int"`
 	Cctext         string    `gorm:"column:cctext;type:varchar(100)"`
 	Time           time.Time `gorm:"column:time;type:datetime"`
 	UserTargetName string    `gorm:"column:usertargetName;type:varchar(50)"`

@@ -31,13 +31,15 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/postCcomment", controller.PostCcomment)
 	auth.POST("api/auth/updateCcommentLike", controller.UpdateCcommentLike)
 	auth.POST("api/auth/updatePcommentLike", controller.UpdatePcommentLike)
+	auth.POST("api/auth/updateCcommentDeny", controller.UpdateCcommentDeny)
+	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
 	auth.POST("/api/auth/deletePcomment", controller.DeletePcomment)
 	auth.POST("/api/auth/deleteCcomment", controller.DeleteCcomment)
 	auth.POST("/api/auth/submitReport", controller.SubmitReport)
-	auth.GET("/api/auth/info", middleware.AuthMiddleware(), controller.Info)
+	auth.GET("/api/auth/info", controller.Info)
 	noauth.POST("/api/auth/uploadPhotos", controller.UploadPhotos)
 	noauth.POST("/api/auth/uploadAvatar", controller.UploadAvatar)
 	noauth.POST("/api/auth/updateAvatar", controller.UpdateAvatar)
@@ -61,7 +63,15 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/addFolder", controller.AddFolder)
 	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
 	auth.GET("/api/auth/getTags", controller.GetTags)
-	auth.POST("/api/auth/gettitle",controller.GetTitle)
+	auth.POST("/api/auth/gettitle", controller.GetTitle)
+	//获得所有聊天用户列表，并且建立ws链接
+	auth.GET("/websocket/auth/chat", controller.ChatHandler)
+	//点击与某人聊天主页的接口，需要监听用户是否在聊天页面
+	//auth.GET("/api/auth/intoChatView", controller.IntoChatView)
+	//退出与某人聊天主页的接口，需要监听用户是否在聊天页面
+	//auth.POST("/api/auth/leaveChatView", controller.LeaveChatView)
+	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
+	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())
