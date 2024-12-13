@@ -14,6 +14,7 @@ import (
 	"loginTest/model"
 	"loginTest/response"
 	"math"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"sort"
@@ -541,7 +542,10 @@ func UpdateBrowseNum(c *gin.Context) {
 	var browsed model.Pbrowse
 	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
 	if browsed.PbrowseID == 0 {
-		db.Model(&post).Update("browse_num", post.BrowseNum+1)
+		// 随机添加1~4
+		rand.Seed(time.Now().UnixNano())
+		randBowseNum := rand.Intn(4) + 1
+		db.Model(&post).Update("browse_num", post.BrowseNum+randBowseNum)
 		// 在这里设置 浏览 的权重
 		weightBrowse := float64(1)
 		db.Model(&post).Update("heat", post.Heat+weightBrowse)
