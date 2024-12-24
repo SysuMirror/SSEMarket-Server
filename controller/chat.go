@@ -291,8 +291,11 @@ func dispatch(data []byte, userID int) error {
 	if err != nil {
 		return err
 	}
-	//发送消息
-	sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
+
+	if msg.SenderUserID != msg.TargetUserID {
+		//发送消息
+		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
+	}
 	return nil
 }
 
@@ -366,6 +369,11 @@ func GetRelevantUser(userID int) ([]byte, error) {
 		if msg.SenderUserID != userID && !exist2 {
 			relevantRespUsersMap[msg.SenderUser] = 1
 		}
+		//用户自己给自己发信息的情况
+		if msg.TargetUserID == msg.SenderUserID && !exist1 {
+			relevantRespUsersMap[msg.SenderUser] = 1
+		}
+
 	}
 
 	//获得是否未读对方信息
