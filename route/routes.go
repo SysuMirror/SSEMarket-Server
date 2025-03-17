@@ -31,6 +31,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/postCcomment", controller.PostCcomment)
 	auth.POST("api/auth/updateCcommentLike", controller.UpdateCcommentLike)
 	auth.POST("api/auth/updatePcommentLike", controller.UpdatePcommentLike)
+	auth.POST("api/auth/updateCcommentDeny", controller.UpdateCcommentDeny)
+	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
@@ -63,7 +65,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getTags", controller.GetTags)
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	//获得所有聊天用户列表，并且建立ws链接
-	auth.GET("/api/auth/chat", controller.ChatHandler)
+	auth.GET("/websocket/auth/chat", controller.ChatHandler)
 	//点击与某人聊天主页的接口，需要监听用户是否在聊天页面
 	//auth.GET("/api/auth/intoChatView", controller.IntoChatView)
 	//退出与某人聊天主页的接口，需要监听用户是否在聊天页面
