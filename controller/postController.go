@@ -255,6 +255,8 @@ func Browse(c *gin.Context) {
 						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
 					}
 				}
+			} else if partition == "优质贴" {
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND is_high_quality =?", "%"+searchinfo+"%", "%"+searchinfo+"%", 1).Find(&posts)
 			} else {
 				//fmt.Println("tag:", tag)
 				if tag == "" {
@@ -456,10 +458,10 @@ func UpdateLike(c *gin.Context) {
 		isLiked = true
 	}
 
-	if isLiked {//已点赞
-			db.Model(&post).Update("like_num", post.LikeNum-1)
-			db.Delete(&like)
-	} else {//未点赞
+	if isLiked { //已点赞
+		db.Model(&post).Update("like_num", post.LikeNum-1)
+		db.Delete(&like)
+	} else { //未点赞
 		newLike := model.Plike{
 			UserID:    user.UserID,
 			PtargetID: post.PostID,
@@ -481,8 +483,7 @@ type BrowseMsg struct {
 	// BrowseNum     int
 }
 
-
-//修改浏览量为浏览用户数量,原本为浏览人次
+// 修改浏览量为浏览用户数量,原本为浏览人次
 func UpdateBrowseNum(c *gin.Context) {
 	db := common.GetDB()
 	var requestBrowseMsg BrowseMsg
