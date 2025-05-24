@@ -256,7 +256,7 @@ func Browse(c *gin.Context) {
 					}
 				}
 			} else if partition == "优质贴" {
-				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND is_high_quality =?", "%"+searchinfo+"%", "%"+searchinfo+"%", 1).Find(&posts, "`partition` = ?", partition)
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND is_high_quality =?", "%"+searchinfo+"%", "%"+searchinfo+"%", 1).Find(&posts)
 			} else {
 				//fmt.Println("tag:", tag)
 				if tag == "" {
