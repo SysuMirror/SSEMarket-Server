@@ -256,7 +256,7 @@ func Browse(c *gin.Context) {
 					}
 				}
 			} else if partition == "优质贴" {
-				db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND is_high_quality =?", "%"+searchinfo+"%", "%"+searchinfo+"%", 1).Find(&posts)
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("is_high_quality =?", 1).Find(&posts)
 			} else {
 				//fmt.Println("tag:", tag)
 				if tag == "" {
@@ -340,6 +340,8 @@ func GetPostNum(c *gin.Context) {
 					Where("postId != ?", 0).
 					Count(&count)
 			}
+		} else if partition == "优质贴" {
+			db.Model(&model.Post{}).Where("is_high_quality =?", 1).Count(&count)
 		} else {
 			db.Model(&model.Post{}).Where("`partition` = ?", partition).Count(&count)
 		}
