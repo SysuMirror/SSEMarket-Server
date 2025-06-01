@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
+	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
@@ -16,6 +14,10 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 // 定义响应用户结构体
@@ -310,11 +312,14 @@ type ChatMsgResp struct {
 
 // 发送消息到对应用户的消息队列
 func sendMsg(chatMsgID, userID int, msg []byte) {
+	db := common.GetDB()
 	chatMsg := ChatMsgResp{}
+	var receiver model.User
 	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
 	val, ok := clientMap.Load(userID)
 	//如果不存在表示一定是消息而不是相关用户的获得
 	if err := json.Unmarshal(msg, &chatMsg); err != nil {
+
 		return
 	}
 	if !ok {
@@ -333,6 +338,9 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
+				db := common.GetDB()
+				db.Where("userID = ?", userID).First(&receiver)
+				go Chat_EmailAlerter(receiver.Email) // 使用 goroutine 异步发送邮件
 			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
@@ -498,4 +506,8 @@ func GetChatNotice(c *gin.Context) {
 	response.Success(c, gin.H{
 		"noticeNum": totalUnread,
 	}, "获取未读消息成功")
+}
+
+func Chat_EmailAlerter(receiver string) {
+	api.SendEmail(receiver, 2)
 }
