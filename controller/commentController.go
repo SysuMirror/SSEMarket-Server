@@ -443,6 +443,7 @@ func PostCcomment(c *gin.Context) {
 	if msg.UserTargetName != "" {
 		var temccomment model.Ccomment
 		db.Where("ccommentID =?", msg.CcommentID).First(&temccomment)
+		db.Where("userID =?", tempcomment.UserID).First(&receiver)
 		if temccomment.CcommentID == 0 {
 			return
 		}
