@@ -312,7 +312,6 @@ type ChatMsgResp struct {
 
 // 发送消息到对应用户的消息队列
 func sendMsg(chatMsgID, userID int, msg []byte) {
-	db := common.GetDB()
 	chatMsg := ChatMsgResp{}
 	var receiver model.User
 	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
