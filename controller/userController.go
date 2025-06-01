@@ -3,11 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/brianvoe/gofakeit"
-	"github.com/disintegration/imaging"
-	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
-	"golang.org/x/crypto/bcrypt"
 	"image"
 	"log"
 	"loginTest/api"
@@ -20,6 +15,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/brianvoe/gofakeit"
+	"github.com/disintegration/imaging"
+	"github.com/gin-gonic/gin"
+	"github.com/jinzhu/gorm"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -377,6 +378,7 @@ func Login(c *gin.Context) {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码不能少于6位")
 		return
 	}
+
 	//判断手机号是否存在
 	var user model.User
 	//db.Where("phone = ?", telephone).First(&user)
@@ -390,10 +392,10 @@ func Login(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "密码错误")
 		return
 	}
-	//if user.IDpass == false {
-	//	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户注册尚未通过审核，请耐心等待")
-	//	return
-	//}
+	// if user.IDpass == false {
+	// 	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户注册尚未通过审核，请耐心等待")
+	// 	return
+	// }
 	//发放token
 	token, err := common.ReleaseToken(user)
 	if err != nil {
@@ -487,7 +489,7 @@ func ValidateEmail(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "邮箱获取错误")
 		return
 	}
-	err := api.SendEmail(email)
+	err := api.SendEmail(email, 0)
 	if err != nil {
 		//fmt.Println(2)
 		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "发送邮箱错误")

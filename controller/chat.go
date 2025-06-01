@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
+	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
@@ -16,6 +14,10 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 // 定义响应用户结构体
@@ -276,7 +278,7 @@ func dispatch(data []byte, userID int) error {
 	if err != nil {
 		return err
 	}
-	//添加聊天记录到数据库
+	// 添加聊天记录到数据库
 	db := common.GetDB()
 	db.Create(&msg)
 	chatResp := ChatMsgResp{
@@ -293,7 +295,7 @@ func dispatch(data []byte, userID int) error {
 	}
 
 	if msg.SenderUserID != msg.TargetUserID {
-		//发送消息
+		// 发送消息
 		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
 	}
 	return nil
@@ -318,6 +320,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		return
 	}
 	if !ok {
+		Chat_EmailAlerter(chatMsg.TargetUserID)
 		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
@@ -333,6 +336,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
+				Chat_EmailAlerter(chatMsg.TargetUserID)
 			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
@@ -498,4 +502,11 @@ func GetChatNotice(c *gin.Context) {
 	response.Success(c, gin.H{
 		"noticeNum": totalUnread,
 	}, "获取未读消息成功")
+}
+
+func Chat_EmailAlerter(receiverID int) {
+	db := common.GetDB()
+	var receiver model.User
+	db.Where("userID = ?", receiverID).First(&receiver)
+	api.SendEmail(receiver.Email, 2)
 }

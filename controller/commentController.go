@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"loginTest/api"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
@@ -25,10 +26,10 @@ type CommentResponse struct {
 	CommentTime     time.Time
 	Content         string
 	LikeNum         int
-	DenyNum			int
+	DenyNum         int
 	SubComments     []Subcomment
 	IsLiked         bool
-	IsDenied			bool
+	IsDenied        bool
 }
 type Commentsmsg struct {
 	UserTelephone string `json:"userTelephone"`
@@ -45,9 +46,9 @@ type Subcomment struct {
 	CommentTime     time.Time `json:"commentTime"`
 	Content         string    `json:"content"`
 	LikeNum         int       `json:"likeNum"`
-	DenyNum 		int		  `json:"denyNum"`
+	DenyNum         int       `json:"denyNum"`
 	IsLiked         bool      `json:"isLiked"`
-	IsDenied		bool	  `json:"isDenied"`
+	IsDenied        bool      `json:"isDenied"`
 	UserTargetName  string    `json:"userTargetName"`
 	ShowMenu        bool      `json:"showMenu"`
 }
@@ -77,9 +78,9 @@ func GetComments(c *gin.Context) {
 		var like model.Pclike
 		var deny model.Pcdeny
 		db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
-		if(deny.PcdenyID != 0){
-			isDeny = true;
-		}else{
+		if deny.PcdenyID != 0 {
+			isDeny = true
+		} else {
 			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
 			if like.PclikeID != 0 {
 				isLike = true
@@ -98,10 +99,10 @@ func GetComments(c *gin.Context) {
 			CommentTime:     pcomment.Time,
 			Content:         pcomment.Pctext,
 			LikeNum:         pcomment.LikeNum,
-			DenyNum: 		 pcomment.DenyNum,
+			DenyNum:         pcomment.DenyNum,
 			SubComments:     GetSubComments(pcomment, temUser.UserID),
 			IsLiked:         isLike,
-			IsDenied: 		 isDeny,
+			IsDenied:        isDeny,
 		}
 		comments = append(comments, comment)
 	}
@@ -211,14 +212,13 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 		db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&deny)
 		if deny.CcdenyID != 0 {
 			isDeny = true
-		}else{	
+		} else {
 			db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&like)
 			if like.CclikeID != 0 {
 				isLike = true
 			}
 		}
-		
-		
+
 		var commentuser model.User
 		db.Where("userID =?", ccomment.UserID).First(&commentuser)
 		comment := Subcomment{
@@ -232,9 +232,9 @@ func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
 			CommentTime:     ccomment.Time,
 			Content:         ccomment.Cctext,
 			LikeNum:         ccomment.LikeNum,
-			DenyNum: 		 ccomment.DenyNum,
+			DenyNum:         ccomment.DenyNum,
 			IsLiked:         isLike,
-			IsDenied:  		 isDeny,
+			IsDenied:        isDeny,
 			UserTargetName:  ccomment.UserTargetName,
 			ShowMenu:        false,
 		}
@@ -276,6 +276,7 @@ func PostPcomment(c *gin.Context) {
 	// 	// return
 	// }
 	var user model.User
+	var receiver model.User
 	var tempost model.Post
 	db.Where("phone = ?", msg.UserTelephone).First(&user)
 	if user.UserID == 0 {
@@ -293,6 +294,7 @@ func PostPcomment(c *gin.Context) {
 		return
 	}
 	db.Where("postID =?", msg.PostID).First(&tempost)
+	db.Where("userID =?", tempost.UserID).First(&receiver)
 	if tempost.PostID == 0 {
 		return
 	}
@@ -306,6 +308,7 @@ func PostPcomment(c *gin.Context) {
 	}
 	// 创建一条帖子评论
 	db.Create(&pcomment)
+
 	// 如果用户自己评论自己的帖子，则不用通知
 	if tempost.UserID != user.UserID {
 		notice := model.Notice{
@@ -320,6 +323,7 @@ func PostPcomment(c *gin.Context) {
 		}
 		// 创建一条通知
 		db.Create(&notice)
+		EmailAlerter(receiver.Email, 1)
 	}
 
 	var post model.Post
@@ -339,7 +343,7 @@ func PostPcomment(c *gin.Context) {
 		CommentTime:    pcomment.Time,
 		Content:        pcomment.Pctext,
 		LikeNum:        pcomment.LikeNum,
-		DenyNum:  		pcomment.DenyNum,
+		DenyNum:        pcomment.DenyNum,
 		SubComments:    GetSubComments(pcomment, user.UserID),
 		IsLiked:        false,
 	}
@@ -384,6 +388,7 @@ func PostCcomment(c *gin.Context) {
 	// 	// return
 	// }
 	var user model.User
+	var receiver model.User
 	db.Where("phone =?", msg.UserTelephone).First(&user)
 	if user.UserID == 0 {
 		return
@@ -406,13 +411,14 @@ func PostCcomment(c *gin.Context) {
 		Cctext:         msg.Content,
 		Time:           time.Now(),
 		LikeNum:        0,
-		DenyNum: 		0,
+		DenyNum:        0,
 		UserTargetName: msg.UserTargetName,
 	}
 	// 数据库创建一条新的评论的评论
 	db.Create(&newCcomment)
 	var tempcomment model.Pcomment
 	db.Where("pcommentID =?", msg.PcommentID).First(&tempcomment)
+	db.Where("userID =?", tempcomment.UserID).First(&receiver)
 	if tempcomment.PcommentID == 0 {
 		return
 	}
@@ -431,11 +437,13 @@ func PostCcomment(c *gin.Context) {
 		}
 		// 数据库创建一条通知
 		db.Create(&notice1)
+		EmailAlerter(receiver.Email, 3)
 	}
 	// 如果是二级评论的回复
 	if msg.UserTargetName != "" {
 		var temccomment model.Ccomment
 		db.Where("ccommentID =?", msg.CcommentID).First(&temccomment)
+		db.Where("userID =?", tempcomment.UserID).First(&receiver)
 		if temccomment.CcommentID == 0 {
 			return
 		}
@@ -453,6 +461,7 @@ func PostCcomment(c *gin.Context) {
 			}
 			// 数据库创建一条通知
 			db.Create(&notice2)
+			EmailAlerter(receiver.Email, 3)
 		}
 	}
 	// 如果是评论的回复
@@ -469,7 +478,7 @@ func PostCcomment(c *gin.Context) {
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
 
-type PcMsg struct{
+type PcMsg struct {
 	UserTelephone string `json:"userTelephone"`
 	PcommentID    uint   `json:"pcommentID"`
 }
@@ -503,7 +512,7 @@ func UpdatePcommentLike(c *gin.Context) {
 	if pcomment.PcommentID == 0 {
 		return
 	}
-    //数据库查询点赞和踩的记录
+	//数据库查询点赞和踩的记录
 	isLiked := false
 	isDenied := false
 	var like model.Pclike
@@ -520,7 +529,7 @@ func UpdatePcommentLike(c *gin.Context) {
 	if isLiked {
 		db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
 		db.Delete(&like)
-	}else{
+	} else {
 		//没点过赞的话则先检查是否有过踩,有的话取消
 		if isDenied {
 			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
@@ -537,11 +546,11 @@ func UpdatePcommentLike(c *gin.Context) {
 	}
 }
 
-func UpdatePcommentDeny(c *gin.Context){
+func UpdatePcommentDeny(c *gin.Context) {
 	db := common.GetDB()
 	var requestMsg PcMsg
 	c.Bind(&requestMsg)
-	
+
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 
@@ -583,26 +592,26 @@ func UpdatePcommentDeny(c *gin.Context){
 	}
 
 	if isDenied {
-		db.Model(&pcomment).Update("deny_num", pcomment.DenyNum - 1)
+		db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
 		db.Delete(&deny)
-	}else{
+	} else {
 		//没踩过的话先检查是否有过赞,有的话取消
-		if	isLiked {
-			db.Model(&pcomment).Update("like_num", pcomment.LikeNum - 1)
+		if isLiked {
+			db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
 			db.Delete(&like)
 		}
 		newDeny := model.Pcdeny{
-			UserID:		user.UserID,
+			UserID:     user.UserID,
 			PctargetID: pcomment.PcommentID,
 		}
-		if newDeny.UserID != 0 && newDeny.PctargetID != 0{
-			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum + 1)
+		if newDeny.UserID != 0 && newDeny.PctargetID != 0 {
+			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum+1)
 			db.Create(&newDeny)
 		}
 	}
 }
 
-type CcMsg struct{
+type CcMsg struct {
 	UserTelephone string `json:"userTelephone"`
 	CcommentID    uint   `json:"ccommentID"`
 }
@@ -670,7 +679,7 @@ func UpdateCcommentLike(c *gin.Context) {
 	}
 }
 
-func UpdateCcommentDeny(c *gin.Context){
+func UpdateCcommentDeny(c *gin.Context) {
 	db := common.GetDB()
 	var requestMsg CcMsg
 	c.Bind(&requestMsg)
@@ -715,21 +724,25 @@ func UpdateCcommentDeny(c *gin.Context){
 	}
 
 	if isDenied {
-		db.Model(&ccomment).Update("deny_num", ccomment.DenyNum - 1)
+		db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
 		db.Delete(&deny)
-	}else{
+	} else {
 		//没踩过的话先检查是否有过赞,有的话取消
 		if isLiked {
 			db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
 			db.Delete(&like)
 		}
 		newDeny := model.Ccdeny{
-			UserID:		user.UserID,
+			UserID:     user.UserID,
 			CctargetID: ccomment.CcommentID,
 		}
-		if newDeny.UserID != 0 && newDeny.CctargetID != 0{
-			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum + 1)
+		if newDeny.UserID != 0 && newDeny.CctargetID != 0 {
+			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum+1)
 			db.Create(&newDeny)
 		}
 	}
+}
+
+func EmailAlerter(receiver string, status int) {
+	api.SendEmail(receiver, status)
 }
