@@ -278,7 +278,7 @@ func dispatch(data []byte, userID int) error {
 	if err != nil {
 		return err
 	}
-	//添加聊天记录到数据库
+	// 添加聊天记录到数据库
 	db := common.GetDB()
 	db.Create(&msg)
 	chatResp := ChatMsgResp{
@@ -295,14 +295,30 @@ func dispatch(data []byte, userID int) error {
 	}
 
 	if msg.SenderUserID != msg.TargetUserID {
-		//发送消息
+		// 发送消息
 		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
-		var receiver model.User
-		db := common.GetDB()
-		db.Where("userID = ?", msg.TargetUserID).First(&receiver)
-		Chat_EmailAlerter(receiver.Email)
+		// 检查目标用户是否在对话框中
+		isInChatView := checkUserInChatView(msg.TargetUserID, msg.SenderUserID)
+		if !isInChatView {
+			var receiver model.User
+			db.Where("userID = ?", msg.TargetUserID).First(&receiver)
+			Chat_EmailAlerter(receiver.Email)
+		}
 	}
 	return nil
+}
+
+// 检查用户是否在对话框中
+func checkUserInChatView(targetUserID, senderUserID int) bool {
+	ctx := context.Background()
+	key := util.GenerateChatViewKey(targetUserID, senderUserID)
+	// 检查 Redis 中是否存在该键
+	exists, err := common.MyRedis.Exists(ctx, key).Result()
+	if err != nil {
+		// 发生错误时默认认为用户不在对话框中
+		return false
+	}
+	return exists > 0
 }
 
 type ChatMsgResp struct {
