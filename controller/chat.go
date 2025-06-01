@@ -297,6 +297,10 @@ func dispatch(data []byte, userID int) error {
 	if msg.SenderUserID != msg.TargetUserID {
 		//发送消息
 		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
+		var receiver model.User
+		db := common.GetDB()
+		db.Where("userID = ?", msg.TargetUserID).First(&receiver)
+		Chat_EmailAlerter(receiver.Email)
 	}
 	return nil
 }
@@ -313,12 +317,10 @@ type ChatMsgResp struct {
 // 发送消息到对应用户的消息队列
 func sendMsg(chatMsgID, userID int, msg []byte) {
 	chatMsg := ChatMsgResp{}
-	var receiver model.User
 	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
 	val, ok := clientMap.Load(userID)
 	//如果不存在表示一定是消息而不是相关用户的获得
 	if err := json.Unmarshal(msg, &chatMsg); err != nil {
-
 		return
 	}
 	if !ok {
@@ -337,9 +339,6 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
-				db := common.GetDB()
-				db.Where("userID = ?", userID).First(&receiver)
-				go Chat_EmailAlerter(receiver.Email) // 使用 goroutine 异步发送邮件
 			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
