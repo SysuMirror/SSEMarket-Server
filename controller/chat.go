@@ -297,28 +297,8 @@ func dispatch(data []byte, userID int) error {
 	if msg.SenderUserID != msg.TargetUserID {
 		// 发送消息
 		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
-		// 检查目标用户是否在对话框中
-		isInChatView := checkUserInChatView(msg.TargetUserID, msg.SenderUserID)
-		if !isInChatView {
-			var receiver model.User
-			db.Where("userID = ?", msg.TargetUserID).First(&receiver)
-			Chat_EmailAlerter(receiver.Email)
-		}
 	}
 	return nil
-}
-
-// 检查用户是否在对话框中
-func checkUserInChatView(targetUserID, senderUserID int) bool {
-	ctx := context.Background()
-	key := util.GenerateChatViewKey(targetUserID, senderUserID)
-	// 检查 Redis 中是否存在该键
-	exists, err := common.MyRedis.Exists(ctx, key).Result()
-	if err != nil {
-		// 发生错误时默认认为用户不在对话框中
-		return false
-	}
-	return exists > 0
 }
 
 type ChatMsgResp struct {
@@ -340,6 +320,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		return
 	}
 	if !ok {
+		Chat_EmailAlerter(chatMsg.TargetUserID)
 		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
@@ -355,6 +336,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
+				Chat_EmailAlerter(chatMsg.TargetUserID)
 			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
@@ -522,6 +504,9 @@ func GetChatNotice(c *gin.Context) {
 	}, "获取未读消息成功")
 }
 
-func Chat_EmailAlerter(receiver string) {
-	api.SendEmail(receiver, 2)
+func Chat_EmailAlerter(receiverID int) {
+	db := common.GetDB()
+	var receiver model.User
+	db.Where("userID = ?", receiverID).First(&receiver)
+	api.SendEmail(receiver.Email, 2)
 }
