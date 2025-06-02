@@ -1,10 +1,11 @@
 package route
 
 import (
-	"github.com/gin-gonic/gin"
 	"loginTest/api"
 	"loginTest/controller"
 	"loginTest/middleware"
+
+	"github.com/gin-gonic/gin"
 )
 
 // 创建路由
@@ -62,6 +63,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/uploadFile", controller.TeachUpload)
 	auth.POST("/api/auth/addFolder", controller.AddFolder)
 	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
+	auth.POST("/api/auth/changeEmailPush", controller.ChangeEmailPushStatus)
 	auth.GET("/api/auth/getTags", controller.GetTags)
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	//获得所有聊天用户列表，并且建立ws链接

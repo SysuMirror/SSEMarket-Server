@@ -64,15 +64,17 @@ func isEmailExist(db *gorm.DB, email string) bool {
 	return false
 }
 
-//func isNumExist(db *gorm.DB, num int) bool {
-//	var user model.User
-//	db.Where("num = ?", num).First(&user)
-//	if user.UserID != 0 {
-//		return true
+//	func isNumExist(db *gorm.DB, num int) bool {
+//		var user model.User
+//		db.Where("num = ?", num).First(&user)
+//		if user.UserID != 0 {
+//			return true
+//		}
+//		return false
 //	}
-//	return false
-//}
-
+type UserMsg struct {
+	UserID int `json:"user_id"`
+}
 type registerUser struct {
 	Name      string `gorm:"type:varchar(20);not null"`
 	Phone     string `gorm:"type:varchar(11);not null"`
@@ -696,6 +698,7 @@ func GetInfo(c *gin.Context) {
 		"ban":       user.Banend,
 		"punishnum": user.Punishnum,
 		"avatarURL": user.AvatarURL,
+		"emailpush": user.ISEmailNotificationBlocked,
 	})
 }
 
@@ -807,4 +810,20 @@ func CalculateAndSaveScores() {
 		db.Model(&user).Update("Score", totalScore)
 	}
 	log.Println("Score updated")
+}
+
+func ChangeEmailPushStatus(c *gin.Context) {
+	db := common.GetDB()
+	var user_id UserMsg
+	var user model.User
+	if err := c.ShouldBindJSON(&user_id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	db.Where("userID = ?", user_id.UserID).First(&user)
+	if user.ISEmailNotificationBlocked {
+		db.Model(&user).Update("is_email_notification_blocked", false)
+	} else {
+		db.Model(&user).Update("is_email_notification_blocked", true)
+	}
 }
