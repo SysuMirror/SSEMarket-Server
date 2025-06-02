@@ -323,7 +323,9 @@ func PostPcomment(c *gin.Context) {
 		}
 		// 创建一条通知
 		db.Create(&notice)
-		EmailAlerter(receiver.Email, 1)
+		if !receiver.ISEmailNotificationBlocked {
+			EmailAlerter(receiver.Email, 1)
+		}
 	}
 
 	var post model.Post
@@ -437,7 +439,9 @@ func PostCcomment(c *gin.Context) {
 		}
 		// 数据库创建一条通知
 		db.Create(&notice1)
-		EmailAlerter(receiver.Email, 3)
+		if !receiver.ISEmailNotificationBlocked {
+			EmailAlerter(receiver.Email, 3)
+		}
 	}
 	// 如果是二级评论的回复
 	if msg.UserTargetName != "" {
@@ -461,7 +465,9 @@ func PostCcomment(c *gin.Context) {
 			}
 			// 数据库创建一条通知
 			db.Create(&notice2)
-			EmailAlerter(receiver.Email, 3)
+			if !receiver.ISEmailNotificationBlocked {
+				EmailAlerter(receiver.Email, 3)
+			}
 		}
 	}
 	// 如果是评论的回复

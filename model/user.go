@@ -12,9 +12,10 @@ type User struct {
 	//Num       int       `gorm:"column:num;type:int"`
 	Intro string `gorm:"column:intro;type:varchar(255)"`
 	//IDpass    bool      `gorm:"column:idpass;type:tinyint(1)"`
-	Banend    time.Time `gorm:"column:banend;type:datetime"`
-	Punishnum int       `gorm:"column:punishnum;type:int"`
-	AvatarURL string    `gorm:"column:avatar_url;type:varchar(255)"`
-	Identity  string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
-	Score     int       `gorm:"column:score;type:int;default:0"`
+	Banend                     time.Time `gorm:"column:banend;type:datetime"`
+	Punishnum                  int       `gorm:"column:punishnum;type:int"`
+	AvatarURL                  string    `gorm:"column:avatar_url;type:varchar(255)"`
+	Identity                   string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
+	Score                      int       `gorm:"column:score;type:int;default:0"`
+	ISEmailNotificationBlocked bool      `gorm:"column:is_email_notification_blocked;type:bool"`
 }
