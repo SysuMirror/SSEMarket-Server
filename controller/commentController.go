@@ -324,7 +324,7 @@ func PostPcomment(c *gin.Context) {
 		// 创建一条通知
 		db.Create(&notice)
 		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 1)
+			EmailAlerter(receiver.Email, 1, msg.Content)
 		}
 	}
 
@@ -440,14 +440,15 @@ func PostCcomment(c *gin.Context) {
 		// 数据库创建一条通知
 		db.Create(&notice1)
 		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 3)
+			EmailAlerter(receiver.Email, 3, msg.Content)
 		}
 	}
 	// 如果是二级评论的回复
 	if msg.UserTargetName != "" {
 		var temccomment model.Ccomment
+		var receiver2 model.User
 		db.Where("ccommentID =?", msg.CcommentID).First(&temccomment)
-		db.Where("userID =?", tempcomment.UserID).First(&receiver)
+		db.Where("userID =?", temccomment.UserID).First(&receiver2)
 		if temccomment.CcommentID == 0 {
 			return
 		}
@@ -465,8 +466,8 @@ func PostCcomment(c *gin.Context) {
 			}
 			// 数据库创建一条通知
 			db.Create(&notice2)
-			if !receiver.ISEmailNotificationBlocked {
-				EmailAlerter(receiver.Email, 3)
+			if !receiver2.ISEmailNotificationBlocked {
+				EmailAlerter(receiver2.Email, 3, msg.Content)
 			}
 		}
 	}
@@ -749,6 +750,6 @@ func UpdateCcommentDeny(c *gin.Context) {
 	}
 }
 
-func EmailAlerter(receiver string, status int) {
-	api.SendEmail(receiver, status)
+func EmailAlerter(receiver string, status int, msg string) {
+	api.SendEmail(receiver, status, msg)
 }
