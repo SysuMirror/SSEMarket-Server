@@ -41,12 +41,14 @@ func saveVcode(vcode, receiver string) {
 	rds.Set(ctx, receiver, vcode, 5*time.Minute)
 }
 
-func SendEmail(receiver string, status int) error {
+func SendEmail(receiver string, status int, msg string) error {
 	e := email.NewEmail()
 	senderString := config.ValidateSender
 	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)
 	e.From = senderString
-
+	if len(strings.Split(msg, "")) > 20 {
+		msg = msg[:20] + "..."
+	}
 	e.To = []string{receiver}
 	e.Subject = config.ValidateTitle
 	text := ""
@@ -54,13 +56,13 @@ func SendEmail(receiver string, status int) error {
 		text = config.ValidateText
 	} else if status == 1 {
 		e.Subject = "软工集市评论通知"
-		text = "您好，您在软工集市上的发帖收到一条新评论，请登录平台查阅"
+		text = "您好，您在软工集市上的发帖收到一条新评论'" + msg + "'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	} else if status == 2 {
 		e.Subject = "软工集市私信通知"
-		text = "您好，您在软工集市上收到一条新私信，请登录平台查阅"
+		text = "您好，您在软工集市上收到一条新私信，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	} else if status == 3 {
 		e.Subject = "软工集市回复通知"
-		text = "您好，您在软工集市上收到一条新回复，请登录平台查阅"
+		text = "您好，您在软工集市上收到一条新回复'" + msg + "'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	}
 
 	text, vcode := formVcode(text)

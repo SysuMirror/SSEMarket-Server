@@ -509,6 +509,6 @@ func Chat_EmailAlerter(receiverID int) {
 	var receiver model.User
 	db.Where("userID = ?", receiverID).First(&receiver)
 	if !receiver.ISEmailNotificationBlocked {
-		api.SendEmail(receiver.Email, 2)
+		api.SendEmail(receiver.Email, 2, "")
 	}
 }
