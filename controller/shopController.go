@@ -140,8 +140,7 @@ func GetProducts(c *gin.Context) {
 	} else {
 		db.Order("productID DESC").Offset(offset).Limit(limit).
 			Where("is_delete = ?", false).
-			Where("userID = ?", user.UserID)
-			Find(&products)
+			Find(&products, "`userID` = ?", user.UserID)
 	}
 	for _, product := range products {
 		photo := strings.Split(product.Photos, ",")
