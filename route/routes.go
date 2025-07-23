@@ -74,6 +74,17 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	//auth.POST("/api/auth/leaveChatView", controller.LeaveChatView)
 	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
 	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
+	//商城板块
+	auth.POST("/api/auth/postProduct", controller.PostProduct)
+	auth.POST("/api/auth/getProducts", controller.GetProducts)
+	auth.POST("/api/auth/getProductDetail", controller.GetProductDetail)
+	auth.POST("/api/auth/getProductNum", controller.GetProductNum)
+	auth.POST("/api/auth/deleteProduct", controller.DeleteProduct)
+	auth.POST("/api/auth/saleProduct", controller.SaleProduct)
+	auth.POST("/api/auth/getCarouselImg", controller.GetCarouselImg)
+
+
+
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())

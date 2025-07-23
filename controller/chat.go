@@ -320,7 +320,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		return
 	}
 	if !ok {
-		Chat_EmailAlerter(chatMsg.TargetUserID)
+		Chat_EmailAlerter(chatMsg.TargetUserID,"")
 		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
@@ -336,7 +336,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
-				Chat_EmailAlerter(chatMsg.TargetUserID)
+				Chat_EmailAlerter(chatMsg.TargetUserID,"")
 			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
@@ -504,11 +504,11 @@ func GetChatNotice(c *gin.Context) {
 	}, "获取未读消息成功")
 }
 
-func Chat_EmailAlerter(receiverID int) {
+func Chat_EmailAlerter(receiverID int,msg string) {
 	db := common.GetDB()
 	var receiver model.User
 	db.Where("userID = ?", receiverID).First(&receiver)
 	if !receiver.ISEmailNotificationBlocked {
-		api.SendEmail(receiver.Email, 2, "")
+		api.SendEmail(receiver.Email, 2,msg)
 	}
 }
