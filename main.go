@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/robfig/cron"
-	"github.com/spf13/viper"
 	"log"
 	"loginTest/common"
 	"loginTest/config"
@@ -12,6 +9,11 @@ import (
 	"loginTest/heat"
 	"loginTest/middleware"
 	"loginTest/route"
+
+	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron"
+	"github.com/spf13/viper"
+
 	// "loginTest/heat"
 	"net/http"
 	"os/exec"
@@ -48,6 +50,7 @@ var r *gin.Engine
 
 func main() {
 	config.InitConfig()
+	config.InitEmailConfig()
 	go Copy()
 	db := common.InitDB()
 	rds := common.RedisInit()
