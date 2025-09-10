@@ -4,3 +4,4 @@ public/uploads
 public/resized
 ssl
 config/emailConst.go
+.env
