@@ -23,6 +23,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	// 课程交流分区名称
+	CoursePartition = "课程交流"
+)
+
 type PostMsg struct {
 	UserTelephone string
 	Title         string
@@ -247,28 +252,27 @@ func Browse(c *gin.Context) {
 		if searchsort == "home" {
 			if partition == "主页" || len(partition) == 0 {
 				if len(searchinfo) == 0 {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+					db.Order("postID DESC").Offset(offset).Limit(limit).Where("`partition` != ?", CoursePartition).Find(&posts)
 				} else {
 					if tag == "" {
-						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND `partition` != ?", "%"+searchinfo+"%", "%"+searchinfo+"%", CoursePartition).Find(&posts)
 					} else {
-						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
+						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ? AND `partition` != ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag, CoursePartition).Find(&posts)
 					}
 				}
 			} else if partition == "优质贴" {
-				db.Order("postID DESC").Offset(offset).Limit(limit).Where("is_high_quality =?", 1).Find(&posts)
+				db.Order("postID DESC").Offset(offset).Limit(limit).Where("is_high_quality = ? AND `partition` != ?", 1, CoursePartition).Find(&posts)
 			} else {
 				//fmt.Println("tag:", tag)
 				if tag == "" {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts, "`partition` = ?", partition)
+					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND `partition` = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", partition).Find(&posts)
 				} else {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag =?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts, "`partition` = ?", partition)
-
+					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ? AND `partition` = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag, partition).Find(&posts)
 				}
 			}
 		} else if searchsort == "history" {
 			// historys是用户的发帖记录
-			db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts, "`userID` = ?", temUser.UserID)
+			db.Order("postID DESC").Offset(offset).Limit(limit).Where("`userID` = ? AND `partition` != ?", temUser.UserID, CoursePartition).Find(&posts)
 		}
 		// 对每个帖子查询是否点赞和收藏
 		for _, post := range posts {
