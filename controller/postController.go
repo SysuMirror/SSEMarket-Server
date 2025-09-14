@@ -108,6 +108,11 @@ func Post(c *gin.Context) {
 		return
 	}
 
+	if partition == CoursePartition {
+		response.Response(c, http.StatusBadRequest, 400, nil, "权限不足")
+		return
+	}
+
 	newPost := model.Post{
 		UserID:     int(user.UserID),
 		Partition:  partition,
