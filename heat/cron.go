@@ -4,16 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/redis/go-redis/v9"
 	"log"
 	"loginTest/config"
 	"loginTest/controller"
 	"math"
 	"time"
 
-	"github.com/robfig/cron/v3"
+	"github.com/redis/go-redis/v9"
+
 	"loginTest/common"
 	"loginTest/model"
+
+	"github.com/robfig/cron/v3"
+)
+
+const (
+	// 课程交流分区名称
+	CoursePartition = "课程交流"
 )
 
 // 启动热度计算定时任务
@@ -39,9 +46,9 @@ func RefreshHeat() {
 	now := time.Now()
 	tenDaysAgo := now.AddDate(0, 0, -config.HEAT_DAY)
 
-	// 获取10天内的所有帖子
+	// 获取10天内的所有帖子，排除课程交流分区
 	var posts []model.Post
-	db.Where("post_time >= ?", tenDaysAgo).Find(&posts)
+	db.Where("post_time >= ? AND `partition` != ?", tenDaysAgo, CoursePartition).Find(&posts)
 
 	// Redis ZSet的key，用来存储帖子热度
 	redisKey := "hot_posts_zset"
