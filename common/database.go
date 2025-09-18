@@ -3,10 +3,11 @@ package common
 import (
 	"fmt"
 	//_ "github.com/alexbrainman/odbc"
+	"loginTest/model"
+
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
 	"github.com/spf13/viper"
-	"loginTest/model"
 )
 
 var DB *gorm.DB
@@ -50,6 +51,10 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.CDKey{})
 	db.AutoMigrate(&model.Tag{})
 	db.AutoMigrate(&model.ChatMsg{})
+	db.AutoMigrate(&model.OAuth2App{})
+	db.AutoMigrate(&model.OAuth2Code{})
+	db.AutoMigrate(&model.OAuth2Token{})
+	db.AutoMigrate(&model.OAuth2AuthRecord{})
 	db.Model(&model.Pcomment{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccomment{}).AddForeignKey("ctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
