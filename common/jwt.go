@@ -2,10 +2,11 @@
 package common
 
 import (
-	"github.com/dgrijalva/jwt-go"
-	"github.com/spf13/viper"
 	"loginTest/model"
 	"time"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/spf13/viper"
 )
 
 // 采用jwt方式生成token
@@ -18,6 +19,14 @@ type Claims struct {
 
 type Claims_admin struct {
 	AdminID int
+	jwt.StandardClaims
+}
+
+// OAuth2Claims OAuth2访问令牌的Claims
+type OAuth2Claims struct {
+	UserID int
+	AppID  string
+	Scope  string
 	jwt.StandardClaims
 }
 
@@ -77,4 +86,35 @@ func ParseToken_admin(tokenString string) (*jwt.Token, *Claims_admin, error) {
 		return jwtKey, nil
 	})
 	return token, claims_admin, err
+}
+
+// 生成OAuth2访问令牌
+func ReleaseOAuth2Token(userID int, appID, scope string) (string, error) {
+	expirationTime := time.Now().Add(5 * time.Minute) // 有效期5分钟
+	claims := &OAuth2Claims{
+		UserID: userID,
+		AppID:  appID,
+		Scope:  scope,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+			IssuedAt:  time.Now().Unix(),
+			Issuer:    "loginTest",
+			Subject:   "oauth2 token",
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+// 解析OAuth2访问令牌
+func ParseOAuth2Token(tokenString string) (*jwt.Token, *OAuth2Claims, error) {
+	claims := &OAuth2Claims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (i interface{}, err error) {
+		return jwtKey, nil
+	})
+	return token, claims, err
 }
