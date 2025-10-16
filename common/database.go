@@ -55,6 +55,7 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.OAuth2Code{})
 	db.AutoMigrate(&model.OAuth2Token{})
 	db.AutoMigrate(&model.OAuth2AuthRecord{})
+	db.AutoMigrate(&model.Rstar{})
 	db.Model(&model.Pcomment{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccomment{}).AddForeignKey("ctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
@@ -62,6 +63,8 @@ func InitDB() *gorm.DB {
 	db.Model(&model.Pclike{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccdeny{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Pcdeny{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
+	db.Model(&model.Rstar{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
+	db.Model(&model.Rstar{}).AddForeignKey("postID", "posts(postID)", "CASCADE", "CASCADE")
 
 	//db.Model(&model.Post{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
 	//db.Model(&model.Pcomment{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")

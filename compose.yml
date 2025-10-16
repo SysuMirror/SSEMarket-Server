@@ -86,6 +86,21 @@ services:
       #     - /root/SSE_Market/log/server_public:/app/log
       #     - /root/SSE_Market/database_public:/app/database
       #     # - /root/SSE_Market/Nginx:/app/ssl
+  sse_market_test_new:
+    image: sse_market_test:latest
+    container_name: test_new
+    restart: on-failure:3
+    build: ./
+    networks:
+      - sse_market_server_default  # 自动加入正确网络
+    ports:
+      - 9091:9091
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - /root/SSE_Market/qiu/GIN:/app/public
+      - /root/SSE_Market/log/server:/app/log
+      - /root/SSE_Market/database:/app/database      
   nginx_proxy:
     image: nginx_proxy
     restart: on-failure:3

@@ -179,6 +179,65 @@ type BrowseMeg struct {
 	Searchsort    string //用于分表查询 分为home,history,save三种
 	Limit         int
 	Offset        int
+	PostType      string
+}
+
+type ReviewResponse struct {
+	PostID        uint
+	UserName      string
+	UserScore     int
+	UserTelephone string
+	UserAvatar    string
+	UserIdentity  string
+	Title         string
+	Content       string
+	Like          int
+	Comment       int
+	Browse        int
+	Heat          float64
+	PostTime      time.Time
+	IsSaved       bool
+	IsLiked       bool
+	Photos        string
+	Tag           string
+	UserRating    int
+	Rating        float64
+	Stars         [5]int
+}
+
+type PostIDRequest struct {
+	PostID int `json:"postID" binding:"required"` // binding:"required" 表示该字段必填
+}
+
+func isPost(postId uint) bool {
+	db := common.GetDB()
+
+	var post model.Post
+	db.Where("postID = ?", postId).First(&post)
+	if post.PostID == 0 {
+		return false
+	}
+	return post.Partition != "打分"
+}
+
+func GetPostType(c *gin.Context) {
+	db := common.GetDB()
+	// 获取参数
+	var requestPostType PostIDRequest
+	c.Bind(&requestPostType)
+	postId := requestPostType.PostID
+	fmt.Println("postId:", postId)
+	var post model.Post
+	db.Where("postID = ?", postId).First(&post)
+	if post.PostID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
+		return
+	}
+	postType := "post"
+	if post.Partition == "打分" {
+		postType = "rating"
+	}
+	response.Response(c, http.StatusOK, 200, gin.H{"postType": postType}, "帖子类型查询成功")
 }
 
 func Browse(c *gin.Context) {
@@ -193,109 +252,167 @@ func Browse(c *gin.Context) {
 	searchsort := requestBrowseMeg.Searchsort
 	limit := requestBrowseMeg.Limit
 	offset := requestBrowseMeg.Offset
+	fmt.Println("searchsort:", searchsort)
+	//postType := requestBrowseMeg.PostType
 	// 查询用户
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
 	if temUser.UserID == 0 {
 		return
 	}
-	// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
-	var posts []model.Post
-	var postResponses []PostResponse
+	if searchsort != "rating" {
+		// posts是查询的原数据,postResponses是post基础上添加了用户点赞和删除的信息
+		var posts []model.Post
+		var postResponses []PostResponse
 
-	// 如果是收藏"save"查询,首先查询psave,再查询post
-	if searchsort == "save" {
-		// saves是用户的收藏列表
-		var saves []model.Psave
-		db.Order("psaveID DESC").Offset(offset).Limit(limit).Where("userID = ?", temUser.UserID).Find(&saves)
-		// 根据收藏列表得到帖子列表
-		for _, save := range saves {
-			var post model.Post
-			db.Where("postID = ?", save.PtargetID).First(&post)
-			if post.PostID != 0 {
-				posts = append(posts, post)
+		// 如果是收藏"save"查询,首先查询psave,再查询post
+		if searchsort == "save" {
+			// saves是用户的收藏列表
+			var saves []model.Psave
+			db.Order("psaveID DESC").Offset(offset).Limit(limit).Where("userID = ?", temUser.UserID).Find(&saves)
+			// 根据收藏列表得到帖子列表
+			for _, save := range saves {
+				var post model.Post
+				db.Where("postID = ?", save.PtargetID).First(&post)
+				if post.PostID != 0 {
+					posts = append(posts, post)
+				}
 			}
-		}
-		// 对每个帖子查询是否点赞
-		for _, post := range posts {
-			isLiked := false
-			var like model.Plike
-			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
-			if like.PlikeID != 0 {
-				isLiked = true
-			}
-			var user model.User
-			if post.UserID == 0 {
-				user.Name = "管理员"
-				user.Phone = "11111111111"
-			} else {
-				db.Where("userID = ?", post.UserID).First(&user)
-			}
-			postResponse := PostResponse{
-				PostID:        uint(post.PostID),
-				UserName:      user.Name,
-				UserScore:     user.Score,
-				UserTelephone: user.Phone,
-				UserAvatar:    user.AvatarURL,
-				UserIdentity:  user.Identity,
-				Title:         post.Title,
-				Content:       post.Ptext,
-				Like:          post.LikeNum,
-				Comment:       post.CommentNum,
-				Browse:        post.BrowseNum,
-				Heat:          post.Heat,
-				PostTime:      post.PostTime,
-				IsSaved:       true,
-				IsLiked:       isLiked,
-				Photos:        post.Photos,
-				Tag:           post.Tag,
-			}
-			postResponses = append(postResponses, postResponse)
-		}
-	} else {
-		// "home"查询
-		if searchsort == "home" {
-			if partition == "主页" || len(partition) == 0 {
-				if len(searchinfo) == 0 {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("`partition` != ?", CoursePartition).Find(&posts)
+			// 对每个帖子查询是否点赞
+			for _, post := range posts {
+				isLiked := false
+				var like model.Plike
+				db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
+				if like.PlikeID != 0 {
+					isLiked = true
+				}
+				var user model.User
+				if post.UserID == 0 {
+					user.Name = "管理员"
+					user.Phone = "11111111111"
 				} else {
-					if tag == "" {
-						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND `partition` != ?", "%"+searchinfo+"%", "%"+searchinfo+"%", CoursePartition).Find(&posts)
+					db.Where("userID = ?", post.UserID).First(&user)
+				}
+				postResponse := PostResponse{
+					PostID:        uint(post.PostID),
+					UserName:      user.Name,
+					UserScore:     user.Score,
+					UserTelephone: user.Phone,
+					UserAvatar:    user.AvatarURL,
+					UserIdentity:  user.Identity,
+					Title:         post.Title,
+					Content:       post.Ptext,
+					Like:          post.LikeNum,
+					Comment:       post.CommentNum,
+					Browse:        post.BrowseNum,
+					Heat:          post.Heat,
+					PostTime:      post.PostTime,
+					IsSaved:       true,
+					IsLiked:       isLiked,
+					Photos:        post.Photos,
+					Tag:           post.Tag,
+				}
+				postResponses = append(postResponses, postResponse)
+			}
+		} else {
+			// "home"查询
+			if searchsort == "home" {
+				if partition == "主页" || len(partition) == 0 {
+					if len(searchinfo) == 0 {
+						db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
 					} else {
-						db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ? AND `partition` != ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag, CoursePartition).Find(&posts)
+						if tag == "" {
+							db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+						} else {
+							db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
+						}
+					}
+				} else if partition == "优质贴" {
+					db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Where("is_high_quality =?", 1).Find(&posts)
+				} else {
+					//fmt.Println("tag:", tag)
+					if tag == "" {
+						db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts, "`partition` = ?", partition)
+					} else {
+						db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag =?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts, "`partition` = ?", partition)
+
 					}
 				}
-			} else if partition == "优质贴" {
-				db.Order("postID DESC").Offset(offset).Limit(limit).Where("is_high_quality = ? AND `partition` != ?", 1, CoursePartition).Find(&posts)
-			} else {
-				//fmt.Println("tag:", tag)
-				if tag == "" {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND `partition` = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", partition).Find(&posts)
-				} else {
-					db.Order("postID DESC").Offset(offset).Limit(limit).Where("(title LIKE ? OR ptext LIKE ? ) AND tag = ? AND `partition` = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag, partition).Find(&posts)
+			} else if searchsort == "history" {
+				// historys是用户的发帖记录
+				db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit).Find(&posts, "`userID` = ?", temUser.UserID)
+			}
+			// 对每个帖子查询是否点赞和收藏
+			for _, post := range posts {
+				if post.PostID == 0 {
+					continue
 				}
+				isSaved := false
+				var save model.Psave
+				db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&save)
+				if save.PsaveID != 0 {
+					isSaved = true
+				}
+				isLiked := false
+				var like model.Plike
+				db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
+				if like.PlikeID != 0 {
+					isLiked = true
+				}
+				var user model.User
+				if post.UserID == 0 {
+					user.Name = "管理员"
+					user.Phone = "11111111111"
+				} else {
+					db.Where("userID = ?", post.UserID).First(&user)
+				}
+				postResponse := PostResponse{
+					PostID:        uint(post.PostID),
+					UserName:      user.Name,
+					UserScore:     user.Score,
+					UserTelephone: user.Phone,
+					UserAvatar:    user.AvatarURL,
+					UserIdentity:  user.Identity,
+					Title:         post.Title,
+					Content:       post.Ptext,
+					Like:          post.LikeNum,
+					Comment:       post.CommentNum,
+					Browse:        post.BrowseNum,
+					Heat:          post.Heat,
+					PostTime:      post.PostTime,
+					IsSaved:       isSaved,
+					IsLiked:       isLiked,
+					Photos:        post.Photos,
+					Tag:           post.Tag,
+				}
+				postResponses = append(postResponses, postResponse)
 			}
-		} else if searchsort == "history" {
-			// historys是用户的发帖记录
-			db.Order("postID DESC").Offset(offset).Limit(limit).Where("`userID` = ? AND `partition` != ?", temUser.UserID, CoursePartition).Find(&posts)
 		}
-		// 对每个帖子查询是否点赞和收藏
+		c.JSON(http.StatusOK, postResponses)
+	} else {
+		var posts []model.Post
+		var reviewResponses []ReviewResponse
+		if partition != "" && searchinfo != "" {
+			// 对 partition 字段使用反引号转义
+			db.Where("`partition` = ? AND (title LIKE ? OR content LIKE ?)", partition, "%"+searchinfo+"%", "%"+searchinfo+"%").
+				Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+		} else if partition != "" {
+			// 对 partition 字段使用反引号转义
+			db.Where("`partition` = ?", partition).
+				Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+		} else if searchinfo != "" {
+			db.Where("title LIKE ? OR content LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%").
+				Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+		} else {
+			db.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+		}
 		for _, post := range posts {
-			if post.PostID == 0 {
-				continue
-			}
-			isSaved := false
-			var save model.Psave
-			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&save)
-			if save.PsaveID != 0 {
-				isSaved = true
-			}
-			isLiked := false
-			var like model.Plike
-			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
-			if like.PlikeID != 0 {
-				isLiked = true
-			}
+
+			var userStarNum model.Rstar
+			db.Model(&model.Rstar{}).Where("postID = ? AND userID = ?", post.PostID, temUser.UserID).First(&userStarNum)
+			var userStar model.Rstar
+			db.Where("userID = ? AND postID = ?", temUser.UserID, post.PostID).First(&userStar)
+
 			var user model.User
 			if post.UserID == 0 {
 				user.Name = "管理员"
@@ -303,7 +420,26 @@ func Browse(c *gin.Context) {
 			} else {
 				db.Where("userID = ?", post.UserID).First(&user)
 			}
-			postResponse := PostResponse{
+
+			isLiked := false
+			isSaved := false
+
+			var like model.Plike
+			db.Where("userID = ? AND ptargetID = ?", temUser.UserID, post.PostID).First(&like)
+			if like.PlikeID != 0 {
+				isLiked = true
+			}
+			var rstar []model.Rstar
+			db.Where("userID = ? AND postID = ?", temUser.UserID, post.PostID).Find(&rstar)
+			var cnt [5]int
+			for _, star := range rstar {
+				if star.StarNum == 0 {
+					continue
+				}
+				cnt[star.StarNum-1]++
+			}
+
+			reviewResponses = append(reviewResponses, ReviewResponse{
 				PostID:        uint(post.PostID),
 				UserName:      user.Name,
 				UserScore:     user.Score,
@@ -321,11 +457,12 @@ func Browse(c *gin.Context) {
 				IsLiked:       isLiked,
 				Photos:        post.Photos,
 				Tag:           post.Tag,
-			}
-			postResponses = append(postResponses, postResponse)
+				Rating:        getAverageRating(uint(post.PostID)),
+				Stars:         cnt,
+			})
 		}
+		c.JSON(http.StatusOK, reviewResponses)
 	}
-	c.JSON(http.StatusOK, postResponses)
 }
 
 func GetPostNum(c *gin.Context) {
@@ -338,15 +475,17 @@ func GetPostNum(c *gin.Context) {
 	searchinfo := requestBrowseMeg.Searchinfo
 	searchsort := requestBrowseMeg.Searchsort
 	var count int
-	// 下面的searchsort分为home,save,history三类
-	if searchsort == "home" {
+	if searchsort == "rating" {
+		db.Model(&model.Post{}).Where("`partition` = ?", partition).Count(&count)
+	} else if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
 			if len(searchinfo) == 0 {
-				db.Model(&model.Post{}).Count(&count)
+				db.Model(&model.Post{}).Where("`partition` != ?", "打分").Count(&count)
 			} else {
 				db.Model(&model.Post{}).
 					Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%").
 					Where("postId != ?", 0).
+					Where("`partition` != ?", "打分").
 					Count(&count)
 			}
 		} else if partition == "优质贴" {
@@ -491,6 +630,7 @@ func UpdateLike(c *gin.Context) {
 type BrowseMsg struct {
 	UserTelephone string
 	PostID        uint
+	PostType      string
 	// BrowseNum     int
 }
 
@@ -530,7 +670,8 @@ func UpdateBrowseNum(c *gin.Context) {
 }
 
 type IDmsg struct {
-	PostID uint
+	PostID   uint
+	PostType string
 }
 
 func DeletePost(c *gin.Context) {
@@ -619,9 +760,34 @@ type PostDetailsResponse struct {
 	Tag           string
 }
 
+type RpostDetailsResponse struct {
+	PostID        uint
+	UserID        uint
+	UserName      string
+	UserScore     int
+	UserTelephone string
+	UserAvatar    string
+	UserIdentity  string
+	Title         string
+	Content       string
+	Like          int
+	Comment       int
+	Browse        int
+	Heat          float64
+	PostTime      time.Time
+	IsSaved       bool
+	IsLiked       bool
+	Photos        string
+	Tag           string
+	AverageStar   float64
+	Stars         [5]int
+	UserStar      int
+}
+
 type PostDetailsMsg struct {
 	UserTelephone string `json:"userTelephone"`
 	PostID        uint   `json:"postID"`
+	PostType      string `json:"postType"`
 }
 
 func ShowDetails(c *gin.Context) {
@@ -630,6 +796,7 @@ func ShowDetails(c *gin.Context) {
 	c.Bind(&requestPostDetailsMsg)
 	userTelephone := requestPostDetailsMsg.UserTelephone
 	postID := requestPostDetailsMsg.PostID
+	//postType := requestPostDetailsMsg.PostType
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
 	if temUser.UserID == 0 {
@@ -640,51 +807,129 @@ func ShowDetails(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 404, nil, "接收到的postID为空")
 		return
 	}
-	isLiked := false
-	var like model.Plike
-	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
-	if like.PlikeID != 0 {
-		isLiked = true
+	if isPost(postID) {
+		isLiked := false
+		var like model.Plike
+		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
+		if like.PlikeID != 0 {
+			isLiked = true
+		}
+		isSaved := false
+		var save model.Psave
+		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
+		if save.PsaveID != 0 {
+			isSaved = true
+		}
+		var post model.Post
+		db.Where("postID = ?", postID).First(&post)
+		if post.PostID == 0 {
+			return
+		}
+		var user model.User
+		if post.UserID == 0 {
+			user.Name = "管理员"
+			user.Phone = "11111111111"
+		} else {
+			db.Where("userID = ?", post.UserID).First(&user)
+		}
+		postDetailsResponse := PostDetailsResponse{
+			PostID:        uint(post.PostID),
+			UserID:        uint(user.UserID),
+			UserName:      user.Name,
+			UserScore:     user.Score,
+			UserTelephone: user.Phone,
+			UserAvatar:    user.AvatarURL,
+			UserIdentity:  user.Identity,
+			Title:         post.Title,
+			Content:       post.Ptext,
+			Like:          post.LikeNum,
+			Comment:       post.CommentNum,
+			PostTime:      post.PostTime,
+			IsSaved:       isSaved,
+			IsLiked:       isLiked,
+			Browse:        post.BrowseNum,
+			Heat:          post.Heat,
+			Photos:        post.Photos,
+			Tag:           post.Tag,
+		}
+		c.JSON(http.StatusOK, postDetailsResponse)
+	} else {
+		isLiked := false
+		var like model.Plike
+		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
+		if like.PlikeID != 0 {
+			isLiked = true
+		}
+		var post model.Post
+		db.Where("postID = ?", postID).First(&post)
+		if post.PostID == 0 {
+			return
+		}
+		var user model.User
+		if post.UserID == 0 {
+			user.Name = "管理员"
+			user.Phone = "11111111111"
+		} else {
+			db.Where("userID = ?", post.UserID).First(&user)
+		}
+		var stars []model.Rstar
+		var userStar model.Rstar
+		db.Model(&model.Rstar{}).Where("postID = ? AND userID = ?", postID, temUser.UserID).First(&userStar)
+		db.Model(&model.Rstar{}).Where("postID = ?", postID).Find(&stars)
+		var cnt [5]int
+		for _, star := range stars {
+			if star.StarNum == 0 {
+				continue
+			}
+			cnt[star.StarNum-1]++
+		}
+		postDetailsResponse := RpostDetailsResponse{
+			PostID:        uint(post.PostID),
+			UserID:        uint(user.UserID),
+			UserName:      user.Name,
+			UserScore:     user.Score,
+			UserTelephone: user.Phone,
+			UserAvatar:    user.AvatarURL,
+			UserIdentity:  user.Identity,
+			Title:         post.Title,
+			Content:       post.Ptext,
+			Like:          post.LikeNum,
+			Comment:       post.CommentNum,
+			PostTime:      post.PostTime,
+			IsSaved:       false,
+			IsLiked:       isLiked,
+			Browse:        post.BrowseNum,
+			Heat:          post.Heat,
+			Photos:        post.Photos,
+			Tag:           post.Tag,
+			AverageStar:   getAverageRating(uint(post.PostID)),
+			Stars:         cnt,
+			UserStar:      userStar.StarNum,
+		}
+		c.JSON(http.StatusOK, postDetailsResponse)
 	}
-	isSaved := false
-	var save model.Psave
-	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
-	if save.PsaveID != 0 {
-		isSaved = true
-	}
+}
+
+func getAverageRating(postID uint) float64 {
+	db := common.GetDB()
 	var post model.Post
 	db.Where("postID = ?", postID).First(&post)
 	if post.PostID == 0 {
-		return
+		return 0
 	}
-	var user model.User
-	if post.UserID == 0 {
-		user.Name = "管理员"
-		user.Phone = "11111111111"
-	} else {
-		db.Where("userID = ?", post.UserID).First(&user)
+	var totalRatings float64
+	var stars []model.Rstar
+	db.Model(&model.Rstar{}).Where("postID = ?", postID).Find(&stars)
+
+	for _, star := range stars {
+		totalRatings += float64(star.StarNum)
 	}
-	postDetailsResponse := PostDetailsResponse{
-		PostID:        uint(post.PostID),
-		UserID:        uint(user.UserID),
-		UserName:      user.Name,
-		UserScore:     user.Score,
-		UserTelephone: user.Phone,
-		UserAvatar:    user.AvatarURL,
-		UserIdentity:  user.Identity,
-		Title:         post.Title,
-		Content:       post.Ptext,
-		Like:          post.LikeNum,
-		Comment:       post.CommentNum,
-		PostTime:      post.PostTime,
-		IsSaved:       isSaved,
-		IsLiked:       isLiked,
-		Browse:        post.BrowseNum,
-		Heat:          post.Heat,
-		Photos:        post.Photos,
-		Tag:           post.Tag,
+	if totalRatings == 0 {
+		return 0
 	}
-	c.JSON(http.StatusOK, postDetailsResponse)
+	// 计算平均评分
+	averageRating := totalRatings / float64(len(stars))
+	return averageRating
 }
 
 func UploadPhotos(c *gin.Context) {
