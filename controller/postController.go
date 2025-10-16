@@ -430,7 +430,7 @@ func Browse(c *gin.Context) {
 				isLiked = true
 			}
 			var rstar []model.Rstar
-			db.Where("userID = ? AND postID = ?", temUser.UserID, post.PostID).Find(&rstar)
+			db.Where("postID = ?", post.PostID).Find(&rstar)
 			var cnt [5]int
 			for _, star := range rstar {
 				if star.StarNum == 0 {
