@@ -63,8 +63,6 @@ func InitDB() *gorm.DB {
 	db.Model(&model.Pclike{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccdeny{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Pcdeny{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Rstar{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
-	db.Model(&model.Rstar{}).AddForeignKey("postID", "posts(postID)", "CASCADE", "CASCADE")
 
 	//db.Model(&model.Post{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
 	//db.Model(&model.Pcomment{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
