@@ -151,7 +151,7 @@ func GetComments(c *gin.Context) {
 			db.Where("userID = ?", pcomment.UserID).First(&commentuser)
 
 			var star model.Rstar
-			db.Where("userID = ? AND postID = ?", temUser.UserID, pcomment.PtargetID).First(&star)
+			db.Where("userID = ? AND postID = ?", pcomment.UserID, pcomment.PtargetID).First(&star)
 
 			comment := RCommentResponse{
 				PcommentID:      pcomment.PcommentID,
