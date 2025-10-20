@@ -6,9 +6,10 @@ import (
 	"loginTest/model"
 	"loginTest/response"
 	"net/http"
+	"strings"
 	"time"
 	"unicode/utf8"
-	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 )
@@ -149,7 +150,7 @@ func GetProducts(c *gin.Context) {
 		}
 		response := ProductReponse{
 			ProductID:   product.ProductID,
-			Seller:      user.Name,
+			Seller:      product.User.Name,
 			Price:       product.Price,
 			Name:        product.Name,
 			Description: product.Description,
@@ -172,8 +173,8 @@ func GetProductDetail(c *gin.Context) {
 	db.Where("userID = ?", product.UserID).First(&user)
 	photo := strings.Split(product.Photos, ",")
 	for i, photoURL := range photo {
-        photo[i] = replaceResizedWithURL(photoURL)
-    }
+		photo[i] = replaceResizedWithURL(photoURL)
+	}
 	response := ProductReponse{
 		ProductID:   product.ProductID,
 		SellerID:    user.UserID,
@@ -279,5 +280,5 @@ func isUserExist(db *gorm.DB, user_id int) bool {
 }
 
 func replaceResizedWithURL(photoURL string) string {
-    return strings.ReplaceAll(photoURL, "/resized/", "/uploads/")
+	return strings.ReplaceAll(photoURL, "/resized/", "/uploads/")
 }
