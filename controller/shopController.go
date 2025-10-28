@@ -148,9 +148,26 @@ func GetProducts(c *gin.Context) {
 		for i, photoURL := range photo {
 			photo[i] = replaceResizedWithURL(photoURL)
 		}
+
+		var sellerName string
+		var sellerID int
+
+		if searchsort == "home" {
+			// 首页显示所有商品，需要获取每个商品的实际卖家信息
+			var seller model.User
+			db.Where("userID = ?", product.UserID).First(&seller)
+			sellerName = seller.Name
+			sellerID = seller.UserID
+		} else {
+			// 我的商品页面，所有商品都是当前用户的，直接使用当前用户信息
+			sellerName = user.Name
+			sellerID = user.UserID
+		}
+
 		response := ProductReponse{
 			ProductID:   product.ProductID,
-			Seller:      product.User.Name,
+			SellerID:    sellerID,
+			Seller:      sellerName,
 			Price:       product.Price,
 			Name:        product.Name,
 			Description: product.Description,
