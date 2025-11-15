@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 
 	"github.com/jordan-wright/email"
+	"github.com/redis/go-redis/v9"
 
 	// 	"log"
 	"loginTest/common"
@@ -41,7 +43,7 @@ func saveVcode(vcode, receiver string) {
 	rds.Set(ctx, receiver, vcode, 5*time.Minute)
 }
 
-func SendEmail(receiver string, status int ,msg string) error {
+func SendEmail(receiver string, status int, msg string) error {
 	e := email.NewEmail()
 	senderString := config.ValidateSender
 	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)
@@ -53,16 +55,28 @@ func SendEmail(receiver string, status int ,msg string) error {
 	e.Subject = config.ValidateTitle
 	text := ""
 	if status == 0 {
+		rds := common.MyRedis
+		ctx := context.Background()
+		_, err := rds.Get(ctx, receiver).Result()
+		// 如果 err == nil，说明找到了验证码（key存在），说明验证码还未过期
+		// 如果 err == redis.Nil，说明 key 不存在，可以发送新验证码
+		if err == nil {
+			return errors.New("验证码已发送，请5分钟后再试")
+		}
+		// 如果是其他错误（如Redis连接错误），也阻止发送，避免异常情况
+		if err != redis.Nil {
+			return fmt.Errorf("检查验证码状态失败: %v", err)
+		}
 		text = config.ValidateText
 	} else if status == 1 {
 		e.Subject = "软工集市评论通知"
-		text = "您好，您在软工集市上的发帖收到一条新评论'"+ msg +"'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
+		text = "您好，您在软工集市上的发帖收到一条新评论'" + msg + "'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	} else if status == 2 {
 		e.Subject = "软工集市私信通知"
 		text = "您好，您在软工集市上收到一条新私信，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	} else if status == 3 {
 		e.Subject = "软工集市回复通知"
-		text = "您好，您在软工集市上收到一条新回复'"+ msg +"'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
+		text = "您好，您在软工集市上收到一条新回复'" + msg + "'，请登录平台查阅。 如需关闭邮箱通知请前往个人主页最下方关闭。"
 	}
 
 	text, vcode := formVcode(text)

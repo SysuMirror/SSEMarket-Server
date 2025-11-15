@@ -1,12 +1,12 @@
 package main
 
 import (
+	"SSE_market_server/common"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron"
 	"github.com/spf13/viper"
 	"log"
-	"loginTest/common"
 	"loginTest/config"
 	"loginTest/controller"
 	"loginTest/heat"
