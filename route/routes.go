@@ -40,6 +40,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", controller.Login)
+	noauth.POST("/api/auth/refresh", controller.RefreshToken)
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)

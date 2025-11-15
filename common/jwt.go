@@ -22,6 +22,12 @@ type Claims_admin struct {
 	jwt.StandardClaims
 }
 
+// RefreshClaims 用于刷新 token 的 JWT 声明
+type RefreshClaims struct {
+	UserID int
+	jwt.StandardClaims
+}
+
 // OAuth2Claims OAuth2访问令牌的Claims
 type OAuth2Claims struct {
 	UserID int
@@ -43,6 +49,27 @@ func ReleaseToken(user model.User) (string, error) {
 			IssuedAt:  time.Now().Unix(),
 			Issuer:    "loginTest",
 			Subject:   "user token",
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+// ReleaseRefreshToken 生成用于刷新 access token 的 refresh token
+// 有效期：30 天
+func ReleaseRefreshToken(user model.User) (string, error) {
+	expirationTime := time.Now().Add(30 * 24 * time.Hour)
+	claims := &RefreshClaims{
+		UserID: user.UserID,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+			IssuedAt:  time.Now().Unix(),
+			Issuer:    "loginTest",
+			Subject:   "refresh token",
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -86,6 +113,15 @@ func ParseToken_admin(tokenString string) (*jwt.Token, *Claims_admin, error) {
 		return jwtKey, nil
 	})
 	return token, claims_admin, err
+}
+
+// ParseRefreshToken 解析 refresh token
+func ParseRefreshToken(tokenString string) (*jwt.Token, *RefreshClaims, error) {
+	claims := &RefreshClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (i interface{}, err error) {
+		return jwtKey, nil
+	})
+	return token, claims, err
 }
 
 // 生成OAuth2访问令牌
