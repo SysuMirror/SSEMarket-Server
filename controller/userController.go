@@ -1011,20 +1011,25 @@ func GetInfo(c *gin.Context) {
 		}
 		return
 	}
-	// 返回用户的所有信息
-	c.JSON(http.StatusOK, gin.H{
-		"userID": user.UserID,
-		"phone":  user.Phone,
-		"email":  user.Email,
-		"name":   user.Name,
-		//"num":       user.Num,
+	info := gin.H{
+		"userID":    user.UserID,
+		"name":      user.Name,
+		"phone":     user.Phone,
 		"intro":     user.Intro,
 		"score":     user.Score,
 		"ban":       user.Banend,
 		"punishnum": user.Punishnum,
 		"avatarURL": user.AvatarURL,
-		"emailpush": user.ISEmailNotificationBlocked,
-	})
+	}
+
+	// 判断为本人
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != 0 && tokenUserID == user.UserID {
+		info["email"] = user.Email
+		info["emailpush"] = user.ISEmailNotificationBlocked
+	}
+
+	c.JSON(http.StatusOK, info)
 }
 
 type updateUser struct {
