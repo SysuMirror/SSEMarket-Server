@@ -50,6 +50,7 @@ var r *gin.Engine
 
 func main() {
 	config.InitConfig()
+	config.InitEmailConfig()
 	go Copy()
 	db := common.InitDB()
 	rds := common.RedisInit()

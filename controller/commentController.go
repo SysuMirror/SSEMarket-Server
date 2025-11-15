@@ -31,9 +31,29 @@ type CommentResponse struct {
 	IsLiked         bool
 	IsDenied        bool
 }
+
+type RCommentResponse struct {
+	PcommentID      int
+	AuthorID        int
+	Author          string
+	AuthorTelephone string
+	AuthorScore     int
+	AuthorAvatar    string
+	AuthorIdentity  string
+	CommentTime     time.Time
+	Content         string
+	LikeNum         int
+	DenyNum         int
+	SubComments     []Subcomment
+	IsLiked         bool
+	IsDenied        bool
+	AuthorRating    int
+}
+
 type Commentsmsg struct {
 	UserTelephone string `json:"userTelephone"`
 	PostID        int    `json:"postID"`
+	TypePost      string `json:"postType"`
 }
 type Subcomment struct {
 	CcommentID      int       `json:"ccommentID"`
@@ -60,7 +80,8 @@ func GetComments(c *gin.Context) {
 	c.Bind(&msg)
 	usertelephone := msg.UserTelephone
 	postid := msg.PostID
-	if usertelephone == "" || postid == 0 {
+	postType := msg.TypePost
+	if usertelephone == "" || postid == 0 || postType == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
 		return
 	}
@@ -69,44 +90,90 @@ func GetComments(c *gin.Context) {
 	if temUser.UserID == 0 {
 		return
 	}
-	var comments []CommentResponse
-	var pcomments []model.Pcomment
-	db.Find(&pcomments, "ptargetID = ?", postid)
-	for _, pcomment := range pcomments {
-		isLike := false
-		isDeny := false
-		var like model.Pclike
-		var deny model.Pcdeny
-		db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
-		if deny.PcdenyID != 0 {
-			isDeny = true
-		} else {
-			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
-			if like.PclikeID != 0 {
-				isLike = true
+	if postType == "post" {
+		var comments []CommentResponse
+		var pcomments []model.Pcomment
+		db.Find(&pcomments, "ptargetID = ?", postid)
+		for _, pcomment := range pcomments {
+			isLike := false
+			isDeny := false
+			var like model.Pclike
+			var deny model.Pcdeny
+			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
+			if deny.PcdenyID != 0 {
+				isDeny = true
+			} else {
+				db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
+				if like.PclikeID != 0 {
+					isLike = true
+				}
 			}
+			var commentuser model.User
+			db.Where("userID = ?", pcomment.UserID).First(&commentuser)
+			comment := CommentResponse{
+				PcommentID:      pcomment.PcommentID,
+				Author:          commentuser.Name,
+				AuthorID:        commentuser.UserID,
+				AuthorTelephone: commentuser.Phone,
+				AuthorScore:     commentuser.Score,
+				AuthorAvatar:    commentuser.AvatarURL,
+				AuthorIdentity:  commentuser.Identity,
+				CommentTime:     pcomment.Time,
+				Content:         pcomment.Pctext,
+				LikeNum:         pcomment.LikeNum,
+				DenyNum:         pcomment.DenyNum,
+				SubComments:     GetSubComments(pcomment, temUser.UserID),
+				IsLiked:         isLike,
+				IsDenied:        isDeny,
+			}
+			comments = append(comments, comment)
 		}
-		var commentuser model.User
-		db.Where("userID = ?", pcomment.UserID).First(&commentuser)
-		comment := CommentResponse{
-			PcommentID:      pcomment.PcommentID,
-			Author:          commentuser.Name,
-			AuthorID:        commentuser.UserID,
-			AuthorTelephone: commentuser.Phone,
-			AuthorScore:     commentuser.Score,
-			AuthorAvatar:    commentuser.AvatarURL,
-			AuthorIdentity:  commentuser.Identity,
-			CommentTime:     pcomment.Time,
-			Content:         pcomment.Pctext,
-			LikeNum:         pcomment.LikeNum,
-			DenyNum:         pcomment.DenyNum,
-			SubComments:     GetSubComments(pcomment, temUser.UserID),
-			IsLiked:         isLike,
-			IsDenied:        isDeny,
+		c.JSON(http.StatusOK, comments)
+	} else {
+		var comments []RCommentResponse
+		var rcomments []model.Pcomment
+		db.Find(&rcomments, "ptargetID = ?", postid)
+		for _, pcomment := range rcomments {
+			isLike := false
+			isDeny := false
+			var like model.Pclike
+			var deny model.Pcdeny
+			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
+			if deny.PcdenyID != 0 {
+				isDeny = true
+			} else {
+				db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
+				if like.PclikeID != 0 {
+					isLike = true
+				}
+			}
+			var commentuser model.User
+			db.Where("userID = ?", pcomment.UserID).First(&commentuser)
+
+			var star model.Rstar
+			db.Where("userID = ? AND postID = ?", pcomment.UserID, pcomment.PtargetID).First(&star)
+
+			comment := RCommentResponse{
+				PcommentID:      pcomment.PcommentID,
+				Author:          commentuser.Name,
+				AuthorID:        commentuser.UserID,
+				AuthorTelephone: commentuser.Phone,
+				AuthorScore:     commentuser.Score,
+				AuthorAvatar:    commentuser.AvatarURL,
+				AuthorIdentity:  commentuser.Identity,
+				CommentTime:     pcomment.Time,
+				Content:         pcomment.Pctext,
+				LikeNum:         pcomment.LikeNum,
+				DenyNum:         pcomment.DenyNum,
+				SubComments:     GetSubComments(pcomment, temUser.UserID),
+				IsLiked:         isLike,
+				IsDenied:        isDeny,
+				AuthorRating:    star.StarNum,
+			}
+			comments = append(comments, comment)
 		}
-		comments = append(comments, comment)
+		c.JSON(http.StatusOK, comments)
 	}
-	c.JSON(http.StatusOK, comments)
 }
 
 type IDmesg struct {
@@ -324,7 +391,7 @@ func PostPcomment(c *gin.Context) {
 		// 创建一条通知
 		db.Create(&notice)
 		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 1,msg.Content)
+			EmailAlerter(receiver.Email, 1, msg.Content)
 		}
 	}
 
@@ -349,6 +416,129 @@ func PostPcomment(c *gin.Context) {
 		SubComments:    GetSubComments(pcomment, user.UserID),
 		IsLiked:        false,
 	}
+	c.JSON(http.StatusOK, comment)
+}
+
+type RpcommentMsg struct {
+	UserTelephone string
+	PostID        int
+	Content       string
+	Rating        int
+}
+
+func PostRcomment(c *gin.Context) {
+	db := common.GetDB()
+	var msg RpcommentMsg
+	c.Bind(&msg)
+	if len(msg.Content) == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
+		return
+	}
+	// 这里不能直接用len(),否则中文字符会计算错误
+	if utf8.RuneCountInString(msg.Content) > 1000 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
+		return
+	}
+	if len(msg.UserTelephone) == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
+		return
+	}
+
+	if msg.Rating < 0 || msg.Rating > 5 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评分必须在0-5之间")
+		return
+	}
+	// if api.GetSuggestion(msg.Content) == "Block" {
+	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
+	// 	// return
+	// }
+	var user model.User
+	var receiver model.User
+	var tempost model.Post
+	db.Where("phone = ?", msg.UserTelephone).First(&user)
+	if user.UserID == 0 {
+		return
+	}
+	// 获取token中的用户标识符
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	currentDateTime := time.Now()
+	if user.Banend.After(currentDateTime) {
+		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
+		return
+	}
+
+	db.Where("postID =?", msg.PostID).First(&tempost)
+	db.Where("userID =?", tempost.UserID).First(&receiver)
+	if tempost.PostID == 0 {
+		return
+	}
+	pcomment := model.Pcomment{
+		UserID:    user.UserID,
+		PtargetID: msg.PostID,
+		Pctext:    msg.Content,
+		Time:      time.Now(),
+		LikeNum:   0,
+		DenyNum:   0,
+	}
+	// 创建一条帖子评论
+	db.Create(&pcomment)
+
+	// 如果用户自己评论自己的帖子，则不用通知
+	if tempost.UserID != user.UserID {
+		notice := model.Notice{
+			Receiver: tempost.UserID,
+			User:     model.User{},
+			Sender:   user.UserID,
+			Type:     "pcomment",
+			Ntext:    msg.Content,
+			Time:     time.Now(),
+			Read:     false,
+			Target:   pcomment.PcommentID,
+		}
+		// 创建一条通知
+		db.Create(&notice)
+		if !receiver.ISEmailNotificationBlocked {
+			EmailAlerter(receiver.Email, 1, msg.Content)
+		}
+	}
+
+	var post model.Post
+	db.Where("postID = ?", msg.PostID).First(&post)
+	if post.PostID == 0 {
+		return
+	}
+	db.Model(&post).Update("comment_num", post.CommentNum+1)
+	// 在这里设置 评论 的权重
+	weightComment := float64(6)
+	db.Model(&post).Update("heat", post.Heat+weightComment)
+	comment := CommentResponse{
+		PcommentID:     pcomment.PcommentID,
+		Author:         user.Name,
+		AuthorAvatar:   user.AvatarURL,
+		AuthorIdentity: user.Identity,
+		CommentTime:    pcomment.Time,
+		Content:        pcomment.Pctext,
+		LikeNum:        pcomment.LikeNum,
+		DenyNum:        pcomment.DenyNum,
+		SubComments:    GetSubComments(pcomment, user.UserID),
+		IsLiked:        false,
+	}
+
+	var star model.Rstar
+	db.Where("postID = ? AND userID = ?", msg.PostID, user.UserID).First(&star)
+	if star.RstarID != 0 {
+		db.Model(&star).Update("star_num", msg.Rating)
+	} else {
+		star.PostID = int(msg.PostID)
+		star.UserID = int(user.UserID)
+		star.StarNum = msg.Rating
+		db.Create(&star)
+	}
+
 	c.JSON(http.StatusOK, comment)
 }
 
@@ -440,7 +630,7 @@ func PostCcomment(c *gin.Context) {
 		// 数据库创建一条通知
 		db.Create(&notice1)
 		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 3,msg.Content)
+			EmailAlerter(receiver.Email, 3, msg.Content)
 		}
 	}
 	// 如果是二级评论的回复
@@ -467,7 +657,7 @@ func PostCcomment(c *gin.Context) {
 			// 数据库创建一条通知
 			db.Create(&notice2)
 			if !receiver2.ISEmailNotificationBlocked {
-				EmailAlerter(receiver2.Email, 3,msg.Content)
+				EmailAlerter(receiver2.Email, 3, msg.Content)
 			}
 		}
 	}
@@ -750,6 +940,6 @@ func UpdateCcommentDeny(c *gin.Context) {
 	}
 }
 
-func EmailAlerter(receiver string, status int,msg string) {
-	api.SendEmail(receiver, status,msg)
+func EmailAlerter(receiver string, status int, msg string) {
+	api.SendEmail(receiver, status, msg)
 }

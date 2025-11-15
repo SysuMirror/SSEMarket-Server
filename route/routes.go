@@ -13,11 +13,31 @@ import (
 func CollectRoute(r *gin.Engine) *gin.Engine {
 
 	r.Use(middleware.CORSMiddleware())
-	// 这里把路由分成了两组，其中auth是需要token验证的，也就是需要用户登录，noauth是不需要token的，也就是不需要用户登录。
+	// 这里把路由分成了三组，其中auth是需要token验证的，也就是需要用户登录
+	// noauth是不需要token的，也就是不需要用户登录
+	// oauth是OAuth带限制权限认证的，需要用户先授权
 	auth := r.Group("")
 	noauth := r.Group("")
+	oauth := r.Group("")
 
 	auth.Use(middleware.AuthMiddleware())
+	oauth.Use(middleware.OAuthMiddleware())
+
+	//OAuth2认证
+	auth.POST("/api/auth/connect/check", controller.CheckOAuth2App)
+	auth.POST("/api/auth/connect/authorize", controller.AuthorizeOAuth2App)
+	noauth.POST("/api/auth/connect/token", controller.GetTokenbyOAuth2)
+	oauth.POST("/api/auth/connect/userinfo", controller.GetInfobyOAuth2)
+	//OAuth2授权记录管理
+	auth.GET("/api/auth/connect/records", controller.GetOAuth2AuthRecords)
+
+	auth.POST("/api/auth/submitRating", controller.UpdateRating) // 评分
+	auth.POST("api/auth/userPostRating", controller.GetUserPostRating)
+	auth.POST("/api/auth/getPostType", controller.GetPostType)           // 获取帖子类型
+	auth.POST("/api/auth/getAverageRating", controller.GetAverageRating) // 评分贴评分
+	auth.POST("/api/auth/getStars", controller.GetStars)
+	auth.POST("api/auth/postRcomment", controller.PostRcomment)
+
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", controller.Login)
 	auth.POST("/api/auth/apiTest", api.ApiTest)
@@ -82,8 +102,6 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/deleteProduct", controller.DeleteProduct)
 	auth.POST("/api/auth/saleProduct", controller.SaleProduct)
 	auth.POST("/api/auth/getCarouselImg", controller.GetCarouselImg)
-
-
 
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")

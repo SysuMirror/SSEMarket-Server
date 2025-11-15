@@ -13,6 +13,7 @@ import (
 	"loginTest/util"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -462,6 +463,327 @@ func ModifyPassword(c *gin.Context) {
 	}
 }
 
+type OAuth2Info struct {
+	AppId        string `json:"app_id"`
+	RedirectURL  string `json:"redirect_uri"`
+	ResponseType string `json:"response_type"`
+	Scope        string `json:"scope"`
+	State        string `json:"state"`
+}
+
+// 检查OAuth2应用信息，前端传入appid，返回对应的app_name、app_icon
+func CheckOAuth2App(c *gin.Context) {
+	db := common.GetDB()
+	var requestInfo OAuth2Info
+	if err := c.Bind(&requestInfo); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数格式错误")
+		return
+	}
+
+	appId := requestInfo.AppId
+
+	// 验证应用是否存在
+	var app model.OAuth2App
+	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
+		response.Response(c, http.StatusNotFound, 404, nil, "OAuth2认证应用不存在或未开通")
+		return
+	}
+
+	// 返回应用信息
+	appInfo := gin.H{
+		"app_id":      app.AppID,
+		"app_name":    app.AppName,
+		"app_icon":    app.AppIcon,
+		"description": app.Description,
+	}
+
+	response.Response(c, http.StatusOK, 200, appInfo, "应用信息获取成功")
+}
+
+// OAuth2授权接口，传入app_id、redirect_uri、response_type、scope、state
+// 如果app_id跟数据库里的redirect_url对应，则返回带着临时有效的code的redirect_uri
+func AuthorizeOAuth2App(c *gin.Context) {
+	db := common.GetDB()
+	var requestInfo OAuth2Info
+	if err := c.Bind(&requestInfo); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数格式错误")
+		return
+	}
+
+	appId := requestInfo.AppId
+	redirectURI := requestInfo.RedirectURL
+	responseType := requestInfo.ResponseType
+	scope := requestInfo.Scope
+	state := requestInfo.State
+
+	// 验证response_type，response_type目前只允许code(authorization_code)
+	if responseType != "code" {
+		response.Response(c, http.StatusBadRequest, 400, nil, "不支持的response_type")
+		return
+	}
+
+	// 验证scope，scope目前只允许read_basic，用于授权当前用户的头像、用户名、邮箱等基本信息
+	if scope != "read_basic" {
+		response.Response(c, http.StatusBadRequest, 400, nil, "不支持的scope")
+		return
+	}
+
+	// 验证应用是否存在
+	var app model.OAuth2App
+	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
+		response.Response(c, http.StatusNotFound, 404, nil, "应用不存在或未激活")
+		return
+	}
+
+	// 验证redirect_uri是否与app_id对应应用一致
+	if app.RedirectURI != redirectURI {
+		response.Response(c, http.StatusBadRequest, 400, nil, "redirect_uri不匹配")
+		return
+	}
+
+	// 获取当前用户（需要先通过AuthMiddleware验证）
+	userInterface, exists := c.Get("user")
+	if !exists {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
+		return
+	}
+	user := userInterface.(model.User)
+
+	// 生成授权码
+	code := util.GenerateRandomString(32)
+
+	// 保存授权码到数据库
+	authCode := model.OAuth2Code{
+		Code:        code,
+		AppID:       appId,
+		UserID:      user.UserID,
+		Scope:       scope,
+		RedirectURI: redirectURI,
+		State:       state,
+		ExpiresAt:   time.Now().Add(5 * time.Minute), // 5分钟有效期
+		IsUsed:      false,
+		CreatedAt:   time.Now(),
+	}
+
+	if err := db.Create(&authCode).Error; err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "生成授权码失败")
+		return
+	}
+
+	// 记录授权信息
+	authRecord := model.OAuth2AuthRecord{
+		UserID:       user.UserID,
+		AppID:        appId,
+		AppName:      app.AppName,
+		Scope:        scope,
+		IPAddress:    c.ClientIP(),
+		UserAgent:    c.GetHeader("User-Agent"),
+		Status:       "authorized",
+		AuthorizedAt: time.Now(),
+		ExpiresAt:    time.Now().Add(5 * time.Minute), // 与访问令牌有效期一致
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := db.Create(&authRecord).Error; err != nil {
+		fmt.Printf("记录OAuth2授权信息失败: %v\n", err)
+	}
+
+	// 构建重定向URL
+	redirectURL := fmt.Sprintf("%s?code=%s&state=%s", redirectURI, code, state)
+
+	response.Response(c, http.StatusOK, 200, gin.H{
+		"redirect_url": redirectURL,
+		//"code": code,
+		//"state": state,
+	}, "授权成功")
+}
+
+// 三方APP取得临时code后，其服务端带着code来请求，根据scope返回对应的access_token
+func GetTokenbyOAuth2(c *gin.Context) {
+	db := common.GetDB()
+
+	code := c.PostForm("code")
+	appId := c.PostForm("app_id")
+	appSecret := c.PostForm("app_secret")
+
+	if code == "" || appId == "" || appSecret == "" {
+		response.Response(c, http.StatusBadRequest, 400, nil, "缺少必要参数")
+		return
+	}
+
+	// 验证应用
+	var app model.OAuth2App
+	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
+		response.Response(c, http.StatusNotFound, 404, nil, "应用不存在或未激活")
+		return
+	}
+
+	// 验证app_secret是否与app_id对应，避免其他应用冒用临时code
+	if app.AppSecret != appSecret {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "应用密钥错误")
+		return
+	}
+
+	// 查找授权码，临时code只允许使用1次
+	var authCode model.OAuth2Code
+	if err := db.Where("code = ? AND app_id = ? AND is_used = ?", code, appId, false).First(&authCode).Error; err != nil {
+		response.Response(c, http.StatusNotFound, 404, nil, "授权码不存在或已使用")
+		return
+	}
+
+	// 检查授权码是否过期
+	if time.Now().After(authCode.ExpiresAt) {
+		response.Response(c, http.StatusBadRequest, 400, nil, "授权码已过期")
+		return
+	}
+
+	// 标记授权码为已使用
+	authCode.IsUsed = true
+	db.Save(&authCode)
+
+	// 生成访问令牌
+	accessToken, err := common.ReleaseOAuth2Token(authCode.UserID, appId, authCode.Scope)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "生成访问令牌失败")
+		return
+	}
+
+	// 保存令牌到数据库
+	oauth2Token := model.OAuth2Token{
+		AccessToken:  accessToken,
+		RefreshToken: "", // 暂不实现refreshToken
+		AppID:        appId,
+		UserID:       authCode.UserID,
+		Scope:        authCode.Scope,
+		ExpiresAt:    time.Now().Add(5 * time.Minute), // 5分钟有效期
+		IsActive:     true,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+
+	if err := db.Create(&oauth2Token).Error; err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "保存访问令牌失败")
+		return
+	}
+
+	response.Response(c, http.StatusOK, 200, gin.H{
+		"access_token": accessToken,
+		"token_type":   "Bearer",
+		"expires_in":   300, // 5分钟
+		"scope":        authCode.Scope,
+	}, "获取访问令牌成功")
+}
+
+// 三方APP取得access_token后，其服务端带着access_token来请求，验证token确实有对应权限后（这在oauthMiddleware实现），返回对应的用户信息
+func GetInfobyOAuth2(c *gin.Context) {
+	// 从OAuth中间件获取用户信息
+	userInterface, exists := c.Get("oauth2_user")
+	if !exists {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "OAuth2认证失败")
+		return
+	}
+	user := userInterface.(model.User)
+
+	// 获取权限范围
+	scopeInterface, exists := c.Get("oauth2_scope")
+	if !exists {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "权限范围获取失败")
+		return
+	}
+	scope := scopeInterface.(string)
+
+	// 根据权限范围返回不同信息
+	userInfo := gin.H{}
+
+	if scope == "read_basic" {
+		userInfo = gin.H{
+			"user_id":    user.UserID,
+			"name":       user.Name,
+			"email":      user.Email,
+			"avatar_url": user.AvatarURL,
+			"intro":      user.Intro,
+			"identity":   user.Identity,
+		}
+	} else {
+		response.Response(c, http.StatusForbidden, 403, nil, "权限不足")
+		return
+	}
+
+	response.Response(c, http.StatusOK, 200, userInfo, "获取用户信息成功")
+}
+
+// 用户获取OAuth2授权记录
+func GetOAuth2AuthRecords(c *gin.Context) {
+	// 从Auth中间件获取用户信息
+	userInterface, exists := c.Get("user")
+	if !exists {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
+		return
+	}
+	user := userInterface.(model.User)
+
+	db := common.GetDB()
+
+	// 获取分页参数
+	page := 1
+	pageSize := 10
+	if p := c.Query("page"); p != "" {
+		if parsedPage, err := strconv.Atoi(p); err == nil && parsedPage > 0 {
+			page = parsedPage
+		}
+	}
+	if ps := c.Query("page_size"); ps != "" {
+		if parsedPageSize, err := strconv.Atoi(ps); err == nil && parsedPageSize > 0 && parsedPageSize <= 100 {
+			pageSize = parsedPageSize
+		}
+	}
+
+	// 查询授权记录
+	var records []model.OAuth2AuthRecord
+	var total int64
+
+	offset := (page - 1) * pageSize
+
+	// 获取总数
+	db.Model(&model.OAuth2AuthRecord{}).Where("user_id = ?", user.UserID).Count(&total)
+
+	// 获取记录列表
+	if err := db.Where("user_id = ?", user.UserID).
+		Order("authorized_at DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&records).Error; err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "查询授权记录失败")
+		return
+	}
+
+	// 构建返回数据
+	var recordList []gin.H
+	for _, record := range records {
+		recordList = append(recordList, gin.H{
+			"record_id":     record.RecordID,
+			"app_id":        record.AppID,
+			"app_name":      record.AppName,
+			"scope":         record.Scope,
+			"ip_address":    record.IPAddress,
+			"user_agent":    record.UserAgent,
+			"status":        record.Status,
+			"authorized_at": record.AuthorizedAt.Format("2006-01-02 15:04:05"),
+			"expires_at":    record.ExpiresAt.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	// 返回分页数据
+	response.Response(c, http.StatusOK, 200, gin.H{
+		"records":     recordList,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
+		"total_pages": (total + int64(pageSize) - 1) / int64(pageSize),
+	}, "获取授权记录成功")
+}
+
 func ValidateEmail(c *gin.Context) {
 	var request requestEmail
 	c.Bind(&request)
@@ -491,7 +813,7 @@ func ValidateEmail(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "邮箱获取错误")
 		return
 	}
-	err := api.SendEmail(email, 0,"")
+	err := api.SendEmail(email, 0, "")
 	if err != nil {
 		//fmt.Println(2)
 		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "发送邮箱错误")
