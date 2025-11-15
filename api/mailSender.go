@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 
 	"github.com/jordan-wright/email"
+	"github.com/redis/go-redis/v9"
 
 	// 	"log"
 	"loginTest/common"
@@ -52,7 +54,18 @@ func SendEmail(receiver string, status int, msg string) error {
 	e.To = []string{receiver}
 	text := ""
 	if status == 0 {
-		e.Subject = config.ValidateTitle
+		rds := common.MyRedis
+		ctx := context.Background()
+		_, err := rds.Get(ctx, receiver).Result()
+		// 如果 err == nil，说明找到了验证码（key存在），说明验证码还未过期
+		// 如果 err == redis.Nil，说明 key 不存在，可以发送新验证码
+		if err == nil {
+			return errors.New("验证码已发送，请5分钟后再试")
+		}
+		// 如果是其他错误（如Redis连接错误），也阻止发送，避免异常情况
+		if err != redis.Nil {
+			return fmt.Errorf("检查验证码状态失败: %v", err)
+		}
 		text = config.ValidateText
 		text, vcode := formVcode(text)
 		saveVcode(vcode, receiver)
