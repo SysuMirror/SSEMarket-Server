@@ -815,8 +815,11 @@ func ValidateEmail(c *gin.Context) {
 	}
 	err := api.SendEmail(email, 0, "")
 	if err != nil {
-		//fmt.Println(2)
-		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "发送邮箱错误")
+		msg := err.Error()
+		if msg == "" {
+			msg = "发送邮箱错误"
+		}
+		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, msg)
 		return
 	}
 	response.Success(c, gin.H{"data": email}, "邮箱发送成功")
