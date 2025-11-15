@@ -7,4 +7,4 @@
 如果想要实现邮箱发送验证码的功能，可以将someConst/mailConst中的EmailUsername和Password进行更改
 
 
-Password使用的是qq邮箱的授权码，不是qq密码
+Password使用的是授权码，不是密码

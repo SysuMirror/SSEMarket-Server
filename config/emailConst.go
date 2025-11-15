@@ -42,5 +42,3 @@ func InitEmailConfig() {
 	NoticeAddr = os.Getenv("SMTP_NOTICE_ADDR")
 	NoticeHost = os.Getenv("SMTP_NOTICE_HOST")
 }
-
-//这是一条测试注释
