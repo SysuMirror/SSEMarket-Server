@@ -289,15 +289,25 @@ func Register(c *gin.Context) {
 		Used:     true,
 		UsedTime: time.Now(),
 	})
-	//发放token
+	//发放 access token 和 refresh token
 	token, err := common.ReleaseToken(newUser)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 400, nil, "账号已注册，但无法返回token")
 		log.Printf("token generate error: %v", err)
 		return
 	}
+	refreshToken, err := common.ReleaseRefreshToken(newUser)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 400, nil, "账号已注册，但无法返回refresh token")
+		log.Printf("refresh token generate error: %v", err)
+		return
+	}
+	// 将 refresh token 写入 Redis，使其一次性使用
+	refreshKey := "refresh_token:" + refreshToken
+	// 有效期与 refresh token 一致 30 天
+	rds.Set(ctx, refreshKey, strconv.Itoa(newUser.UserID), 30*24*time.Hour)
 	//返回结果
-	response.Success(c, gin.H{"token": token}, "注册成功")
+	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "注册成功")
 	rds.Del(ctx, codeKey)
 	rds.Del(ctx, failKey)
 }
@@ -424,16 +434,89 @@ func Login(c *gin.Context) {
 	// 	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户注册尚未通过审核，请耐心等待")
 	// 	return
 	// }
-	//发放token
+	//发放 access token 和 refresh token
 	token, err := common.ReleaseToken(user)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 400, nil, "系统异常")
-
 		log.Printf("token generate error: %v", err)
 		return
 	}
+	refreshToken, err := common.ReleaseRefreshToken(user)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 400, nil, "系统异常")
+		log.Printf("refresh token generate error: %v", err)
+		return
+	}
+	// 将 refresh token 写入 Redis，使其一次性使用
+	rds := common.MyRedis
+	ctx := context.Background()
+	refreshKey := "refresh_token:" + refreshToken
+	rds.Set(ctx, refreshKey, strconv.Itoa(user.UserID), 30*24*time.Hour)
 	//返回结果
-	response.Success(c, gin.H{"token": token}, "登录成功")
+	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "登录成功")
+}
+
+// RefreshToken 用于通过 refresh_token 刷新 access token
+func RefreshToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
+		return
+	}
+
+	// 先检查 refresh token 是否在 Redis 中存在，保证一次性使用
+	rds := common.MyRedis
+	ctx := context.Background()
+	refreshKey := "refresh_token:" + req.RefreshToken
+	storedUserID, err := rds.Get(ctx, refreshKey).Result()
+	if err != nil || storedUserID == "" {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效或已使用")
+		return
+	}
+
+	token, claims, err := common.ParseRefreshToken(req.RefreshToken)
+	if err != nil || !token.Valid {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效")
+		return
+	}
+
+	userID := claims.UserID
+	if userID == 0 {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效")
+		return
+	}
+
+	db := common.GetDB()
+	var user model.User
+	if err := db.Where("userID = ?", userID).First(&user).Error; err != nil || user.UserID == 0 {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "用户不存在")
+		return
+	}
+
+	// refresh token 只能使用一次，立即删除旧的 refresh token 记录
+	rds.Del(ctx, refreshKey)
+
+	// 重新发放新的 access token 和 refresh token
+	newToken, err := common.ReleaseToken(user)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "生成新的token失败")
+		return
+	}
+	newRefreshToken, err := common.ReleaseRefreshToken(user)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "生成新的refresh token失败")
+		return
+	}
+	// 将新的 refresh token 写入 Redis
+	newRefreshKey := "refresh_token:" + newRefreshToken
+	rds.Set(ctx, newRefreshKey, strconv.Itoa(user.UserID), 30*24*time.Hour)
+
+	response.Success(c, gin.H{
+		"token":         newToken,
+		"refresh_token": newRefreshToken,
+	}, "刷新token成功")
 }
 
 func ModifyPassword(c *gin.Context) {
