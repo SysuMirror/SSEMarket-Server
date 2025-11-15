@@ -2,9 +2,15 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/big"
+	"net/smtp"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jordan-wright/email"
 	"github.com/redis/go-redis/v9"
@@ -12,35 +18,37 @@ import (
 	// 	"log"
 	"loginTest/common"
 	"loginTest/config"
-	"math/rand"
-	"net/smtp"
-	"strconv"
-	"strings"
-	"time"
 )
 
 func formVcode(ctx string) (string, string) {
-	rand.Seed(time.Now().Unix()) // unix 时间戳，秒
-	data := rand.Int() % 1000000
 	vcode := ""
-	for i := 1; i <= 6; i++ {
-		vcode += strconv.Itoa(data % 10)
-		data = data / 10
+	for i := 0; i < 6; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			// 如果生成出错退回到时间戳拼接
+			/*
+			vcode += strconv.Itoa(int(time.Now().UnixNano()%10))
+			continue
+			*/
+		}
+		vcode += strconv.Itoa(int(n.Int64()))
 	}
 	ctx = strings.Replace(ctx, "{{vcode}}", vcode, -1)
-	fmt.Println(ctx)
-	fmt.Println(vcode)
 	return ctx, vcode
 }
 
 func saveVcode(vcode, receiver string) {
 	rds := common.MyRedis
 	ctx := context.Background()
-	_, err := rds.Get(ctx, receiver).Result()
+	codeKey := "vcode:" + receiver
+	failKey := "vcode_fail:" + receiver
+	_, err := rds.Get(ctx, codeKey).Result()
 	if err == nil {
-		rds.Del(ctx, receiver)
+		rds.Del(ctx, codeKey)
 	}
-	rds.Set(ctx, receiver, vcode, 5*time.Minute)
+	// 重置失败次数
+	rds.Del(ctx, failKey)
+	rds.Set(ctx, codeKey, vcode, 5*time.Minute)
 }
 
 func SendEmail(receiver string, status int, msg string) error {
@@ -56,7 +64,8 @@ func SendEmail(receiver string, status int, msg string) error {
 	if status == 0 {
 		rds := common.MyRedis
 		ctx := context.Background()
-		_, err := rds.Get(ctx, receiver).Result()
+		codeKey := "vcode:" + receiver
+		_, err := rds.Get(ctx, codeKey).Result()
 		// 如果 err == nil，说明找到了验证码（key存在），说明验证码还未过期
 		// 如果 err == redis.Nil，说明 key 不存在，可以发送新验证码
 		if err == nil {
@@ -66,6 +75,7 @@ func SendEmail(receiver string, status int, msg string) error {
 		if err != redis.Nil {
 			return fmt.Errorf("检查验证码状态失败: %v", err)
 		}
+		e.Subject = config.ValidateTitle
 		text = config.ValidateText
 		text, vcode := formVcode(text)
 		saveVcode(vcode, receiver)

@@ -31,6 +31,8 @@ const (
 	VALIDATEFAILED  = 3
 )
 
+const MAX_VALIDATE_FAIL = 5
+
 func GetTokenUserID(c *gin.Context) int {
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
@@ -224,12 +226,22 @@ func Register(c *gin.Context) {
 	}
 	rds := common.MyRedis
 	ctx := context.Background()
-	correctValiCode, err := rds.Get(ctx, email).Result()
-	if err != nil {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
-	}
-	if correctValiCode != valiCode {
+	codeKey := "vcode:" + email
+	failKey := "vcode_fail:" + email
+	correctValiCode, err := rds.Get(ctx, codeKey).Result()
+	if err != nil || correctValiCode != valiCode {
+		failCountStr, _ := rds.Get(ctx, failKey).Result()
+		failCount := 0
+		if failCountStr != "" {
+			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
+				failCount = v
+			}
+		}
+		failCount++
+		rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute)
+		if failCount >= MAX_VALIDATE_FAIL {
+			rds.Del(ctx, codeKey)
+		}
 		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
 		return
 	}
@@ -286,7 +298,8 @@ func Register(c *gin.Context) {
 	}
 	//返回结果
 	response.Success(c, gin.H{"token": token}, "注册成功")
-	rds.Del(ctx, email)
+	rds.Del(ctx, codeKey)
+	rds.Del(ctx, failKey)
 }
 
 func IdentityValidate(c *gin.Context) {
@@ -328,15 +341,27 @@ func IdentityValidateService(email string, valiCode string) int {
 	}
 	rds := common.MyRedis
 	ctx := context.Background()
-	correctValiCode, err := rds.Get(ctx, email).Result()
-	if err != nil {
-		return VALIDATEFAILED
-	}
-	if correctValiCode != valiCode {
+	codeKey := "vcode:" + email
+	failKey := "vcode_fail:" + email
+	correctValiCode, err := rds.Get(ctx, codeKey).Result()
+	if err != nil || correctValiCode != valiCode {
+		failCountStr, _ := rds.Get(ctx, failKey).Result()
+		failCount := 0
+		if failCountStr != "" {
+			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
+				failCount = v
+			}
+		}
+		failCount++
+		rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute)
+		if failCount >= MAX_VALIDATE_FAIL {
+			rds.Del(ctx, codeKey)
+		}
 		return VALIDATEFAILED
 	}
 	//返回结果
-	rds.Del(ctx, email)
+	rds.Del(ctx, codeKey)
+	rds.Del(ctx, failKey)
 	return VALIDATESUCCESS
 }
 
