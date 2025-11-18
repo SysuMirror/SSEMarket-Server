@@ -7,6 +7,8 @@ import (
 	"loginTest/model"
 	"net/http"
 	"strings"
+
+ 	"fmt"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -29,6 +31,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		if isWs && len(tokenString) <= 7 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
+			fmt.Println(tokenString)
 			return
 		}
 		//若不是ws连接，表示有bearer
@@ -39,6 +42,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		if err != nil || !token.Valid {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
+			if(isWs) {
+				fmt.Println(tokenString)
+			}
 			return
 		}
 		//验证通过后获取claims中的userId
@@ -46,6 +52,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		if userId == 0 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
+			if(isWs) {
+				fmt.Println(tokenString)
+			}
 			return
 		}
 		db := common.GetDB()
@@ -54,7 +63,9 @@ func AuthMiddleware() gin.HandlerFunc {
 		//用户不存在
 		if user.UserID == 0 {
 			// 如果用户不存在，则将user设置为nil，表示当前用户为游客。
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
+			return;
 		} else {
 			// 用户存在，将user的信息写入上下文
 			ctx.Set("user", user)
