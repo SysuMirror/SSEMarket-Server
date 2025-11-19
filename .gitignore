@@ -3,7 +3,8 @@ loginTest.exe
 public/uploads
 public/resized
 ssl
-config/emailConst.go
 .env
 .vscode
 .idea
+.DS_Store
+*.DS_Store

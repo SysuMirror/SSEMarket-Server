@@ -302,10 +302,15 @@ func Register(c *gin.Context) {
 		log.Printf("refresh token generate error: %v", err)
 		return
 	}
-	// 将 refresh token 写入 Redis，使其一次性使用
-	refreshKey := "refresh_token:" + refreshToken
-	// 有效期与 refresh token 一致 30 天
-	rds.Set(ctx, refreshKey, strconv.Itoa(newUser.UserID), 30*24*time.Hour)
+	// 将 refresh token 记录到数据库，使其一次性使用
+	refreshRecord := model.RefreshToken{
+		UserID:    newUser.UserID,
+		Token:     refreshToken,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		IsUsed:    false,
+		CreatedAt: time.Now(),
+	}
+	db.Create(&refreshRecord)
 	//返回结果
 	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "注册成功")
 	rds.Del(ctx, codeKey)
@@ -447,32 +452,26 @@ func Login(c *gin.Context) {
 		log.Printf("refresh token generate error: %v", err)
 		return
 	}
-	// 将 refresh token 写入 Redis，使其一次性使用
-	rds := common.MyRedis
-	ctx := context.Background()
-	refreshKey := "refresh_token:" + refreshToken
-	rds.Set(ctx, refreshKey, strconv.Itoa(user.UserID), 30*24*time.Hour)
+	// 将 refresh token 记录到数据库，使其一次性使用
+	refreshRecord := model.RefreshToken{
+		UserID:    user.UserID,
+		Token:     refreshToken,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		IsUsed:    false,
+		CreatedAt: time.Now(),
+	}
+	db.Create(&refreshRecord)
 	//返回结果
 	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "登录成功")
 }
 
-// RefreshToken 用于通过 refresh_token 刷新 access token
+// 通过 refresh token 刷新 access token
 func RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
-		return
-	}
-
-	// 先检查 refresh token 是否在 Redis 中存在，保证一次性使用
-	rds := common.MyRedis
-	ctx := context.Background()
-	refreshKey := "refresh_token:" + req.RefreshToken
-	storedUserID, err := rds.Get(ctx, refreshKey).Result()
-	if err != nil || storedUserID == "" {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效或已使用")
 		return
 	}
 
@@ -495,8 +494,23 @@ func RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// refresh token 只能使用一次，立即删除旧的 refresh token 记录
-	rds.Del(ctx, refreshKey)
+	// 在数据库中检查 refresh token 是否存在且未使用，并未过期
+	var refreshRecord model.RefreshToken
+	if err := db.Where("token = ? AND user_id = ? AND is_used = ?", req.RefreshToken, userID, false).First(&refreshRecord).Error; err != nil || refreshRecord.ID == 0 {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效或已使用")
+		return
+	}
+	if time.Now().After(refreshRecord.ExpiresAt) {
+		// 标记为已使用，避免重复提示
+		refreshRecord.IsUsed = true
+		db.Save(&refreshRecord)
+		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 已过期")
+		return
+	}
+
+	// 将当前 refresh token 标记为已使用
+	refreshRecord.IsUsed = true
+	db.Save(&refreshRecord)
 
 	// 重新发放新的 access token 和 refresh token
 	newToken, err := common.ReleaseToken(user)
@@ -509,9 +523,15 @@ func RefreshToken(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "生成新的refresh token失败")
 		return
 	}
-	// 将新的 refresh token 写入 Redis
-	newRefreshKey := "refresh_token:" + newRefreshToken
-	rds.Set(ctx, newRefreshKey, strconv.Itoa(user.UserID), 30*24*time.Hour)
+	// 将新的 refresh token 记录到数据库
+	newRefreshRecord := model.RefreshToken{
+		UserID:    user.UserID,
+		Token:     newRefreshToken,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
+		IsUsed:    false,
+		CreatedAt: time.Now(),
+	}
+	db.Create(&newRefreshRecord)
 
 	response.Success(c, gin.H{
 		"token":         newToken,

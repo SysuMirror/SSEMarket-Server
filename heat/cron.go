@@ -31,6 +31,8 @@ func StartHeat() {
 
 	// 每h刷新
 	c.AddFunc("@hourly", RefreshHeat)
+	// 每 48 小时清理一次已使用的 refresh token
+	c.AddFunc("@every 48h", CleanUsedRefreshTokens)
 	c.Start()
 
 	// 防止程序退出
@@ -85,6 +87,25 @@ func RefreshHeat() {
 	} else {
 		fmt.Println("Redis热度前10帖子已刷新:", topPosts)
 	}
+}
+
+// CleanUsedRefreshTokens 定期清理已使用的 refresh token 记录
+func CleanUsedRefreshTokens() {
+	db := common.GetDB()
+
+	// 清理3天前的已使用token
+	retentionDays := 3
+	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
+
+	result := db.Where("is_used = ? AND updated_at < ?", true, cutoffTime).
+		Delete(&model.RefreshToken{})
+
+	if result.Error != nil {
+		log.Printf("清理已使用 refresh token 失败: %v", result.Error)
+		return
+	}
+
+	log.Printf("定期清理已使用 refresh token 完成，清理了 %d 条记录", result.RowsAffected)
 }
 
 // 计算帖子热度值的函数
