@@ -56,8 +56,8 @@ func SendEmail(receiver string, status int, msg string) error {
 	senderString := config.Sender
 	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)
 	e.From = senderString
-	if len(strings.Split(msg, "")) > 40 {
-		msg = msg[:40] + "..."
+	if len([]rune(msg)) > 40 {
+		msg = string([]rune(msg)[:40]) + "..."
 	}
 	e.To = []string{receiver}
 	text := ""
