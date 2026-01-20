@@ -97,7 +97,7 @@ func CleanUsedRefreshTokens() {
 	retentionDays := 3
 	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
 
-	result := db.Where("is_used = ? AND updated_at < ?", true, cutoffTime).
+	result := db.Where("is_used = ? AND created_at < ?", true, cutoffTime).
 		Delete(&model.RefreshToken{})
 
 	if result.Error != nil {
