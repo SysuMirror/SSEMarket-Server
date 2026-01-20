@@ -1377,9 +1377,6 @@ func GetStatistics(c *gin.Context) {
 	var savedCount int
 	db.Model(&model.Psave{}).Where("userID = ?", user.UserID).Count(&savedCount)
 
-	var chatCount int
-	db.Model(&model.ChatMsg{}).Where("userID = ?", user.UserID).Count(&chatCount)
-
 	chatMsgs := []model.ChatMsg{}
 	err := db.Where("senderUserID = ? OR targetUserID = ?", userId, userId).
 		Preload("TargetUser").
@@ -1389,6 +1386,8 @@ func GetStatistics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	chatCount := len(chatMsgs)
 
 	relevantRespUsers := []ChatUser{}
 	existsUserIDs := make(map[int]bool) // 去重：key=用户ID，value=是否已存在
