@@ -1287,8 +1287,8 @@ func ChangeEmailPushStatus(c *gin.Context) {
 }
 
 type ChatUser struct {
-	UserID    int    `json:"userID"`
-	Email     string `json:"email"`
+	UserID int `json:"userID"`
+	// Email     string `json:"email"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatarURL"`
 	Identity  string `json:"identity"`
@@ -1398,8 +1398,8 @@ func GetStatistics(c *gin.Context) {
 			if _, ok := existsUserIDs[chatMsg.TargetUserID]; !ok {
 				existsUserIDs[chatMsg.TargetUserID] = true
 				relevantRespUsers = append(relevantRespUsers, ChatUser{
-					UserID:    chatMsg.TargetUserID,
-					Email:     chatMsg.TargetUser.Email,
+					UserID: chatMsg.TargetUserID,
+					// Email:     chatMsg.TargetUser.Email,
 					Name:      chatMsg.TargetUser.Name,
 					AvatarURL: chatMsg.TargetUser.AvatarURL,
 					Identity:  chatMsg.TargetUser.Identity,
@@ -1413,8 +1413,8 @@ func GetStatistics(c *gin.Context) {
 			if _, ok := existsUserIDs[chatMsg.SenderUserID]; !ok {
 				existsUserIDs[chatMsg.SenderUserID] = true
 				relevantRespUsers = append(relevantRespUsers, ChatUser{
-					UserID:    chatMsg.SenderUserID,
-					Email:     chatMsg.SenderUser.Email,
+					UserID: chatMsg.SenderUserID,
+					// Email:     chatMsg.SenderUser.Email,
 					Name:      chatMsg.SenderUser.Name,
 					AvatarURL: chatMsg.SenderUser.AvatarURL,
 					Identity:  chatMsg.SenderUser.Identity,
@@ -1434,8 +1434,13 @@ func GetStatistics(c *gin.Context) {
 		}
 	}
 
-	maxSayUser := User{}
-	db.Where("userID = ?", maxSayUserID).First(&maxSayUser)
+	var maxSayUser ChatUser
+	for _, user := range relevantRespUsers {
+		if user.UserID == maxSayUserID {
+			maxSayUser = user
+			break
+		}
+	}
 
 	statistics := gin.H{
 		"name":         user.Name,      // 用户名
