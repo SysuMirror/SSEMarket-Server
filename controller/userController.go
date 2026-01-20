@@ -1285,3 +1285,187 @@ func ChangeEmailPushStatus(c *gin.Context) {
 		db.Model(&user).Update("is_email_notification_blocked", true)
 	}
 }
+
+type ChatUser struct {
+	UserID    int    `json:"userID"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarURL"`
+	Identity  string `json:"identity"`
+	Score     int    `json:"score"`
+}
+
+func GetStatistics(c *gin.Context) {
+	db := common.GetDB()
+	userId := GetTokenUserID(c)
+
+	user := model.User{}
+	db.Where("userID = ?", userId).First(&user)
+
+	curTime := time.Now()
+	durationTime := curTime.Sub(user.Banend)
+
+	lastYear := curTime.Year() - 1
+	statisticsStartTime := time.Date(lastYear, 1, 1, 0, 0, 0, 0, curTime.Location())
+	statisticsEndTime := time.Date(curTime.Year(), 1, 1, 0, 0, 0, 0, curTime.Location())
+
+	var posts []model.Post
+	var postIDs []int
+	db.Model(&model.Post{}).Where("userID = ?", userId).Find(&posts)
+
+	totalPostCnt := len(posts)
+
+	totalPostLikeNum := 0
+	thisYearPostCnt := 0
+	thisYearLikeNum := 0
+
+	maxPostLikeNum := 0
+	maxPostBrowseNum := 0
+	maxPostCommentNum := 0
+	for _, post := range posts {
+		postIDs = append(postIDs, post.PostID)
+		totalPostLikeNum += post.LikeNum
+		if post.PostTime.After(statisticsStartTime) && post.PostTime.Before(statisticsEndTime) {
+			thisYearPostCnt++
+			thisYearLikeNum += post.LikeNum
+
+			if post.LikeNum > maxPostLikeNum {
+				maxPostLikeNum = post.LikeNum
+			}
+			if post.BrowseNum > maxPostBrowseNum {
+				maxPostBrowseNum = post.BrowseNum
+			}
+			if post.CommentNum > maxPostCommentNum {
+				maxPostCommentNum = post.CommentNum
+			}
+		}
+	}
+
+	// 查询用户的 pcomment ID
+	var pcommentIDs []int
+	db.Model(&model.Pcomment{}).Where("userID = ?", user.UserID).Pluck("pcommentID", &pcommentIDs)
+	pCommentCnt := len(pcommentIDs)
+	pCommentLikeNum := 0
+
+	// 统计pcomment被点赞个数
+	for _, pcommentID := range pcommentIDs {
+		var likeNum int
+		db.Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).Select("like_num").Row().Scan(&likeNum)
+		pCommentLikeNum += likeNum
+	}
+	// 统计被收藏个数
+	var besavedCount int
+	db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&besavedCount)
+	// 统计帖子被评论个数
+	var commentedCount int
+	db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
+	// 统计评论被回复个数
+	var repliedCount int
+	db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
+	// 查询用户的 ccomment ID
+	var ccommentIDs []int
+	db.Model(&model.Ccomment{}).Where("userID = ?", user.UserID).Pluck("ccommentID", &ccommentIDs)
+	ccommentCnt := len(ccommentIDs)
+	ccommentLikeNum := 0
+	// 统计ccomment被点赞个数
+	for _, ccommentID := range ccommentIDs {
+		var likeNum int
+		db.Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).Select("like_num").Row().Scan(&likeNum)
+		ccommentLikeNum += likeNum
+	}
+
+	var savedCount int
+	db.Model(&model.Psave{}).Where("userID = ?", user.UserID).Count(&savedCount)
+
+	var chatCount int
+	db.Model(&model.ChatMsg{}).Where("userID = ?", user.UserID).Count(&chatCount)
+
+	chatMsgs := []model.ChatMsg{}
+	err := db.Where("senderUserID = ? OR targetUserID = ?", userId, userId).
+		Preload("TargetUser").
+		Preload("SenderUser").
+		Find(&chatMsgs).Error
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	relevantRespUsers := []ChatUser{}
+	existsUserIDs := make(map[int]bool) // 去重：key=用户ID，value=是否已存在
+	chatUserCnt := make(map[int]int)    // 统计每个用户的聊天句子数量：key=用户ID，value=聊天句子数量
+	for _, chatMsg := range chatMsgs {
+		if userId != chatMsg.TargetUserID {
+			if _, ok := existsUserIDs[chatMsg.TargetUserID]; !ok {
+				existsUserIDs[chatMsg.TargetUserID] = true
+				relevantRespUsers = append(relevantRespUsers, ChatUser{
+					UserID:    chatMsg.TargetUserID,
+					Email:     chatMsg.TargetUser.Email,
+					Name:      chatMsg.TargetUser.Name,
+					AvatarURL: chatMsg.TargetUser.AvatarURL,
+					Identity:  chatMsg.TargetUser.Identity,
+					Score:     chatMsg.TargetUser.Score,
+				})
+			}
+			chatUserCnt[chatMsg.TargetUserID]++
+		}
+
+		if userId != chatMsg.SenderUserID {
+			if _, ok := existsUserIDs[chatMsg.SenderUserID]; !ok {
+				existsUserIDs[chatMsg.SenderUserID] = true
+				relevantRespUsers = append(relevantRespUsers, ChatUser{
+					UserID:    chatMsg.SenderUserID,
+					Email:     chatMsg.SenderUser.Email,
+					Name:      chatMsg.SenderUser.Name,
+					AvatarURL: chatMsg.SenderUser.AvatarURL,
+					Identity:  chatMsg.SenderUser.Identity,
+					Score:     chatMsg.SenderUser.Score,
+				})
+			}
+			chatUserCnt[chatMsg.SenderUserID]++
+		}
+	}
+
+	maxSayUserID := 0
+	maxSayUserCnt := 0
+	for userID, cnt := range chatUserCnt {
+		if cnt > maxSayUserCnt {
+			maxSayUserID = userID
+			maxSayUserCnt = cnt
+		}
+	}
+
+	maxSayUser := User{}
+	db.Where("userID = ?", maxSayUserID).First(&maxSayUser)
+
+	statistics := gin.H{
+		"name":         user.Name,      // 用户名
+		"intro":        user.Intro,     // 用户介绍
+		"score":        user.Score,     // 用户积分
+		"avatarUrl":    user.AvatarURL, // 用户头像URL
+		"durationTime": durationTime,   // 注册时间
+
+		"totalPostCnt":     totalPostCnt,      // 总帖子数量
+		"totalPostLikeNum": totalPostLikeNum,  // 总点赞数量
+		"thisYearPostCnt":  thisYearPostCnt,   // 这一年发布的帖子数量
+		"thisYearLikeNum":  thisYearLikeNum,   // 这一年收到的点赞数量
+		"maxLikeNum":       maxPostLikeNum,    // 这一年发布的帖子中点赞数量最多的帖子的点赞数量
+		"maxBrowseNum":     maxPostBrowseNum,  // 这一年发布的帖子中浏览数量最多的帖子的浏览数量
+		"maxCommentNum":    maxPostCommentNum, // 这一年发布的帖子中评论数量最多的帖子的评论数量
+
+		"pCommentCnt":     pCommentCnt,     // 总评论数量
+		"pCommentLikeNum": pCommentLikeNum, // 总评论点赞数量
+		"ccommentCnt":     ccommentCnt,     // 总回复数量
+		"ccommentLikeNum": ccommentLikeNum, // 总回复点赞数量\
+
+		"beSavedCount":     besavedCount,   // 总被收藏数量
+		"beCommentedCount": commentedCount, // 总被评论数量
+		"repliedCount":     repliedCount,   // 总被回复数量
+
+		"savedCount":        savedCount,        // 总收藏数量
+		"chatCount":         chatCount,         // 总聊天句子数量
+		"relevantRespUsers": relevantRespUsers, // 相关聊天用户列表
+		"maxSayUser":        maxSayUser,        // 最常联系用户
+		"maxSayUserCnt":     maxSayUserCnt,     // 最常联系用户的聊天句子数量
+	}
+	response.Response(c, http.StatusOK, 200, statistics, "获取用户统计信息成功")
+}

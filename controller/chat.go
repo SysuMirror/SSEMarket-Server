@@ -377,7 +377,6 @@ func GetRelevantUser(userID int) ([]byte, error) {
 		if msg.TargetUserID == msg.SenderUserID && !exist1 {
 			relevantRespUsersMap[msg.SenderUser] = 1
 		}
-
 	}
 
 	//获得是否未读对方信息
