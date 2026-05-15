@@ -15,7 +15,6 @@ import (
 	"loginTest/response"
 	"loginTest/service"
 	"loginTest/util"
-	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"sort"
@@ -162,6 +161,8 @@ func Post(c *gin.Context) {
 
 type PostResponse struct {
 	PostID        uint
+	Partition     string
+	UserID        int
 	UserName      string
 	UserScore     int
 	UserTelephone string
@@ -193,6 +194,7 @@ type BrowseMeg struct {
 
 type ReviewResponse struct {
 	PostID        uint
+	UserID        int
 	UserName      string
 	UserScore     int
 	UserTelephone string
@@ -293,6 +295,8 @@ func Browse(c *gin.Context) {
 			_, isLiked := likedSet[post.PostID]
 			postResponses = append(postResponses, PostResponse{
 				PostID:        uint(post.PostID),
+				Partition:     post.Partition,
+				UserID:        post.UserID,
 				UserName:      user.Name,
 				UserScore:     user.Score,
 				UserTelephone: user.Phone,
@@ -343,6 +347,7 @@ func Browse(c *gin.Context) {
 		cnt := starsCountFromRstars(stars)
 		reviewResponses = append(reviewResponses, ReviewResponse{
 			PostID:        uint(post.PostID),
+			UserID:        post.UserID,
 			UserName:      user.Name,
 			UserScore:     user.Score,
 			UserTelephone: user.Phone,
@@ -364,6 +369,128 @@ func Browse(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, reviewResponses)
+}
+
+type UserProfilePostsMsg struct {
+	UserTelephone string `json:"userTelephone"`
+	TargetUserID  int    `json:"targetUserID"`
+	Limit         int    `json:"limit"`
+	Offset        int    `json:"offset"`
+}
+
+// UserProfilePosts 个人主页发帖列表（不含「打分」）；对方开启「隐藏发帖」且浏览者非本人时返回空。
+func UserProfilePosts(c *gin.Context) {
+	db := common.GetDB()
+	var req UserProfilePostsMsg
+	_ = c.Bind(&req)
+	if req.TargetUserID <= 0 {
+		c.JSON(http.StatusOK, []PostResponse{})
+		return
+	}
+	var viewer model.User
+	db.Where("phone = ?", req.UserTelephone).First(&viewer)
+	if viewer.UserID == 0 {
+		c.JSON(http.StatusOK, []PostResponse{})
+		return
+	}
+	var target model.User
+	if err := db.Where("userID = ?", req.TargetUserID).First(&target).Error; err != nil {
+		c.JSON(http.StatusOK, []PostResponse{})
+		return
+	}
+	if target.HideProfilePosts && viewer.UserID != target.UserID {
+		c.JSON(http.StatusOK, []PostResponse{})
+		return
+	}
+	limit, offset := req.Limit, req.Offset
+	if limit <= 0 || limit > 50 {
+		limit = 15
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var posts []model.Post
+	db.Where("userID = ? AND `partition` != ?", target.UserID, "打分").
+		Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
+	if len(posts) == 0 {
+		c.JSON(http.StatusOK, []PostResponse{})
+		return
+	}
+	postIDs := make([]int, 0, len(posts))
+	userIDs := make(map[int]struct{})
+	for _, p := range posts {
+		postIDs = append(postIDs, p.PostID)
+		if p.UserID != 0 {
+			userIDs[p.UserID] = struct{}{}
+		}
+	}
+	savedSet := browseBatchSavedSet(db, viewer.UserID, postIDs)
+	likedSet := browseBatchLikedSet(db, viewer.UserID, postIDs)
+	userMap := browseBatchUserMap(db, userIDs)
+	postResponses := make([]PostResponse, 0, len(posts))
+	for _, post := range posts {
+		u := browseGetUserForPost(userMap, post.UserID)
+		_, isSaved := savedSet[post.PostID]
+		_, isLiked := likedSet[post.PostID]
+		postResponses = append(postResponses, PostResponse{
+			PostID:        uint(post.PostID),
+			Partition:     post.Partition,
+			UserID:        post.UserID,
+			UserName:      u.Name,
+			UserScore:     u.Score,
+			UserTelephone: u.Phone,
+			UserAvatar:    u.AvatarURL,
+			UserIdentity:  u.Identity,
+			Title:         post.Title,
+			Content:       post.Ptext,
+			Like:          post.LikeNum,
+			Comment:       post.CommentNum,
+			Browse:        post.BrowseNum,
+			Heat:          post.Heat,
+			PostTime:      post.PostTime,
+			IsSaved:       isSaved,
+			IsLiked:       isLiked,
+			Photos:        post.Photos,
+			Tag:           post.Tag,
+		})
+	}
+	c.JSON(http.StatusOK, postResponses)
+}
+
+type UserProfilePostNumMsg struct {
+	UserTelephone string `json:"userTelephone"`
+	TargetUserID  int    `json:"targetUserID"`
+}
+
+// UserProfilePostNum 个人主页可展示的发帖总数（不含「打分」）；隐藏时对非本人返回 0。
+func UserProfilePostNum(c *gin.Context) {
+	db := common.GetDB()
+	var req UserProfilePostNumMsg
+	_ = c.Bind(&req)
+	count := 0
+	if req.TargetUserID <= 0 {
+		c.JSON(http.StatusOK, gin.H{"Postcount": count})
+		return
+	}
+	var viewer model.User
+	db.Where("phone = ?", req.UserTelephone).First(&viewer)
+	if viewer.UserID == 0 {
+		c.JSON(http.StatusOK, gin.H{"Postcount": count})
+		return
+	}
+	var target model.User
+	if err := db.Where("userID = ?", req.TargetUserID).First(&target).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"Postcount": count})
+		return
+	}
+	if target.HideProfilePosts && viewer.UserID != target.UserID {
+		c.JSON(http.StatusOK, gin.H{"Postcount": 0})
+		return
+	}
+	db.Model(&model.Post{}).
+		Where("userID = ? AND `partition` != ?", target.UserID, "打分").
+		Count(&count)
+	c.JSON(http.StatusOK, gin.H{"Postcount": count})
 }
 
 func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.Post {
@@ -694,6 +821,9 @@ func UpdateLike(c *gin.Context) {
 			db.Create(&newLike)
 		}
 	}
+
+	cacheKey := util.GetPostDetailKey(int(postID))
+	common.DelMultiLevelCache(cacheKey)
 }
 
 type BrowseMsg struct {
@@ -703,7 +833,8 @@ type BrowseMsg struct {
 	// BrowseNum     int
 }
 
-// 修改浏览量为浏览用户数量,原本为浏览人次
+// UpdateBrowseNum 仅记录「该用户是否已浏览过该帖」（Pbrowse）并更新 heat。
+// 帖子浏览人次 browse_num 仅由 ShowDetails 中的 HotData.IncrBrowseCount（Redis）及 syncToDB 写入 MySQL，避免双写与随机注水。
 func UpdateBrowseNum(c *gin.Context) {
 	db := common.GetDB()
 	var requestBrowseMsg BrowseMsg
@@ -723,10 +854,6 @@ func UpdateBrowseNum(c *gin.Context) {
 	var browsed model.Pbrowse
 	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
 	if browsed.PbrowseID == 0 {
-		rand.Seed(time.Now().UnixNano())
-		r := rand.Intn(4)
-		db.Model(&post).Update("browse_num", post.BrowseNum+r+1)
-		// 在这里设置 浏览 的权重
 		weightBrowse := float64(1)
 		db.Model(&post).Update("heat", post.Heat+weightBrowse)
 		newBrowse := model.Pbrowse{
@@ -860,31 +987,87 @@ type PostDetailsMsg struct {
 	PostType      string `json:"postType"`
 }
 
+// showDetailStepTimer 单次 ShowDetails 请求内各阶段耗时，结束时由 defer 统一打日志
+type showDetailStepTimer struct {
+	start  time.Time
+	last   time.Time
+	steps  []showDetailTimedStep
+	postID uint
+}
+
+type showDetailTimedStep struct {
+	name string
+	d    time.Duration
+}
+
+func newShowDetailStepTimer() *showDetailStepTimer {
+	now := time.Now()
+	return &showDetailStepTimer{start: now, last: now}
+}
+
+func (s *showDetailStepTimer) setPostID(id uint) {
+	s.postID = id
+}
+
+func (s *showDetailStepTimer) step(name string) {
+	now := time.Now()
+	s.steps = append(s.steps, showDetailTimedStep{name: name, d: now.Sub(s.last)})
+	s.last = now
+}
+
+func (s *showDetailStepTimer) finish() {
+	total := time.Since(s.start)
+	var b strings.Builder
+	b.WriteString("[ShowDetails] postID=")
+	b.WriteString(strconv.FormatUint(uint64(s.postID), 10))
+	b.WriteString(" total=")
+	b.WriteString(total.String())
+	for _, st := range s.steps {
+		b.WriteString(" ")
+		b.WriteString(st.name)
+		b.WriteString("=")
+		b.WriteString(st.d.String())
+	}
+	// 与 Gin 默认访问日志一致写到 stdout；标准库 log 默认 stderr，在部分终端/采集里不可见
+	fmt.Println(b.String())
+}
+
 // ShowDetails 重构最终版：两级缓存 + 浏览数高并发优化 + 无HEAT维护
 func ShowDetails(c *gin.Context) {
+	timing := newShowDetailStepTimer()
+	defer timing.finish()
+
 	db := common.GetDB()
 	var requestPostDetailsMsg PostDetailsMsg
 
 	// 绑定参数
 	if err := c.ShouldBindBodyWith(&requestPostDetailsMsg, binding.JSON); err != nil {
+		timing.step("bind_body")
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析失败")
 		return
 	}
+	timing.step("bind_body")
 
 	userTelephone := requestPostDetailsMsg.UserTelephone
 	postID := requestPostDetailsMsg.PostID
 
 	var temUser model.User
 	if err := db.Where("phone = ?", userTelephone).First(&temUser).Error; err != nil {
+		timing.step("load_user_by_phone")
 		response.Response(c, http.StatusNotFound, 404, nil, "无法解析当前用户")
 		return
 	}
+	timing.step("load_user_by_phone")
 
 	// 校验帖子ID
 	if postID == 0 {
+		timing.setPostID(0)
+		timing.step("validate_post_id")
 		response.Response(c, http.StatusBadRequest, 404, nil, "接收到的postID为空")
 		return
 	}
+	timing.setPostID(postID)
+	timing.step("validate_post_id")
 
 	// ===================== 【核心：两级缓存读取冷数据】 =====================
 	var post model.Post
@@ -918,6 +1101,7 @@ func ShowDetails(c *gin.Context) {
 		dto.ConvertFromModel(dbPost, cacheUser)
 		return &dto, nil
 	}, baseExpire)
+	timing.step("multilevel_get")
 
 	if err != nil {
 		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
@@ -925,19 +1109,37 @@ func ShowDetails(c *gin.Context) {
 	}
 
 	post, user = dtoObj.ConvertToModel()
+	timing.step("dto_to_model")
 
 	// ===================== 【浏览数高并发优化：本地聚合 + 批量同步】 =====================
 	post.BrowseNum = int(service.HotData.IncrBrowseCount(postIDInt))
+	timing.step("browse_incr")
 
 	// ===================== 以下所有逻辑 100% 完全不变 =====================
 	queryIsLiked := func() bool {
-		return false
+		isLiked := false
+		var like model.Plike
+		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
+		if like.PlikeID != 0 {
+			isLiked = true
+		}
+		return isLiked
 	}
 
-	if isPost(postID) {
+	isNormalPost := isPost(postID)
+	timing.step("is_post_query")
+
+	if isNormalPost {
 		// ------------------- 普通帖子分支 -------------------
 		isLiked := queryIsLiked()
+		timing.step("query_plike")
 		isSaved := false
+		var save model.Psave
+		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
+		if save.PsaveID != 0 {
+			isSaved = true
+		}
+		timing.step("query_psave")
 
 		postDetailsResponse := PostDetailsResponse{
 			PostID:        uint(post.PostID),
@@ -960,13 +1162,17 @@ func ShowDetails(c *gin.Context) {
 			Tag:           post.Tag,
 		}
 		c.JSON(http.StatusOK, postDetailsResponse)
+		timing.step("write_json")
 	} else {
 		// ------------------- 评分帖子分支 -------------------
 		isLiked := queryIsLiked()
+		timing.step("query_plike")
 		var stars []model.Rstar
 		var userStar model.Rstar
 		db.Where("postID = ? AND userID = ?", postID, temUser.UserID).First(&userStar)
+		timing.step("query_rstar_user")
 		db.Where("postID = ?", postID).Find(&stars)
+		timing.step("query_rstar_list")
 
 		var cnt [5]int
 		var totalRatings float64
@@ -1006,6 +1212,7 @@ func ShowDetails(c *gin.Context) {
 			UserStar:      userStar.StarNum,
 		}
 		c.JSON(http.StatusOK, postDetailsResponse)
+		timing.step("write_json")
 	}
 }
 func getAverageRating(postID uint) float64 {

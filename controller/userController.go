@@ -1141,14 +1141,15 @@ func GetInfo(c *gin.Context) {
 		return
 	}
 	info := gin.H{
-		"userID":    user.UserID,
-		"name":      user.Name,
-		"phone":     user.Phone,
-		"intro":     user.Intro,
-		"score":     user.Score,
-		"ban":       user.Banend,
-		"punishnum": user.Punishnum,
-		"avatarURL": user.AvatarURL,
+		"userID":           user.UserID,
+		"name":             user.Name,
+		"phone":            user.Phone,
+		"intro":            user.Intro,
+		"score":            user.Score,
+		"ban":              user.Banend,
+		"punishnum":        user.Punishnum,
+		"avatarURL":        user.AvatarURL,
+		"hideProfilePosts": user.HideProfilePosts,
 	}
 
 	// 判断为本人
@@ -1162,14 +1163,15 @@ func GetInfo(c *gin.Context) {
 }
 
 type updateUser struct {
-	UserID    int    `json:"userID"`
-	Phone     string `json:"phone"`
-	Email     string `json:"email"`
-	Password  string `json:"password"`
-	Name      string `json:"name"`
-	Num       int    `json:"num"`
-	Intro     string `json:"intro"`
-	AvatarURL string `json:"avatarURL"`
+	UserID           int    `json:"userID"`
+	Phone            string `json:"phone"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	Name             string `json:"name"`
+	Num              int    `json:"num"`
+	Intro            string `json:"intro"`
+	AvatarURL        string `json:"avatarURL"`
+	HideProfilePosts *bool  `json:"hideProfilePosts,omitempty"`
 }
 
 func UpdateUserInfo(c *gin.Context) {
@@ -1204,6 +1206,9 @@ func UpdateUserInfo(c *gin.Context) {
 	//user.Num = userInfo.Num
 	user.Intro = userInfo.Intro
 	user.AvatarURL = userInfo.AvatarURL
+	if userInfo.HideProfilePosts != nil {
+		user.HideProfilePosts = *userInfo.HideProfilePosts
+	}
 
 	if err := db.Save(&user).Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")

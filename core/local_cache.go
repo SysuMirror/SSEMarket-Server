@@ -17,7 +17,7 @@ func InitLocalCache() {
 	config := bigcache.Config{
 		Shards: 2,
 		// 缓存过期时间：5分钟（热点数据）
-		LifeWindow: 5 * time.Minute,
+		LifeWindow: 500 * time.Minute,
 		// 后台清理过期数据间隔
 		CleanWindow: 1 * time.Minute,
 		// 最大缓存数量，避免OOM

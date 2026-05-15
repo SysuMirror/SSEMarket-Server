@@ -19,6 +19,7 @@ type NoticeResponse struct {
 	ReceiverName string    `json:"receiverName"`
 	SenderName   string    `json:"senderName"`
 	SenderAvatar string    `json:"senderAvatar"`
+	SenderID     int       `json:"senderID"`
 	Type         string    `json:"type"`
 	Content      string    `json:"content"`
 	Read         bool      `json:"read"`
@@ -90,6 +91,7 @@ func GetNotice(c *gin.Context) {
 				ReceiverName: user.Name,
 				SenderName:   temuser.Name,
 				SenderAvatar: temuser.AvatarURL,
+				SenderID:     notice.Sender,
 				Type:         notice.Type,
 				Content:      notice.Ntext,
 				Read:         notice.Read,
@@ -105,6 +107,7 @@ func GetNotice(c *gin.Context) {
 				ReceiverName: user.Name,
 				SenderName:   temuser.Name,
 				SenderAvatar: temuser.AvatarURL,
+				SenderID:     notice.Sender,
 				Type:         notice.Type,
 				Content:      notice.Ntext,
 				Read:         notice.Read,
@@ -118,6 +121,7 @@ func GetNotice(c *gin.Context) {
 				ReceiverName: user.Name,
 				SenderName:   temuser.Name,
 				SenderAvatar: temuser.AvatarURL,
+				SenderID:     notice.Sender,
 				Type:         notice.Type,
 				Content:      notice.Ntext,
 				Read:         notice.Read,
@@ -131,6 +135,7 @@ func GetNotice(c *gin.Context) {
 				ReceiverName: user.Name,
 				SenderName:   temuser.Name,
 				SenderAvatar: temuser.AvatarURL,
+				SenderID:     notice.Sender,
 				Type:         notice.Type,
 				Content:      notice.Ntext,
 				Read:         notice.Read,

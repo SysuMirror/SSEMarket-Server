@@ -45,6 +45,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)
+	auth.POST("/api/auth/userProfilePosts", controller.UserProfilePosts)
+	auth.POST("/api/auth/userProfilePostNum", controller.UserProfilePostNum)
 	auth.POST("/api/auth/getPostNum", controller.GetPostNum)
 	auth.POST("/api/auth/deleteMe", controller.DeleteMe)
 	auth.POST("/api/auth/updateLike", controller.UpdateLike)
@@ -122,5 +124,6 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/noViolation", controller.NoViolation)
 	adminAuth.POST("/api/auth/violation", controller.Violation)
 	adminAuth.POST("/api/auth/adminPost", controller.AdminPost)
+
 	return r
 }

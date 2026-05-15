@@ -31,7 +31,7 @@ services:
   mysql:
     image: mysql:8.1
     container_name: sse_market_db
-    restart: on-failure:3
+    restart: always
     command: --max_connections=1000 --default-authentication-plugin=mysql_native_password --innodb_lock_wait_timeout=500
     ports:
       - 3506:3306
@@ -41,14 +41,18 @@ services:
       - MYSQL_DATABASE=ssemarket
     volumes:
       - my-vol:/var/lib/mysql
+  # AOF：降低重启丢 post:browse:count:* 导致与 MySQL 分叉的风险；生产仍需关注 maxmemory 与备份策略。
   redis:
     image: redis:latest
+    restart: always
+    command: redis-server --appendonly yes
     environment:
       - TZ=Asia/Shanghai
   sse_market_server:
     image: sse_market_server:latest
     container_name: server
     restart: on-failure:3
+    # build: ../SSE_market_server_old
     build: .
     ports:
       - 8080:8080
@@ -90,6 +94,8 @@ services:
     image: nginx_proxy
     restart: on-failure:3
     build: ../nginx_proxy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - 80:80
       - 443:443
@@ -146,17 +152,17 @@ services:
 
 volumes:
   my-vol:
-# blog_db_data: 
-#   external: true
-# wordpress_data: 
-# blog_wordpress_data:
-#   external: true
-# --------------
-# db-data:
-# event-data:
-# event-logs:
-# plausible-data:
-# --------------
+    # blog_db_data: 
+    #   external: true
+    # wordpress_data: 
+    # blog_wordpress_data:
+    #   external: true
+    # --------------
+    # db-data:
+    # event-data:
+    # event-logs:
+    # plausible-data:
+    # --------------
 
 networks:
   sse_market_network:

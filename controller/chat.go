@@ -71,16 +71,22 @@ func GetChatHistory(c *gin.Context) {
 		response.Fail(c, gin.H{}, "没有权利查看他人聊天记录")
 		return
 	}
-	removeChatViewInRedis(chatQuery.SenderUserID)
+	_ = removeChatViewInRedis(chatQuery.SenderUserID)
 
+	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
+	defer cancel()
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
 	//设置redis表示用户存在当前聊天界面
-	if err := core.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 24*time.Hour).Err(); err != nil {
+	if err := core.MyRedis.Set(redisCtx, chatViewKey, 1, 24*time.Hour).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 	}
+	_ = core.MyRedis.SAdd(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
 	//清空redis的未读情况
-	if err := core.MyRedis.Del(c, util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err(); err != nil {
+	unreadKey := util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	if err := core.MyRedis.Del(redisCtx, unreadKey).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 	}
+	_ = core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(chatQuery.SenderUserID), unreadKey).Err()
 
 	//获得聊天信息
 	chatList, err := GetChatHistoryService(chatQuery.SenderUserID, chatQuery.TargetUserID)
@@ -112,32 +118,19 @@ func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatHistoryResp,
 
 // 取消用户redis里所有的在线状态
 func removeChatViewInRedis(userID int) error {
-	ctx := context.Background()
-	prefix := fmt.Sprintf("%dTo*IsExist", userID) // 构建键前缀
-	cursor := uint64(0)
-	redisClient := core.MyRedis // 使用你的 Redis 客户端实例
-
-	// 遍历所有以 userIDTo 为前缀的键
-	for {
-		keys, cursor, err := redisClient.Scan(ctx, cursor, prefix, 100).Result() // 扫描符合条件的键
-		if err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	indexKey := util.GenerateChatViewIndexKey(userID)
+	keys, err := core.MyRedis.SMembers(ctx, indexKey).Result()
+	if err != nil && err != redis.Nil {
+		return err
+	}
+	if len(keys) > 0 {
+		if _, err = core.MyRedis.Del(ctx, keys...).Result(); err != nil {
 			return err
 		}
-
-		if len(keys) > 0 {
-			// 删除找到的键
-			if _, err := redisClient.Del(ctx, keys...).Result(); err != nil {
-				return err
-			}
-		}
-
-		// 如果 cursor 为 0，表示扫描结束
-		if cursor == 0 {
-			break
-		}
 	}
-
-	return nil
+	return core.MyRedis.Del(ctx, indexKey).Err()
 }
 
 // 聊天ws
@@ -157,8 +150,8 @@ func ChatHandler(c *gin.Context) {
 		userID = user.UserID
 	}
 
-	//取消用户redis里所有的在线状态
-	removeChatViewInRedis(userID)
+	// 避免 Redis 异常阻塞握手：清理逻辑异步执行
+	go removeChatViewInRedis(userID)
 
 	chatFunc(c.Request, c.Writer, userID)
 }
@@ -322,7 +315,11 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 	}
 	if !ok {
 		Chat_EmailAlerter(chatMsg.TargetUserID, "")
-		core.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
+		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		unreadKey := util.GenerateUnreadKey(userID, chatMsg.SenderUserID)
+		core.MyRedis.Incr(redisCtx, unreadKey)
+		core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(userID), unreadKey)
 		return
 	}
 	node, ok := val.(*ChatNode)
@@ -332,9 +329,13 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		if chatMsgID != 0 {
 			//检查接受者是否在聊天界面
 			chatMsg.ChatMsgID = chatMsgID
-			err := core.MyRedis.Get(context.Background(), util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
+			redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			err := core.MyRedis.Get(redisCtx, util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
 			if err == redis.Nil { //不在聊天界面,添加未读
-				resUnread := core.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
+				unreadKey := util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID)
+				resUnread := core.MyRedis.Incr(redisCtx, unreadKey)
+				core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(chatMsg.TargetUserID), unreadKey)
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
 				Chat_EmailAlerter(chatMsg.TargetUserID, "")
@@ -382,7 +383,9 @@ func GetRelevantUser(userID int) ([]byte, error) {
 
 	//获得是否未读对方信息
 	for relevantUser := range relevantRespUsersMap {
-		unreadStr, err := core.MyRedis.Get(context.Background(), util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
+		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
+		cancel()
 		unreadNum, _ := strconv.Atoi(unreadStr)
 		if err != nil && err != redis.Nil {
 			return nil, err
@@ -434,7 +437,11 @@ func LeaveChatView(c *gin.Context) {
 	}
 
 	//	删除redis存储的键值对
-	err := core.MyRedis.Del(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err()
+	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
+	defer cancel()
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	err := core.MyRedis.Del(redisCtx, chatViewKey).Err()
+	_ = core.MyRedis.SRem(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
 	if err != nil {
 		response.Fail(c, gin.H{}, "操作异常")
 	} else {
@@ -452,49 +459,36 @@ func GetChatNotice(c *gin.Context) {
 		return
 	}
 
-	// 生成 Redis key 的前缀
-	keyPrefix := fmt.Sprintf("%dRecvUnread", userID)
-
-	var cursor uint64
 	var totalUnread int // 总的未读数
 
-	// 使用 SCAN 进行分页遍历
-	for {
-		scanKeys, nextCursor, err := core.MyRedis.Scan(c, cursor, keyPrefix+"*", 10).Result()
+	// 使用未读索引集合，避免全库 SCAN
+	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
+	defer cancel()
+	unreadKeys, err := core.MyRedis.SMembers(redisCtx, util.GenerateUnreadIndexKey(userID)).Result()
+	if err != nil && err != redis.Nil {
+		response.Fail(c, gin.H{}, "操作异常")
+		return
+	}
+	if len(unreadKeys) > 0 {
+		unreadVals, err := core.MyRedis.MGet(redisCtx, unreadKeys...).Result()
 		if err != nil {
-			response.Fail(c, gin.H{}, "操作异常")
+			response.Fail(c, gin.H{}, "获取未读消息失败")
 			return
 		}
-
-		// 遍历所有匹配的键
-		for _, key := range scanKeys {
-			// 获取 key 对应的 value
-			unreadStr, err := core.MyRedis.Get(c, key).Result()
-			if err != nil && err != redis.Nil {
-				response.Fail(c, gin.H{}, "获取未读消息失败")
-				return
+		for i, v := range unreadVals {
+			if v == nil {
+				_ = core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(userID), unreadKeys[i]).Err()
+				continue
 			}
-
-			if unreadStr == "" {
-				continue // 如果没有找到值，跳过
+			unreadStr, ok := v.(string)
+			if !ok || unreadStr == "" {
+				continue
 			}
-
-			// 将 value 转换为整数并累加
-			unreadCount, err := strconv.Atoi(unreadStr)
-			if err != nil {
-				response.Fail(c, gin.H{}, "无效的未读消息格式")
-				return
+			unreadCount, convErr := strconv.Atoi(unreadStr)
+			if convErr != nil {
+				continue
 			}
-
 			totalUnread += unreadCount
-		}
-
-		// 更新 cursor，继续扫描下一批 keys
-		cursor = nextCursor
-
-		// 如果 cursor 为 0，说明扫描结束
-		if cursor == 0 {
-			break
 		}
 	}
 
@@ -508,7 +502,13 @@ func Chat_EmailAlerter(receiverID int, msg string) {
 	db := common.GetDB()
 	var receiver model.User
 	db.Where("userID = ?", receiverID).First(&receiver)
-	if !receiver.ISEmailNotificationBlocked {
-		api.SendEmail(receiver.Email, 2, msg)
+	if receiver.ISEmailNotificationBlocked || receiver.Email == "" {
+		return
 	}
+	emailAddr, body := receiver.Email, msg
+	go func() {
+		if err := api.SendEmail(emailAddr, 2, body); err != nil {
+			fmt.Println("async chat notify email:", err)
+		}
+	}()
 }

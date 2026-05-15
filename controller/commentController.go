@@ -1035,6 +1035,15 @@ func UpdateCcommentDeny(c *gin.Context) {
 	}
 }
 
+// EmailAlerter 异步发信，避免 SMTP 握手阻塞 HTTP 响应（评论/回复通知）。
 func EmailAlerter(receiver string, status int, msg string) {
-	api.SendEmail(receiver, status, msg)
+	if receiver == "" {
+		return
+	}
+	r, s, m := receiver, status, msg
+	go func() {
+		if err := api.SendEmail(r, s, m); err != nil {
+			fmt.Println("async notify email:", err)
+		}
+	}()
 }
