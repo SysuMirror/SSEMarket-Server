@@ -125,24 +125,35 @@ func GetProducts(c *gin.Context) {
 		c.JSON(400, "未找到该用户")
 		return
 	}
+
 	var products []model.Product
-	var responses []ProductReponse
+	query := db.Model(&model.Product{}).Where("is_delete = ?", false)
+
 	if searchsort == "home" {
-		if len(searchinfo) == 0 {
-			db.Order("productID DESC").Offset(offset).Limit(limit).
-				Where("is_delete = ?", false).
-				Find(&products)
-		} else {
-			db.Order("productID DESC").Offset(offset).Limit(limit).
-				Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").
-				Where("is_delete = ?", false).
-				Find(&products)
+		if len(searchinfo) > 0 {
+			query = query.Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%")
 		}
 	} else {
-		db.Order("productID DESC").Offset(offset).Limit(limit).
-			Where("is_delete = ?", false).
-			Find(&products, "`userID` = ?", user.UserID)
+		query = query.Where("userID = ?", user.UserID)
 	}
+
+	query.Order("productID DESC").Offset(offset).Limit(limit).Find(&products)
+
+	userIDs := make([]int, 0, len(products))
+	for _, p := range products {
+		userIDs = append(userIDs, p.UserID)
+	}
+
+	var users []model.User
+	userMap := make(map[int]model.User)
+	if len(userIDs) > 0 {
+		db.Where("userID IN ?", userIDs).Find(&users)
+		for _, u := range users {
+			userMap[u.UserID] = u
+		}
+	}
+
+	var responses []ProductReponse
 	for _, product := range products {
 		photo := strings.Split(product.Photos, ",")
 		for i, photoURL := range photo {
@@ -153,13 +164,11 @@ func GetProducts(c *gin.Context) {
 		var sellerID int
 
 		if searchsort == "home" {
-			// 首页显示所有商品，需要获取每个商品的实际卖家信息
-			var seller model.User
-			db.Where("userID = ?", product.UserID).First(&seller)
-			sellerName = seller.Name
-			sellerID = seller.UserID
+			if seller, ok := userMap[product.UserID]; ok {
+				sellerName = seller.Name
+				sellerID = seller.UserID
+			}
 		} else {
-			// 我的商品页面，所有商品都是当前用户的，直接使用当前用户信息
 			sellerName = user.Name
 			sellerID = user.UserID
 		}

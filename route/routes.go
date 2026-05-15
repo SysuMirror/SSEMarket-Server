@@ -21,6 +21,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	oauth := r.Group("")
 
 	auth.Use(middleware.AuthMiddleware())
+	auth.Use(middleware.BloomFilterMiddleware()) // 使用布隆过滤器防止恶意攻击
 	oauth.Use(middleware.OAuthMiddleware())
 
 	//OAuth2认证

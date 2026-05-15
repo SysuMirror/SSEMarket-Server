@@ -7,6 +7,7 @@ import (
 	"log"
 	"loginTest/api"
 	"loginTest/common"
+	"loginTest/core"
 	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/response"
@@ -224,7 +225,7 @@ func Register(c *gin.Context) {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱已存在")
 		return
 	}
-	rds := common.MyRedis
+	rds := core.MyRedis
 	ctx := context.Background()
 	codeKey := "vcode:" + email
 	failKey := "vcode_fail:" + email
@@ -354,7 +355,7 @@ func IdentityValidateService(email string, valiCode string) int {
 	if !isEmailExist(db, email) {
 		return EMAILNOTEXIST
 	}
-	rds := common.MyRedis
+	rds := core.MyRedis
 	ctx := context.Background()
 	codeKey := "vcode:" + email
 	failKey := "vcode_fail:" + email
@@ -470,7 +471,7 @@ func RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.RefreshToken == "" {
+	if err := c.Bind(&req); err != nil || req.RefreshToken == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
 		return
 	}
@@ -1176,7 +1177,7 @@ func UpdateUserInfo(c *gin.Context) {
 
 	// 解析请求参数
 	var userInfo updateUser
-	if err := c.ShouldBindJSON(&userInfo); err != nil {
+	if err := c.Bind(&userInfo); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
 		return
 	}
@@ -1274,7 +1275,7 @@ func ChangeEmailPushStatus(c *gin.Context) {
 	db := common.GetDB()
 	var user_id UserMsg
 	var user model.User
-	if err := c.ShouldBindJSON(&user_id); err != nil {
+	if err := c.Bind(&user_id); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

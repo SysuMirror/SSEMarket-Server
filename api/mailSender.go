@@ -14,9 +14,8 @@ import (
 
 	"github.com/jordan-wright/email"
 	"github.com/redis/go-redis/v9"
-
+	"loginTest/core" 
 	// 	"log"
-	"loginTest/common"
 	"loginTest/config"
 )
 
@@ -38,7 +37,7 @@ func formVcode(ctx string) (string, string) {
 }
 
 func saveVcode(vcode, receiver string) {
-	rds := common.MyRedis
+	rds := core.MyRedis
 	ctx := context.Background()
 	codeKey := "vcode:" + receiver
 	failKey := "vcode_fail:" + receiver
@@ -62,7 +61,7 @@ func SendEmail(receiver string, status int, msg string) error {
 	e.To = []string{receiver}
 	text := ""
 	if status == 0 {
-		rds := common.MyRedis
+		rds := core.MyRedis
 		ctx := context.Background()
 		codeKey := "vcode:" + receiver
 		_, err := rds.Get(ctx, codeKey).Result()

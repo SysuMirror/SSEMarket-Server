@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"loginTest/api"
 	"loginTest/common"
+	"loginTest/core"
 	"loginTest/model"
 	"loginTest/response"
 	"loginTest/util"
@@ -73,11 +74,11 @@ func GetChatHistory(c *gin.Context) {
 	removeChatViewInRedis(chatQuery.SenderUserID)
 
 	//设置redis表示用户存在当前聊天界面
-	if err := common.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 24*time.Hour).Err(); err != nil {
+	if err := core.MyRedis.Set(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID), 1, 24*time.Hour).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 	}
 	//清空redis的未读情况
-	if err := common.MyRedis.Del(c, util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err(); err != nil {
+	if err := core.MyRedis.Del(c, util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 	}
 
@@ -114,7 +115,7 @@ func removeChatViewInRedis(userID int) error {
 	ctx := context.Background()
 	prefix := fmt.Sprintf("%dTo*IsExist", userID) // 构建键前缀
 	cursor := uint64(0)
-	redisClient := common.MyRedis // 使用你的 Redis 客户端实例
+	redisClient := core.MyRedis // 使用你的 Redis 客户端实例
 
 	// 遍历所有以 userIDTo 为前缀的键
 	for {
@@ -321,7 +322,7 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 	}
 	if !ok {
 		Chat_EmailAlerter(chatMsg.TargetUserID, "")
-		common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
+		core.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(userID, chatMsg.SenderUserID))
 		return
 	}
 	node, ok := val.(*ChatNode)
@@ -331,9 +332,9 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		if chatMsgID != 0 {
 			//检查接受者是否在聊天界面
 			chatMsg.ChatMsgID = chatMsgID
-			err := common.MyRedis.Get(context.Background(), util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
+			err := core.MyRedis.Get(context.Background(), util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
 			if err == redis.Nil { //不在聊天界面,添加未读
-				resUnread := common.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
+				resUnread := core.MyRedis.Incr(context.Background(), util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID))
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
 				Chat_EmailAlerter(chatMsg.TargetUserID, "")
@@ -381,7 +382,7 @@ func GetRelevantUser(userID int) ([]byte, error) {
 
 	//获得是否未读对方信息
 	for relevantUser := range relevantRespUsersMap {
-		unreadStr, err := common.MyRedis.Get(context.Background(), util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
+		unreadStr, err := core.MyRedis.Get(context.Background(), util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
 		unreadNum, _ := strconv.Atoi(unreadStr)
 		if err != nil && err != redis.Nil {
 			return nil, err
@@ -410,7 +411,7 @@ func GetRelevantUser(userID int) ([]byte, error) {
 //func IntoChatView(c *gin.Context) {
 //
 //	ctx := context.Background()
-//	common.MyRedis.Set()
+//	core.MyRedis.Set()
 //}
 
 // 用户退出与某人的聊天界面
@@ -433,7 +434,7 @@ func LeaveChatView(c *gin.Context) {
 	}
 
 	//	删除redis存储的键值对
-	err := common.MyRedis.Del(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err()
+	err := core.MyRedis.Del(c, util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)).Err()
 	if err != nil {
 		response.Fail(c, gin.H{}, "操作异常")
 	} else {
@@ -459,7 +460,7 @@ func GetChatNotice(c *gin.Context) {
 
 	// 使用 SCAN 进行分页遍历
 	for {
-		scanKeys, nextCursor, err := common.MyRedis.Scan(c, cursor, keyPrefix+"*", 10).Result()
+		scanKeys, nextCursor, err := core.MyRedis.Scan(c, cursor, keyPrefix+"*", 10).Result()
 		if err != nil {
 			response.Fail(c, gin.H{}, "操作异常")
 			return
@@ -468,7 +469,7 @@ func GetChatNotice(c *gin.Context) {
 		// 遍历所有匹配的键
 		for _, key := range scanKeys {
 			// 获取 key 对应的 value
-			unreadStr, err := common.MyRedis.Get(c, key).Result()
+			unreadStr, err := core.MyRedis.Get(c, key).Result()
 			if err != nil && err != redis.Nil {
 				response.Fail(c, gin.H{}, "获取未读消息失败")
 				return

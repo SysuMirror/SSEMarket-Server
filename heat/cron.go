@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"loginTest/common"
+	"loginTest/core"
 	"loginTest/model"
 
 	"github.com/robfig/cron/v3"
@@ -55,7 +56,7 @@ func RefreshHeat() {
 	// Redis ZSet的key，用来存储帖子热度
 	redisKey := "hot_posts_zset"
 	// 清空之前的 ZSet，确保只有当天最新的热度数据
-	common.MyRedis.Del(ctx, redisKey)
+	core.MyRedis.Del(ctx, redisKey)
 
 	// 计算每个帖子的热度并存入 Redis ZSet
 	for _, post := range posts {
@@ -74,14 +75,14 @@ func RefreshHeat() {
 		}
 
 		// 将热度和帖子信息存入 Redis ZSet
-		common.MyRedis.ZAdd(ctx, redisKey, redis.Z{
+		core.MyRedis.ZAdd(ctx, redisKey, redis.Z{
 			Score:  heatScore,
 			Member: postInfoJSON, // 存储 JSON 字符串
 		})
 	}
 
 	// 获取Redis中热度前10的帖子
-	topPosts, err := common.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
+	topPosts, err := core.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
 	if err != nil {
 		log.Println("获取Redis热度前10帖子失败:", err)
 	} else {

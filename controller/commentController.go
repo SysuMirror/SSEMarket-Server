@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/jinzhu/gorm"
 )
 
@@ -77,39 +78,70 @@ type Subcomment struct {
 func GetComments(c *gin.Context) {
 	db := common.GetDB()
 	var msg Commentsmsg
-	c.Bind(&msg)
+	// 新增参数绑定错误处理
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
+		return
+	}
 	usertelephone := msg.UserTelephone
 	postid := msg.PostID
 	postType := msg.TypePost
+
+	// 原有参数校验逻辑（完全保留）
 	if usertelephone == "" || postid == 0 || postType == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
 		return
 	}
+
+	// 原有用户查询逻辑（新增错误处理，保留变量名）
 	var temUser model.User
-	db.Where("phone = ?", usertelephone).First(&temUser)
-	if temUser.UserID == 0 {
+	if err := db.Where("phone = ?", usertelephone).First(&temUser).Error; err != nil {
+		response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
 		return
 	}
+	userID := temUser.UserID
+
+	// ------------------- 核心优化：批量查询，消除N+1 -------------------
+	// 1. 一次性查询所有主评论（保留原有变量名 pcomments）
+	var pcomments []model.Pcomment
+	db.Where("ptargetID = ?", postid).Find(&pcomments)
+	if len(pcomments) == 0 {
+		c.JSON(http.StatusOK, []interface{}{})
+		return
+	}
+
+	// 批量提取所有评论ID、用户ID（循环仅提取ID，无DB操作）
+	commentIDs := make([]int, 0, len(pcomments))
+	userIDs := make(map[int]struct{}, len(pcomments))
+	for _, comment := range pcomments {
+		commentIDs = append(commentIDs, comment.PcommentID)
+		userIDs[comment.UserID] = struct{}{}
+	}
+
+	// 2. 批量查询所有关联数据（固定次数查询，无循环DB）
+	// 批量查询评论用户
+	userMap := getBatchUserMap(db, userIDs)
+	// 批量查询点赞状态
+	likeMap := getBatchCommentLike(db, userID, commentIDs)
+	// 批量查询踩状态
+	denyMap := getBatchCommentDeny(db, userID, commentIDs)
+	// 批量查询评分（仅评分分支）
+	starMap := make(map[int]int)
+	if postType != "post" {
+		starMap = getBatchCommentStar(db, postid, userIDs)
+	}
+
+	// ------------------- 原有分支逻辑（完全保留变量/结构） -------------------
 	if postType == "post" {
 		var comments []CommentResponse
-		var pcomments []model.Pcomment
-		db.Find(&pcomments, "ptargetID = ?", postid)
+		// 纯内存组装数据，循环内无任何数据库查询
 		for _, pcomment := range pcomments {
-			isLike := false
-			isDeny := false
-			var like model.Pclike
-			var deny model.Pcdeny
-			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
-			if deny.PcdenyID != 0 {
-				isDeny = true
-			} else {
-				db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
-				if like.PclikeID != 0 {
-					isLike = true
-				}
-			}
-			var commentuser model.User
-			db.Where("userID = ?", pcomment.UserID).First(&commentuser)
+			// 从批量Map中取数据
+			isLike := likeMap[pcomment.PcommentID]
+			isDeny := denyMap[pcomment.PcommentID]
+			commentuser := getUserByMap(userMap, pcomment.UserID)
+
+			// 原有响应结构体（完全保留）
 			comment := CommentResponse{
 				PcommentID:      pcomment.PcommentID,
 				Author:          commentuser.Name,
@@ -131,28 +163,16 @@ func GetComments(c *gin.Context) {
 		c.JSON(http.StatusOK, comments)
 	} else {
 		var comments []RCommentResponse
-		var rcomments []model.Pcomment
-		db.Find(&rcomments, "ptargetID = ?", postid)
-		for _, pcomment := range rcomments {
-			isLike := false
-			isDeny := false
-			var like model.Pclike
-			var deny model.Pcdeny
-			db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&deny)
-			if deny.PcdenyID != 0 {
-				isDeny = true
-			} else {
-				db.Where("pctargetID = ? AND userID = ?", pcomment.PcommentID, temUser.UserID).First(&like)
-				if like.PclikeID != 0 {
-					isLike = true
-				}
-			}
-			var commentuser model.User
-			db.Where("userID = ?", pcomment.UserID).First(&commentuser)
+		// 纯内存组装数据，循环内无任何数据库查询
+		for _, pcomment := range pcomments {
+			// 从批量Map中取数据
+			isLike := likeMap[pcomment.PcommentID]
+			isDeny := denyMap[pcomment.PcommentID]
+			commentuser := getUserByMap(userMap, pcomment.UserID)
+			// 从批量Map中取评分
+			starNum := starMap[pcomment.UserID]
 
-			var star model.Rstar
-			db.Where("userID = ? AND postID = ?", pcomment.UserID, pcomment.PtargetID).First(&star)
-
+			// 原有响应结构体（完全保留）
 			comment := RCommentResponse{
 				PcommentID:      pcomment.PcommentID,
 				Author:          commentuser.Name,
@@ -168,12 +188,87 @@ func GetComments(c *gin.Context) {
 				SubComments:     GetSubComments(pcomment, temUser.UserID),
 				IsLiked:         isLike,
 				IsDenied:        isDeny,
-				AuthorRating:    star.StarNum,
+				AuthorRating:    starNum,
 			}
 			comments = append(comments, comment)
 		}
 		c.JSON(http.StatusOK, comments)
 	}
+}
+
+// getBatchUserMap 批量查询用户，保留原有逻辑
+func getBatchUserMap(db *gorm.DB, userIDs map[int]struct{}) map[int]model.User {
+	ids := make([]int, 0, len(userIDs))
+	for id := range userIDs {
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[int]model.User{}
+	}
+	var users []model.User
+	db.Where("userID IN (?)", ids).Find(&users)
+	userMap := make(map[int]model.User, len(users))
+	for _, user := range users {
+		userMap[user.UserID] = user
+	}
+	return userMap
+}
+
+// getBatchCommentLike 批量查询评论点赞
+func getBatchCommentLike(db *gorm.DB, userID int, commentIDs []int) map[int]bool {
+	if len(commentIDs) == 0 {
+		return map[int]bool{}
+	}
+	var likes []model.Pclike
+	db.Where("userID = ? AND pctargetID IN (?)", userID, commentIDs).Find(&likes)
+	likeMap := make(map[int]bool)
+	for _, like := range likes {
+		likeMap[like.PctargetID] = true
+	}
+	return likeMap
+}
+
+// getBatchCommentDeny 批量查询评论踩
+func getBatchCommentDeny(db *gorm.DB, userID int, commentIDs []int) map[int]bool {
+	if len(commentIDs) == 0 {
+		return map[int]bool{}
+	}
+	var denies []model.Pcdeny
+	db.Where("userID = ? AND pctargetID IN (?)", userID, commentIDs).Find(&denies)
+	denyMap := make(map[int]bool)
+	for _, deny := range denies {
+		denyMap[deny.PctargetID] = true
+	}
+	return denyMap
+}
+
+// getBatchCommentStar 批量查询评论用户评分
+func getBatchCommentStar(db *gorm.DB, postID int, userIDs map[int]struct{}) map[int]int {
+	ids := make([]int, 0, len(userIDs))
+	for id := range userIDs {
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return map[int]int{}
+	}
+	var stars []model.Rstar
+	db.Where("postID = ? AND userID IN (?)", postID, ids).Find(&stars)
+	starMap := make(map[int]int)
+	for _, star := range stars {
+		starMap[star.UserID] = star.StarNum
+	}
+	return starMap
+}
+
+// getUserByMap 从Map中获取用户，保留原有管理员逻辑
+func getUserByMap(userMap map[int]model.User, userID int) model.User {
+	if userID == 0 {
+		return model.User{Name: "管理员", Phone: "11111111111"}
+	}
+	if user, ok := userMap[userID]; ok {
+		return user
+	}
+	return model.User{}
 }
 
 type IDmesg struct {
