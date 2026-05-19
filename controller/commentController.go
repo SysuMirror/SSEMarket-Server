@@ -311,6 +311,7 @@ func DeletePcomment(c *gin.Context) {
 		deleteCcommentHeat := float64(count * int64(weightComment))
 		db.Model(&post).Update("heat", post.Heat-(weightComment+deleteCcommentHeat))
 	}
+	common.InvalidatePostDetailCache(post.PostID)
 	//
 	db.Delete(&pcomment)
 }
@@ -356,6 +357,7 @@ func DeleteCcomment(c *gin.Context) {
 	} else {
 		db.Model(&post).Update("heat", post.Heat-weightComment)
 	}
+	common.InvalidatePostDetailCache(post.PostID)
 	//
 	db.Delete(&ccomment)
 }
@@ -499,6 +501,7 @@ func PostPcomment(c *gin.Context) {
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)
 	db.Model(&post).Update("heat", post.Heat+weightComment)
+	common.InvalidatePostDetailCache(post.PostID)
 	comment := CommentResponse{
 		PcommentID:     pcomment.PcommentID,
 		Author:         user.Name,
@@ -610,6 +613,7 @@ func PostRcomment(c *gin.Context) {
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)
 	db.Model(&post).Update("heat", post.Heat+weightComment)
+	common.InvalidatePostDetailCache(post.PostID)
 	comment := CommentResponse{
 		PcommentID:     pcomment.PcommentID,
 		Author:         user.Name,
@@ -767,6 +771,7 @@ func PostCcomment(c *gin.Context) {
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)
 	db.Model(&post).Update("heat", post.Heat+weightComment)
+	common.InvalidatePostDetailCache(post.PostID)
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
 

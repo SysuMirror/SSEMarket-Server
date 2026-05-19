@@ -74,3 +74,11 @@ func DelMultiLevelCache(keys ...string) {
 		log.Printf("[DelMultiLevelCache] 删除缓存 | key: %s", key)
 	}
 }
+
+// InvalidatePostDetailCache 帖子详情变更时失效两级缓存（评论数、点赞数等）
+func InvalidatePostDetailCache(postID int) {
+	if postID <= 0 {
+		return
+	}
+	DelMultiLevelCache(util.GetPostDetailKey(postID))
+}

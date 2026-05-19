@@ -12,6 +12,7 @@ import (
 	"loginTest/response"
 	"loginTest/util"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -23,13 +24,15 @@ import (
 
 // 定义响应用户结构体
 type ChatRespUser struct {
-	UserID    int    `json:"userID"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	AvatarURL string `json:"avatarURL"`
-	Identity  string `json:"identity"`
-	Score     int    `json:"score"`
-	UnRead    int    `json:"unRead"`
+	UserID             int    `json:"userID"`
+	Email              string `json:"email"`
+	Name               string `json:"name"`
+	AvatarURL          string `json:"avatarURL"`
+	Identity           string `json:"identity"`
+	Score              int    `json:"score"`
+	UnRead             int    `json:"unRead"`
+	LastMessageAt      string `json:"lastMessageAt"`
+	LastMessagePreview string `json:"lastMessagePreview"`
 }
 
 // 定义心跳结构体
@@ -361,28 +364,49 @@ func GetRelevantUser(userID int) ([]byte, error) {
 	if err != nil {
 		return []byte{}, err
 	}
-	relevantRespUsersMap := map[model.User]int{}
-	relevantRespUsers := []ChatRespUser{}
+	type peerState struct {
+		user        model.User
+		lastAt      time.Time
+		lastPreview string
+	}
+	peerStates := map[int]*peerState{}
 	for _, msg := range chatMsgs {
-		//舍去重复用户
-		_, exist1 := relevantRespUsersMap[msg.TargetUser]
-		_, exist2 := relevantRespUsersMap[msg.SenderUser]
-		//当前用户是发送者
-		if msg.TargetUserID != userID && !exist1 {
-			relevantRespUsersMap[msg.TargetUser] = 1
+		if msg.SenderUserID == msg.TargetUserID {
+			continue
 		}
-		//当前用户是接收者
-		if msg.SenderUserID != userID && !exist2 {
-			relevantRespUsersMap[msg.SenderUser] = 1
+		var peer model.User
+		var peerID int
+		if msg.SenderUserID == userID {
+			peer = msg.TargetUser
+			peerID = msg.TargetUserID
+		} else {
+			peer = msg.SenderUser
+			peerID = msg.SenderUserID
 		}
-		//用户自己给自己发信息的情况
-		if msg.TargetUserID == msg.SenderUserID && !exist1 {
-			relevantRespUsersMap[msg.SenderUser] = 1
+		if peerID == 0 || peerID == userID {
+			continue
+		}
+		if st, ok := peerStates[peerID]; !ok || msg.CreatedAt.After(st.lastAt) {
+			peerStates[peerID] = &peerState{
+				user:        peer,
+				lastAt:      msg.CreatedAt,
+				lastPreview: msg.Content,
+			}
 		}
 	}
 
-	//获得是否未读对方信息
-	for relevantUser := range relevantRespUsersMap {
+	peerIDs := make([]int, 0, len(peerStates))
+	for id := range peerStates {
+		peerIDs = append(peerIDs, id)
+	}
+	sort.Slice(peerIDs, func(i, j int) bool {
+		return peerStates[peerIDs[i]].lastAt.After(peerStates[peerIDs[j]].lastAt)
+	})
+
+	relevantRespUsers := make([]ChatRespUser, 0, len(peerIDs))
+	for _, peerID := range peerIDs {
+		st := peerStates[peerID]
+		relevantUser := st.user
 		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
 		cancel()
@@ -390,16 +414,21 @@ func GetRelevantUser(userID int) ([]byte, error) {
 		if err != nil && err != redis.Nil {
 			return nil, err
 		}
-		relevantARespUser := ChatRespUser{
-			relevantUser.UserID,
-			relevantUser.Email,
-			relevantUser.Name,
-			relevantUser.AvatarURL,
-			relevantUser.Identity,
-			relevantUser.Score,
-			unreadNum,
+		preview := st.lastPreview
+		if len([]rune(preview)) > 80 {
+			preview = string([]rune(preview)[:80]) + "…"
 		}
-		relevantRespUsers = append(relevantRespUsers, relevantARespUser)
+		relevantRespUsers = append(relevantRespUsers, ChatRespUser{
+			UserID:             relevantUser.UserID,
+			Email:              relevantUser.Email,
+			Name:               relevantUser.Name,
+			AvatarURL:          relevantUser.AvatarURL,
+			Identity:           relevantUser.Identity,
+			Score:              relevantUser.Score,
+			UnRead:             unreadNum,
+			LastMessageAt:      st.lastAt.Format(time.RFC3339),
+			LastMessagePreview: preview,
+		})
 	}
 	jsonData, err := json.Marshal(struct {
 		RelevantUsers []ChatRespUser `json:"relevantUsers"`

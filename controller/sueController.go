@@ -171,6 +171,7 @@ func Violation(c *gin.Context) {
 			deleteCcommentHeat := float64(count * int64(weightComment))
 			db.Model(&post).Update("heat", post.Heat-(weightComment+deleteCcommentHeat))
 		}
+		common.InvalidatePostDetailCache(post.PostID)
 		//
 		db.Delete(&pcomment)
 	} else if sue.Targettype == "ccomment" {
@@ -214,6 +215,7 @@ func Violation(c *gin.Context) {
 		db.Where("pcommentID= ?", ccomment.CtargetID).First(&targetcommentid)
 		db.Where("postID = ?", targetcommentid.PtargetID).First(&post)
 		db.Model(&post).UpdateColumn("comment_num", gorm.Expr("comment_num - ?", 1))
+		common.InvalidatePostDetailCache(post.PostID)
 		db.Delete(&ccomment)
 	}
 

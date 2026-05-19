@@ -187,9 +187,63 @@ type BrowseMeg struct {
 	Searchinfo    string
 	Tag           string
 	Searchsort    string //用于分表查询 分为home,history,save三种
+	OrderBy       string // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc
+	TimeFrom      string `json:"timeFrom"`
+	TimeTo        string `json:"timeTo"`
 	Limit         int
 	Offset        int
 	PostType      string
+}
+
+func parseBrowseTime(s string, endOfDay bool) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		t, err := time.ParseInLocation(layout, s, time.Local)
+		if err != nil {
+			continue
+		}
+		if layout == "2006-01-02" && endOfDay {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+func browseApplyTimeRange(query *gorm.DB, timeFrom, timeTo string) *gorm.DB {
+	if t, ok := parseBrowseTime(timeFrom, false); ok {
+		query = query.Where("post_time >= ?", t)
+	}
+	if t, ok := parseBrowseTime(timeTo, true); ok {
+		query = query.Where("post_time <= ?", t)
+	}
+	return query
+}
+
+func browseApplyOrder(query *gorm.DB, orderBy string) *gorm.DB {
+	switch orderBy {
+	case "time_asc":
+		return query.Order("post_time ASC")
+	case "like_desc":
+		return query.Order("like_num DESC, postID DESC")
+	case "like_asc":
+		return query.Order("like_num ASC, postID DESC")
+	case "comment_desc":
+		return query.Order("comment_num DESC, postID DESC")
+	case "comment_asc":
+		return query.Order("comment_num ASC, postID DESC")
+	default:
+		return query.Order("post_time DESC")
+	}
 }
 
 type ReviewResponse struct {
@@ -526,7 +580,13 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 	}
 
 	var posts []model.Post
-	base := db.Where("`partition` != ?", "打分").Order("postID DESC").Offset(offset).Limit(limit)
+	base := db.Where("`partition` != ?", "打分").Offset(offset).Limit(limit)
+	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
+	if searchsort == "home" {
+		base = browseApplyOrder(base, req.OrderBy)
+	} else {
+		base = base.Order("postID DESC")
+	}
 	if searchsort == "history" {
 		base.Find(&posts, "`userID` = ?", temUser.UserID)
 		return posts
@@ -558,6 +618,7 @@ func browseFetchRatingPosts(db *gorm.DB, req *BrowseMeg, limit, offset int) []mo
 	partition := req.Partition
 	searchinfo := req.Searchinfo
 	base := db.Order("postID DESC").Offset(offset).Limit(limit)
+	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
 	if partition != "" && searchinfo != "" {
 		base.Where("`partition` = ? AND (title LIKE ? OR content LIKE ?)", partition, "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
 	} else if partition != "" {
@@ -670,24 +731,38 @@ func GetPostNum(c *gin.Context) {
 	partition := requestBrowseMeg.Partition
 	searchinfo := requestBrowseMeg.Searchinfo
 	searchsort := requestBrowseMeg.Searchsort
+	timeFrom := requestBrowseMeg.TimeFrom
+	timeTo := requestBrowseMeg.TimeTo
 	var count int
 	if searchsort == "rating" {
-		db.Model(&model.Post{}).Where("`partition` = ?", partition).Count(&count)
+		q := db.Model(&model.Post{}).Where("`partition` = ?", partition)
+		q = browseApplyTimeRange(q, timeFrom, timeTo)
+		q.Count(&count)
 	} else if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
-			if len(searchinfo) == 0 {
+			if len(searchinfo) == 0 && timeFrom == "" && timeTo == "" {
 				db.Model(&model.Post{}).Where("`partition` != ?", "打分").Count(&count)
 			} else {
-				db.Model(&model.Post{}).
-					Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%").
+				q := db.Model(&model.Post{}).
 					Where("postId != ?", 0).
-					Where("`partition` != ?", "打分").
-					Count(&count)
+					Where("`partition` != ?", "打分")
+				q = browseApplyTimeRange(q, timeFrom, timeTo)
+				if len(searchinfo) > 0 {
+					q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
+				}
+				q.Count(&count)
 			}
 		} else if partition == "优质贴" {
-			db.Model(&model.Post{}).Where("is_high_quality =?", 1).Count(&count)
+			q := db.Model(&model.Post{}).Where("is_high_quality =?", 1)
+			q = browseApplyTimeRange(q, timeFrom, timeTo)
+			q.Count(&count)
 		} else {
-			db.Model(&model.Post{}).Where("`partition` = ?", partition).Count(&count)
+			q := db.Model(&model.Post{}).Where("`partition` = ?", partition)
+			q = browseApplyTimeRange(q, timeFrom, timeTo)
+			if len(searchinfo) > 0 {
+				q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
+			}
+			q.Count(&count)
 		}
 	} else {
 		// 查询用户
@@ -807,6 +882,7 @@ func UpdateLike(c *gin.Context) {
 	if isLiked { //已点赞
 		db.Model(&post).Update("like_num", post.LikeNum-1)
 		db.Delete(&like)
+		service.AdjustUserReceivedLike(db, post.UserID, -1)
 	} else { //未点赞
 		newLike := model.Plike{
 			UserID:    user.UserID,
@@ -819,6 +895,7 @@ func UpdateLike(c *gin.Context) {
 			weightLike := float64(3)
 			db.Model(&post).Update("heat", post.Heat+weightLike)
 			db.Create(&newLike)
+			service.AdjustUserReceivedLike(db, post.UserID, 1)
 		}
 	}
 
@@ -887,6 +964,7 @@ func DeletePost(c *gin.Context) {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
+	service.OnPostDeleted(db, &post)
 	db.Delete(&post)
 	common.DelMultiLevelCache(util.GetPostDetailKey(int(PostID)))
 	c.JSON(http.StatusOK, gin.H{"message": "帖子删除成功"})

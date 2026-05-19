@@ -1156,6 +1156,8 @@ func GetInfo(c *gin.Context) {
 	tokenUserID := GetTokenUserID(c)
 	if tokenUserID != 0 && tokenUserID == user.UserID {
 		info["email"] = user.Email
+		info["emailNotificationBlocked"] = user.ISEmailNotificationBlocked
+		// emailpush 历史字段名易误解为「已开启推送」，实际同为 is_email_notification_blocked
 		info["emailpush"] = user.ISEmailNotificationBlocked
 	}
 

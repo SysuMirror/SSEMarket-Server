@@ -109,6 +109,7 @@ func main() {
 	config.InitEmailConfig()
 	go Copy()
 	db := common.InitDB()
+	service.RebuildRankStats(db)
 	rds := core.RedisInit()
 	common.InitJWTkey()
 	core.InitLocalCache()
