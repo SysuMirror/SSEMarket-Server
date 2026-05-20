@@ -115,6 +115,15 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/saleProduct", controller.SaleProduct)
 	auth.POST("/api/auth/getCarouselImg", controller.GetCarouselImg)
 
+	// 简历专区
+	auth.POST("/api/auth/resume/upload", controller.ResumeUpload)
+	auth.POST("/api/auth/resume/list", controller.ResumeList)
+	auth.POST("/api/auth/resume/detail", controller.ResumeDetail)
+	auth.POST("/api/auth/resume/download", controller.ResumeDownload)
+	auth.POST("/api/auth/resume/preview", controller.ResumePreview)
+	auth.GET("/api/auth/resume/preview/stream/:resumeID", controller.ResumePreviewStream)
+	auth.POST("/api/auth/resume/delete", controller.ResumeDelete)
+
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())

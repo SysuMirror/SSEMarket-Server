@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type getFile struct {
@@ -190,4 +191,57 @@ func GetUrl(filename string) string {
 	client, _ := getClient()
 	oUrl := client.Object.GetObjectURL(filename)
 	return oUrl.String()
+}
+
+// GetPresignedURL 生成带签名的临时访问链接；inline 为 true 时便于浏览器内嵌预览 PDF。
+// GetObject 从 COS 读取对象流，用于服务端代理预览。
+func GetObject(key string) (io.ReadCloser, string, error) {
+	client, _ := getClient()
+	resp, err := client.Object.Get(context.Background(), key, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return resp.Body, contentType, nil
+}
+
+func attachmentContentDisposition(filename string) string {
+	ext := filepath.Ext(filename)
+	if ext == "" {
+		ext = ".bin"
+	}
+	fallback := "resume" + ext
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, fallback, url.PathEscape(filename))
+}
+
+func GetPresignedURL(key string, expire time.Duration, inline bool, attachmentFilename string) (string, error) {
+	client, _ := getClient()
+	secretID := viper.GetString("cos.secretId")
+	secretKey := viper.GetString("cos.secretKey")
+	opt := &cos.PresignedURLOptions{}
+	query := make(url.Values)
+	if inline {
+		query.Set("response-content-disposition", "inline")
+	} else if attachmentFilename != "" {
+		query.Set("response-content-disposition", attachmentContentDisposition(attachmentFilename))
+	}
+	if len(query) > 0 {
+		opt.Query = &query
+	}
+	presigned, err := client.Object.GetPresignedURL(
+		context.Background(),
+		http.MethodGet,
+		key,
+		secretID,
+		secretKey,
+		expire,
+		opt,
+	)
+	if err != nil {
+		return "", err
+	}
+	return presigned.String(), nil
 }
