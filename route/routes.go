@@ -122,6 +122,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/resume/download", controller.ResumeDownload)
 	auth.POST("/api/auth/resume/preview", controller.ResumePreview)
 	auth.GET("/api/auth/resume/preview/stream/:resumeID", controller.ResumePreviewStream)
+	auth.POST("/api/auth/resume/update", controller.ResumeUpdate)
 	auth.POST("/api/auth/resume/delete", controller.ResumeDelete)
 
 	// 给管理员设置一个新的路由分组

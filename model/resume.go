@@ -12,6 +12,7 @@ type Resume struct {
 	FileSize    int64     `gorm:"column:file_size;type:bigint"`
 	MimeType    string    `gorm:"column:mime_type;type:varchar(64)"`
 	DownloadNum int       `gorm:"column:download_num;type:int;default:0"`
+	ViewNum     int       `gorm:"column:view_num;type:int;default:0"`
 	IsAnonymous bool      `gorm:"column:is_anonymous;type:bool;default:0"`
 	IsDelete    bool      `gorm:"column:is_delete;type:bool;default:0"`
 	CreatedAt   time.Time `gorm:"column:created_at;type:datetime"`

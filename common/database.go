@@ -58,6 +58,8 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Rstar{})
 	db.AutoMigrate(&model.Pvote{})
 	db.AutoMigrate(&model.Resume{})
+	// 历史简历：浏览次数初始化为下载量 × 3（仅 view_num 仍为 0 的行，避免重复覆盖）
+	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
 	db.Model(&model.Pcomment{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
 	db.Model(&model.Ccomment{}).AddForeignKey("ctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
 	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")

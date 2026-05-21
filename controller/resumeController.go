@@ -78,6 +78,27 @@ type ResumeIDMsg struct {
 	ResumeID int `json:"resumeID"`
 }
 
+type ResumeUpdateMsg struct {
+	ResumeID    int    `json:"resumeID"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func validateResumeTitleDescription(title, description string) (string, string, string) {
+	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
+	if title == "" {
+		return "", "", "标题不能为空"
+	}
+	if utf8.RuneCountInString(title) > 50 {
+		return "", "", "标题最多50个字"
+	}
+	if utf8.RuneCountInString(description) > 500 {
+		return "", "", "简介最多500个字"
+	}
+	return title, description, ""
+}
+
 type ResumeResponse struct {
 	ResumeID    int    `json:"resumeID"`
 	UserID      int    `json:"userID"`
@@ -89,6 +110,7 @@ type ResumeResponse struct {
 	MimeType    string `json:"mimeType"`
 	FileExt     string `json:"fileExt"`
 	DownloadNum int    `json:"downloadNum"`
+	ViewNum     int    `json:"viewNum"`
 	IsAnonymous bool   `json:"isAnonymous"`
 	IsOwner     bool   `json:"isOwner"`
 	CanPreview  bool   `json:"canPreview"`
@@ -188,6 +210,7 @@ func resumeToResponse(r model.Resume, uploader model.User, viewer model.User) Re
 		MimeType:    r.MimeType,
 		FileExt:     fileExt,
 		DownloadNum: r.DownloadNum,
+		ViewNum:     r.ViewNum,
 		IsAnonymous: r.IsAnonymous,
 		IsOwner:     owner,
 		CanPreview:  canPreview,
@@ -242,22 +265,12 @@ func ResumeUpload(c *gin.Context) {
 		return
 	}
 
-	title := strings.TrimSpace(c.PostForm("title"))
-	description := strings.TrimSpace(c.PostForm("description"))
+	title, description, errMsg := validateResumeTitleDescription(c.PostForm("title"), c.PostForm("description"))
+	if errMsg != "" {
+		response.Response(c, http.StatusBadRequest, 400, nil, errMsg)
+		return
+	}
 	isAnonymous := c.PostForm("isAnonymous") == "true" || c.PostForm("isAnonymous") == "1"
-
-	if title == "" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "标题不能为空")
-		return
-	}
-	if utf8.RuneCountInString(title) > 50 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多50个字")
-		return
-	}
-	if utf8.RuneCountInString(description) > 500 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "简介最多500个字")
-		return
-	}
 
 	f, err := file.Open()
 	if err != nil {
@@ -391,6 +404,11 @@ func ResumeList(c *gin.Context) {
 	c.JSON(http.StatusOK, responses)
 }
 
+func incrementResumeViewNum(db *gorm.DB, resume *model.Resume) {
+	db.Model(resume).UpdateColumn("view_num", gorm.Expr("view_num + ?", 1))
+	resume.ViewNum++
+}
+
 func ResumeDetail(c *gin.Context) {
 	user, ok := requireLoginUser(c)
 	if !ok {
@@ -410,6 +428,8 @@ func ResumeDetail(c *gin.Context) {
 		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
 		return
 	}
+
+	incrementResumeViewNum(db, &resume)
 
 	var uploader model.User
 	db.Where("userID = ?", resume.UserID).First(&uploader)
@@ -548,6 +568,55 @@ func ResumeDownload(c *gin.Context) {
 		"downloadURL": payload["fileURL"],
 		"fileName":    payload["fileName"],
 	}, "获取下载链接成功")
+}
+
+func ResumeUpdate(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+
+	var req ResumeUpdateMsg
+	if err := c.ShouldBindJSON(&req); err != nil || req.ResumeID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
+
+	title, description, errMsg := validateResumeTitleDescription(req.Title, req.Description)
+	if errMsg != "" {
+		response.Response(c, http.StatusBadRequest, 400, nil, errMsg)
+		return
+	}
+
+	db := common.GetDB()
+	var resume model.Resume
+	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
+	if resume.ResumeID == 0 {
+		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+		return
+	}
+	if resume.UserID != user.UserID {
+		response.Response(c, http.StatusForbidden, 403, nil, "无权编辑该简历")
+		return
+	}
+
+	now := time.Now()
+	if err := db.Model(&resume).Updates(map[string]interface{}{
+		"title":       title,
+		"description": description,
+		"updated_at":  now,
+	}).Error; err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "保存失败")
+		return
+	}
+
+	resume.Title = title
+	resume.Description = description
+	resume.UpdatedAt = now
+
+	var uploader model.User
+	db.Where("userID = ?", resume.UserID).First(&uploader)
+	c.JSON(http.StatusOK, resumeToResponse(resume, uploader, user))
 }
 
 func ResumeDelete(c *gin.Context) {
