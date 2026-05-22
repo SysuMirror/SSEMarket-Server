@@ -10,7 +10,7 @@ type Post struct {
 	UserID     int       `gorm:"index:postuser;column:userID;type:int"`
 	User       User      `gorm:"association_foreignkey:userID;foreignkey:userID"`
 	Partition  string    `gorm:"column:partition;type:varchar(10)"`
-	Title      string    `gorm:"column:title;type:varchar(20)"`
+	Title      string    `gorm:"column:title;type:varchar(90)"`
 	Ptext      string    `gorm:"column:ptext;type:varchar(5000)"`
 	CommentNum int       `gorm:"column:comment_num;type:int"`
 	LikeNum    int       `gorm:"column:like_num;type:int"`

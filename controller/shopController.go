@@ -1,267 +1,205 @@
 package controller
 
 import (
-	"fmt"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/jinzhu/gorm"
 )
 
 type ProductMsg struct {
-	UserID      int
-	Price       int
-	Title       string
-	Content     string
-	Photos      []string
-	ISAnonymous bool
+	UserID      int      `json:"UserID"`
+	Price       int      `json:"Price"`
+	Title       string   `json:"Title"`
+	Content     string   `json:"Content"`
+	Photos      []string `json:"Photos"`
+	ISAnonymous bool     `json:"ISAnonymous"`
 }
 
 type ProductReponse struct {
-	SellerID    int
-	ProductID   int
-	Seller      string
-	Price       int
-	Name        string
-	Description string
-	Photos      []string
-	ISAnonymous bool
+	SellerID    int       `json:"SellerID"`
+	ProductID   int       `json:"ProductID"`
+	Seller      string    `json:"Seller"`
+	Price       int       `json:"Price"`
+	Name        string    `json:"Name"`
+	Description string    `json:"Description"`
+	Photos      []string  `json:"Photos"`
+	ISSold      bool      `json:"ISSold"`
+	ISAnonymous bool      `json:"ISAnonymous"`
+	PostTime    time.Time `json:"PostTime"`
 }
 
 type ShopBrowseMeg struct {
-	UserID     int
-	Searchinfo string
-	Searchsort string //用于分表查询 分为home,history两种
-	Limit      int
-	Offset     int
+	UserID     int    `json:"UserID"`
+	Searchinfo string `json:"searchinfo"`
+	Searchsort string `json:"searchsort"`
+	Limit      int    `json:"limit"`
+	Offset     int    `json:"offset"`
 }
 
 type ProductIDmsg struct {
-	ProductID int
+	ProductID int `json:"productID"`
 }
 
 func PostProduct(c *gin.Context) {
 	db := common.GetDB()
-	var requestPostMsg ProductMsg
-	c.Bind(&requestPostMsg)
-	fmt.Printf("接收到的请求数据: %+v\n", requestPostMsg)
-	userID := requestPostMsg.UserID
-	price := requestPostMsg.Price
-	title := requestPostMsg.Title
-	content := requestPostMsg.Content
-	photos := requestPostMsg.Photos
-	isAnonymous := requestPostMsg.ISAnonymous
-	// 验证数据
-	if !isUserExist(db, userID) {
+	var msg ProductMsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
+	title := strings.TrimSpace(msg.Title)
+	content := strings.TrimSpace(msg.Content)
+	if !isUserExist(db, msg.UserID) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
 		return
 	}
-	if len(title) == 0 {
+	if title == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题不能为空")
 		return
 	}
-	// 这里不能直接用len()否则会出现中文字符的计算错误
 	if utf8.RuneCountInString(title) > 30 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多为30个字")
 		return
 	}
-
-	if len(content) == 0 {
+	if content == "" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "内容不能为空")
 		return
 	}
-
-	if utf8.RuneCountInString(content) > 10000 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "内容最多为10000个字")
+	if utf8.RuneCountInString(content) > 2000 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "描述最多2000字")
 		return
 	}
-
-	var user model.User
-	db.Where("userID = ?", userID).First(&user)
-
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+	if msg.Price < 0 || msg.Price > 1000000 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "价格无效")
 		return
+	}
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != msg.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 403, nil, "权限不足")
+		return
+	}
+	photos := make([]string, 0, len(msg.Photos))
+	for _, p := range msg.Photos {
+		if s := strings.TrimSpace(p); s != "" {
+			photos = append(photos, s)
+		}
 	}
 	newProduct := model.Product{
-		UserID:      int(user.UserID),
+		UserID:      msg.UserID,
 		Name:        title,
 		Description: content,
 		PostTime:    time.Now(),
 		Photos:      strings.Join(photos, ","),
 		ISSold:      false,
-		ISAnonymous: isAnonymous,
-		Price:       price,
+		ISAnonymous: msg.ISAnonymous,
+		Price:       msg.Price,
 	}
 	if err := db.Create(&newProduct).Error; err != nil {
-		fmt.Printf("插入数据库时出错: %v\n", err)
-		response.Response(c, http.StatusInternalServerError, 500, nil, "数据库插入失败")
+		response.Response(c, http.StatusInternalServerError, 500, nil, "发布失败")
 		return
 	}
-	response.Response(c, http.StatusOK, 200, nil, "商品发布成功")
+	common.BloomFilter.Add([]byte(strconv.FormatUint(uint64(newProduct.ProductID), 10)))
+	response.Response(c, http.StatusOK, 200, gin.H{"ProductID": newProduct.ProductID}, "商品发布成功")
 }
 
 func GetProducts(c *gin.Context) {
 	db := common.GetDB()
-	var requestPostMsg ShopBrowseMeg
-	c.Bind(&requestPostMsg)
-	userID := GetTokenUserID(c)
-	searchinfo := requestPostMsg.Searchinfo
-	searchsort := requestPostMsg.Searchsort
-	limit := requestPostMsg.Limit
-	offset := requestPostMsg.Offset
-
-	var user model.User
-	db.Where("userID = ?", userID).First(&user)
-	if user.UserID == 0 {
-		fmt.Println("requestPostMsg:", requestPostMsg)
-		c.JSON(400, "未找到该用户")
+	var msg ShopBrowseMeg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
 		return
+	}
+	tokenUserID := GetTokenUserID(c)
+	limit := msg.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset := msg.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := db.Model(&model.Product{}).Where("is_delete = ?", false)
+	searchinfo := strings.TrimSpace(msg.Searchinfo)
+	if msg.Searchsort == "history" {
+		query = query.Where("userID = ?", tokenUserID)
+	} else if searchinfo != "" {
+		like := "%" + searchinfo + "%"
+		query = query.Where("(product_name LIKE ? OR description LIKE ?)", like, like)
 	}
 
 	var products []model.Product
-	query := db.Model(&model.Product{}).Where("is_delete = ?", false)
+	query.Order("is_sold ASC, productID DESC").Offset(offset).Limit(limit).Find(&products)
 
-	if searchsort == "home" {
-		if len(searchinfo) > 0 {
-			query = query.Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%")
-		}
-	} else {
-		query = query.Where("userID = ?", user.UserID)
-	}
-
-	query.Order("productID DESC").Offset(offset).Limit(limit).Find(&products)
-
-	userIDs := make([]int, 0, len(products))
+	out := make([]ProductReponse, 0, len(products))
 	for _, p := range products {
-		userIDs = append(userIDs, p.UserID)
+		out = append(out, productToResponse(db, p, tokenUserID, msg.Searchsort == "history"))
 	}
-
-	var users []model.User
-	userMap := make(map[int]model.User)
-	if len(userIDs) > 0 {
-		db.Where("userID IN ?", userIDs).Find(&users)
-		for _, u := range users {
-			userMap[u.UserID] = u
-		}
-	}
-
-	var responses []ProductReponse
-	for _, product := range products {
-		photo := strings.Split(product.Photos, ",")
-		for i, photoURL := range photo {
-			photo[i] = replaceResizedWithURL(photoURL)
-		}
-
-		var sellerName string
-		var sellerID int
-
-		if searchsort == "home" {
-			if seller, ok := userMap[product.UserID]; ok {
-				sellerName = seller.Name
-				sellerID = seller.UserID
-			}
-		} else {
-			sellerName = user.Name
-			sellerID = user.UserID
-		}
-
-		response := ProductReponse{
-			ProductID:   product.ProductID,
-			SellerID:    sellerID,
-			Seller:      sellerName,
-			Price:       product.Price,
-			Name:        product.Name,
-			Description: product.Description,
-			Photos:      photo,
-			ISAnonymous: product.ISAnonymous,
-		}
-		responses = append(responses, response)
-	}
-
-	c.JSON(http.StatusOK, responses)
+	c.JSON(http.StatusOK, out)
 }
 
 func GetProductDetail(c *gin.Context) {
 	db := common.GetDB()
-	var requestMsg ProductIDmsg
-	c.Bind(&requestMsg)
+	var msg ProductIDmsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
 	var product model.Product
-	db.Where("productID = ?", requestMsg.ProductID).First(&product)
-	var user model.User
-	db.Where("userID = ?", product.UserID).First(&user)
-	photo := strings.Split(product.Photos, ",")
-	for i, photoURL := range photo {
-		photo[i] = replaceResizedWithURL(photoURL)
+	db.Where("productID = ? AND is_delete = ?", msg.ProductID, false).First(&product)
+	if product.ProductID == 0 {
+		response.Response(c, http.StatusNotFound, 404, nil, "商品不存在")
+		return
 	}
-	response := ProductReponse{
-		ProductID:   product.ProductID,
-		SellerID:    user.UserID,
-		Seller:      user.Name,
-		Price:       product.Price,
-		Name:        product.Name,
-		Description: product.Description,
-		Photos:      photo,
-		ISAnonymous: product.ISAnonymous,
-	}
-	c.JSON(http.StatusOK, response)
+	tokenUserID := GetTokenUserID(c)
+	c.JSON(http.StatusOK, productToResponse(db, product, tokenUserID, product.UserID == tokenUserID))
 }
 
 func GetProductNum(c *gin.Context) {
 	db := common.GetDB()
-	var requestPostMsg ShopBrowseMeg
-	c.Bind(&requestPostMsg)
-	userID := requestPostMsg.UserID
-	searchinfo := requestPostMsg.Searchinfo
-	searchsort := requestPostMsg.Searchsort
-	var count int
-	var user model.User
-	db.Where("userID = ?", userID).First(&user)
-	if user.UserID == 0 {
+	var msg ShopBrowseMeg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
 		return
 	}
-
-	if searchsort == "home" {
-		if len(searchinfo) == 0 {
-			db.Model(&model.Product{}).Where("is_delete = ?", false).Count(&count)
-		} else {
-			db.Model(&model.Product{}).
-				Where("(title LIKE ? OR ptext LIKE ? )", "%"+searchinfo+"%", "%"+searchinfo+"%").
-				Where("is_delete = ?", false).
-				Count(&count)
-		}
-	} else {
-		db.Model(&model.Product{}).
-			Where("userID = ?", userID).
-			Where("is_delete = ?", false).
-			Count(&count)
+	tokenUserID := GetTokenUserID(c)
+	query := db.Model(&model.Product{}).Where("is_delete = ?", false)
+	searchinfo := strings.TrimSpace(msg.Searchinfo)
+	if msg.Searchsort == "history" {
+		query = query.Where("userID = ?", tokenUserID)
+	} else if searchinfo != "" {
+		like := "%" + searchinfo + "%"
+		query = query.Where("(product_name LIKE ? OR description LIKE ?)", like, like)
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"Productcount": count,
-	})
+	var count int
+	query.Count(&count)
+	c.JSON(http.StatusOK, gin.H{"Productcount": count})
 }
 
 func DeleteProduct(c *gin.Context) {
 	db := common.GetDB()
-	var productID ProductIDmsg
-	c.Bind(&productID)
-	var product model.Product
-	db.Where("productID = ?", productID.ProductID).First(&product)
-	if product.ProductID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "需要出售商品不存在")
+	var msg ProductIDmsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
 		return
 	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != product.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+	var product model.Product
+	db.Where("productID = ?", msg.ProductID).First(&product)
+	if product.ProductID == 0 || product.ISDelete {
+		response.Response(c, http.StatusBadRequest, 400, nil, "商品不存在")
+		return
+	}
+	if GetTokenUserID(c) != product.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 403, nil, "权限不足")
 		return
 	}
 	db.Model(&product).Update("is_delete", true)
@@ -270,17 +208,19 @@ func DeleteProduct(c *gin.Context) {
 
 func SaleProduct(c *gin.Context) {
 	db := common.GetDB()
-	var productID ProductIDmsg
-	c.Bind(&productID)
-	var product model.Product
-	db.Where("productID = ?", productID).First(&product)
-	if product.ProductID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "需要删除的商品不存在")
+	var msg ProductIDmsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
 		return
 	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != product.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+	var product model.Product
+	db.Where("productID = ?", msg.ProductID).First(&product)
+	if product.ProductID == 0 || product.ISDelete {
+		response.Response(c, http.StatusBadRequest, 400, nil, "商品不存在")
+		return
+	}
+	if GetTokenUserID(c) != product.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 403, nil, "权限不足")
 		return
 	}
 	db.Model(&product).Update("is_sold", true)
@@ -290,19 +230,73 @@ func SaleProduct(c *gin.Context) {
 func GetCarouselImg(c *gin.Context) {
 	db := common.GetDB()
 	var products []model.Product
-	db.Order("productID desc").Where("is_delete = ?", false).Limit(5).Find(&products)
-	var CarouselImg string
-	//懒得写了
-	c.JSON(http.StatusOK, CarouselImg)
+	db.Where("is_delete = ? AND is_sold = ?", false, false).
+		Where("photos != ?", "").
+		Order("productID DESC").
+		Limit(8).
+		Find(&products)
+	urls := make([]string, 0, len(products))
+	for _, p := range products {
+		for _, u := range strings.Split(p.Photos, ",") {
+			u = strings.TrimSpace(u)
+			if u == "" {
+				continue
+			}
+			urls = append(urls, replaceResizedWithURL(u))
+			break
+		}
+		if len(urls) >= 5 {
+			break
+		}
+	}
+	c.JSON(http.StatusOK, urls)
 }
 
-func isUserExist(db *gorm.DB, user_id int) bool {
-	var user model.User
-	db.Where("userID = ?", user_id).First(&user)
-	if user.UserID != 0 {
-		return true
+func productToResponse(db *gorm.DB, product model.Product, viewerID int, viewerIsOwner bool) ProductReponse {
+	photos := splitProductPhotos(product.Photos)
+	sellerID, sellerName := 0, "匿名卖家"
+	if !product.ISAnonymous || viewerIsOwner {
+		var user model.User
+		db.Where("userID = ?", product.UserID).First(&user)
+		if user.UserID != 0 {
+			sellerID = user.UserID
+			sellerName = user.Name
+		}
 	}
-	return false
+	return ProductReponse{
+		ProductID:   product.ProductID,
+		SellerID:    sellerID,
+		Seller:      sellerName,
+		Price:       product.Price,
+		Name:        product.Name,
+		Description: product.Description,
+		Photos:      photos,
+		ISSold:      product.ISSold,
+		ISAnonymous: product.ISAnonymous,
+		PostTime:    product.PostTime,
+	}
+}
+
+func splitProductPhotos(raw string) []string {
+	if raw == "" {
+		return []string{}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, replaceResizedWithURL(p))
+	}
+	return out
+}
+
+func isUserExist(db *gorm.DB, userID int) bool {
+	var user model.User
+	db.Where("userID = ?", userID).First(&user)
+	return user.UserID != 0
 }
 
 func replaceResizedWithURL(photoURL string) string {

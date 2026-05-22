@@ -246,73 +246,12 @@ func browseApplyOrder(query *gorm.DB, orderBy string) *gorm.DB {
 	}
 }
 
-type ReviewResponse struct {
-	PostID        uint
-	UserID        int
-	UserName      string
-	UserScore     int
-	UserTelephone string
-	UserAvatar    string
-	UserIdentity  string
-	Title         string
-	Content       string
-	Like          int
-	Comment       int
-	Browse        int
-	Heat          float64
-	PostTime      time.Time
-	IsSaved       bool
-	IsLiked       bool
-	Photos        string
-	Tag           string
-	UserRating    int
-	Rating        float64
-	Stars         [5]int
-}
-
-type PostIDRequest struct {
-	PostID int `json:"postID" binding:"required"` // binding:"required" 表示该字段必填
-}
-
-func isPost(postId uint) bool {
-	db := common.GetDB()
-
-	var post model.Post
-	db.Where("postID = ?", postId).First(&post)
-	if post.PostID == 0 {
-		return false
-	}
-	return post.Partition != "打分"
-}
-
-func GetPostType(c *gin.Context) {
-	db := common.GetDB()
-	// 获取参数
-	var requestPostType PostIDRequest
-	c.Bind(&requestPostType)
-	postId := requestPostType.PostID
-	fmt.Println("postId:", postId)
-	var post model.Post
-	db.Where("postID = ?", postId).First(&post)
-	if post.PostID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
-		return
-	}
-	postType := "post"
-	if post.Partition == "打分" {
-		postType = "rating"
-	}
-	response.Response(c, http.StatusOK, 200, gin.H{"postType": postType}, "帖子类型查询成功")
-}
-
 func Browse(c *gin.Context) {
 	db := common.GetDB()
 	var requestBrowseMeg BrowseMeg
 	c.Bind(&requestBrowseMeg)
 	userTelephone := requestBrowseMeg.UserTelephone
 	searchsort := requestBrowseMeg.Searchsort
-	limit := requestBrowseMeg.Limit
-	offset := requestBrowseMeg.Offset
 	fmt.Println("searchsort:", searchsort)
 	var temUser model.User
 	db.Where("phone = ?", userTelephone).First(&temUser)
@@ -320,63 +259,9 @@ func Browse(c *gin.Context) {
 		return
 	}
 
-	if searchsort != "rating" {
-		// ---------- 非评分分支：home / history / save ----------
-		posts := browseFetchPosts(db, &requestBrowseMeg, &temUser)
-		if len(posts) == 0 {
-			c.JSON(http.StatusOK, []PostResponse{})
-			return
-		}
-		postIDs := make([]int, 0, len(posts))
-		userIDs := make(map[int]struct{})
-		for _, p := range posts {
-			postIDs = append(postIDs, p.PostID)
-			if p.UserID != 0 {
-				userIDs[p.UserID] = struct{}{}
-			}
-		}
-		savedSet := browseBatchSavedSet(db, temUser.UserID, postIDs)
-		likedSet := browseBatchLikedSet(db, temUser.UserID, postIDs)
-		userMap := browseBatchUserMap(db, userIDs)
-		postResponses := make([]PostResponse, 0, len(posts))
-		isSaveMode := (searchsort == "save")
-		for _, post := range posts {
-			user := browseGetUserForPost(userMap, post.UserID)
-			_, isSaved := savedSet[post.PostID]
-			if isSaveMode {
-				isSaved = true
-			}
-			_, isLiked := likedSet[post.PostID]
-			postResponses = append(postResponses, PostResponse{
-				PostID:        uint(post.PostID),
-				Partition:     post.Partition,
-				UserID:        post.UserID,
-				UserName:      user.Name,
-				UserScore:     user.Score,
-				UserTelephone: user.Phone,
-				UserAvatar:    user.AvatarURL,
-				UserIdentity:  user.Identity,
-				Title:         post.Title,
-				Content:       post.Ptext,
-				Like:          post.LikeNum,
-				Comment:       post.CommentNum,
-				Browse:        post.BrowseNum,
-				Heat:          post.Heat,
-				PostTime:      post.PostTime,
-				IsSaved:       isSaved,
-				IsLiked:       isLiked,
-				Photos:        post.Photos,
-				Tag:           post.Tag,
-			})
-		}
-		c.JSON(http.StatusOK, postResponses)
-		return
-	}
-
-	// ---------- 评分分支：rating ----------
-	posts := browseFetchRatingPosts(db, &requestBrowseMeg, limit, offset)
+	posts := browseFetchPosts(db, &requestBrowseMeg, &temUser)
 	if len(posts) == 0 {
-		c.JSON(http.StatusOK, []ReviewResponse{})
+		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
 	postIDs := make([]int, 0, len(posts))
@@ -387,20 +272,21 @@ func Browse(c *gin.Context) {
 			userIDs[p.UserID] = struct{}{}
 		}
 	}
-	userMap := browseBatchUserMap(db, userIDs)
-	likedSet := browseBatchLikedSet(db, temUser.UserID, postIDs)
 	savedSet := browseBatchSavedSet(db, temUser.UserID, postIDs)
-	postIDToStars := browseBatchPostRstars(db, postIDs)
-	reviewResponses := make([]ReviewResponse, 0, len(posts))
+	likedSet := browseBatchLikedSet(db, temUser.UserID, postIDs)
+	userMap := browseBatchUserMap(db, userIDs)
+	postResponses := make([]PostResponse, 0, len(posts))
+	isSaveMode := (searchsort == "save")
 	for _, post := range posts {
 		user := browseGetUserForPost(userMap, post.UserID)
-		_, isLiked := likedSet[post.PostID]
 		_, isSaved := savedSet[post.PostID]
-		stars := postIDToStars[post.PostID]
-		rating := getAverageRatingFromStars(stars)
-		cnt := starsCountFromRstars(stars)
-		reviewResponses = append(reviewResponses, ReviewResponse{
+		if isSaveMode {
+			isSaved = true
+		}
+		_, isLiked := likedSet[post.PostID]
+		postResponses = append(postResponses, PostResponse{
 			PostID:        uint(post.PostID),
+			Partition:     post.Partition,
 			UserID:        post.UserID,
 			UserName:      user.Name,
 			UserScore:     user.Score,
@@ -418,11 +304,9 @@ func Browse(c *gin.Context) {
 			IsLiked:       isLiked,
 			Photos:        post.Photos,
 			Tag:           post.Tag,
-			Rating:        rating,
-			Stars:         cnt,
 		})
 	}
-	c.JSON(http.StatusOK, reviewResponses)
+	c.JSON(http.StatusOK, postResponses)
 }
 
 type UserProfilePostsMsg struct {
@@ -432,7 +316,7 @@ type UserProfilePostsMsg struct {
 	Offset        int    `json:"offset"`
 }
 
-// UserProfilePosts 个人主页发帖列表（不含「打分」）；对方开启「隐藏发帖」且浏览者非本人时返回空。
+// UserProfilePosts 个人主页发帖列表；对方开启「隐藏发帖」且浏览者非本人时返回空。
 func UserProfilePosts(c *gin.Context) {
 	db := common.GetDB()
 	var req UserProfilePostsMsg
@@ -464,7 +348,7 @@ func UserProfilePosts(c *gin.Context) {
 		offset = 0
 	}
 	var posts []model.Post
-	db.Where("userID = ? AND `partition` != ?", target.UserID, "打分").
+	db.Where("userID = ?", target.UserID).
 		Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
 	if len(posts) == 0 {
 		c.JSON(http.StatusOK, []PostResponse{})
@@ -542,7 +426,7 @@ func UserProfilePostNum(c *gin.Context) {
 		return
 	}
 	db.Model(&model.Post{}).
-		Where("userID = ? AND `partition` != ?", target.UserID, "打分").
+		Where("userID = ?", target.UserID).
 		Count(&count)
 	c.JSON(http.StatusOK, gin.H{"Postcount": count})
 }
@@ -580,7 +464,7 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 	}
 
 	var posts []model.Post
-	base := db.Where("`partition` != ?", "打分").Offset(offset).Limit(limit)
+	base := db.Offset(offset).Limit(limit)
 	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
 	if searchsort == "home" {
 		base = browseApplyOrder(base, req.OrderBy)
@@ -609,24 +493,6 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 		} else {
 			base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts, "`partition` = ?", partition)
 		}
-	}
-	return posts
-}
-
-func browseFetchRatingPosts(db *gorm.DB, req *BrowseMeg, limit, offset int) []model.Post {
-	var posts []model.Post
-	partition := req.Partition
-	searchinfo := req.Searchinfo
-	base := db.Order("postID DESC").Offset(offset).Limit(limit)
-	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
-	if partition != "" && searchinfo != "" {
-		base.Where("`partition` = ? AND (title LIKE ? OR content LIKE ?)", partition, "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
-	} else if partition != "" {
-		base.Where("`partition` = ?", partition).Find(&posts)
-	} else if searchinfo != "" {
-		base.Where("title LIKE ? OR content LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
-	} else {
-		base.Find(&posts)
 	}
 	return posts
 }
@@ -685,43 +551,6 @@ func browseGetUserForPost(userMap map[int]model.User, userID int) model.User {
 	return model.User{}
 }
 
-func browseBatchPostRstars(db *gorm.DB, postIDs []int) map[int][]model.Rstar {
-	if len(postIDs) == 0 {
-		return nil
-	}
-	var list []model.Rstar
-	db.Where("postID IN (?)", postIDs).Find(&list)
-	m := make(map[int][]model.Rstar)
-	for _, r := range list {
-		m[r.PostID] = append(m[r.PostID], r)
-	}
-	return m
-}
-
-func getAverageRatingFromStars(stars []model.Rstar) float64 {
-	if len(stars) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, s := range stars {
-		sum += float64(s.StarNum)
-	}
-	return sum / float64(len(stars))
-}
-
-func starsCountFromRstars(stars []model.Rstar) [5]int {
-	var cnt [5]int
-	for _, s := range stars {
-		if s.StarNum == 0 {
-			continue
-		}
-		if s.StarNum >= 1 && s.StarNum <= 5 {
-			cnt[s.StarNum-1]++
-		}
-	}
-	return cnt
-}
-
 func GetPostNum(c *gin.Context) {
 	db := common.GetDB()
 	// 获取参数
@@ -734,18 +563,12 @@ func GetPostNum(c *gin.Context) {
 	timeFrom := requestBrowseMeg.TimeFrom
 	timeTo := requestBrowseMeg.TimeTo
 	var count int
-	if searchsort == "rating" {
-		q := db.Model(&model.Post{}).Where("`partition` = ?", partition)
-		q = browseApplyTimeRange(q, timeFrom, timeTo)
-		q.Count(&count)
-	} else if searchsort == "home" {
+	if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
 			if len(searchinfo) == 0 && timeFrom == "" && timeTo == "" {
-				db.Model(&model.Post{}).Where("`partition` != ?", "打分").Count(&count)
+				db.Model(&model.Post{}).Count(&count)
 			} else {
-				q := db.Model(&model.Post{}).
-					Where("postId != ?", 0).
-					Where("`partition` != ?", "打分")
+				q := db.Model(&model.Post{}).Where("postId != ?", 0)
 				q = browseApplyTimeRange(q, timeFrom, timeTo)
 				if len(searchinfo) > 0 {
 					q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
@@ -1035,30 +858,6 @@ type PostDetailsResponse struct {
 	Tag           string
 }
 
-type RpostDetailsResponse struct {
-	PostID        uint
-	UserID        uint
-	UserName      string
-	UserScore     int
-	UserTelephone string
-	UserAvatar    string
-	UserIdentity  string
-	Title         string
-	Content       string
-	Like          int
-	Comment       int
-	Browse        int
-	Heat          float64
-	PostTime      time.Time
-	IsSaved       bool
-	IsLiked       bool
-	Photos        string
-	Tag           string
-	AverageStar   float64
-	Stars         [5]int
-	UserStar      int
-}
-
 type PostDetailsMsg struct {
 	UserTelephone string `json:"userTelephone"`
 	PostID        uint   `json:"postID"`
@@ -1204,115 +1003,38 @@ func ShowDetails(c *gin.Context) {
 		return isLiked
 	}
 
-	isNormalPost := isPost(postID)
-	timing.step("is_post_query")
-
-	if isNormalPost {
-		// ------------------- 普通帖子分支 -------------------
-		isLiked := queryIsLiked()
-		timing.step("query_plike")
-		isSaved := false
-		var save model.Psave
-		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
-		if save.PsaveID != 0 {
-			isSaved = true
-		}
-		timing.step("query_psave")
-
-		postDetailsResponse := PostDetailsResponse{
-			PostID:        uint(post.PostID),
-			UserID:        uint(user.UserID),
-			UserName:      user.Name,
-			UserScore:     user.Score,
-			UserTelephone: user.Phone,
-			UserAvatar:    user.AvatarURL,
-			UserIdentity:  user.Identity,
-			Title:         post.Title,
-			Content:       post.Ptext,
-			Like:          post.LikeNum,
-			Comment:       post.CommentNum,
-			PostTime:      post.PostTime,
-			IsSaved:       isSaved,
-			IsLiked:       isLiked,
-			Browse:        post.BrowseNum,
-			Heat:          post.Heat,
-			Photos:        post.Photos,
-			Tag:           post.Tag,
-		}
-		c.JSON(http.StatusOK, postDetailsResponse)
-		timing.step("write_json")
-	} else {
-		// ------------------- 评分帖子分支 -------------------
-		isLiked := queryIsLiked()
-		timing.step("query_plike")
-		var stars []model.Rstar
-		var userStar model.Rstar
-		db.Where("postID = ? AND userID = ?", postID, temUser.UserID).First(&userStar)
-		timing.step("query_rstar_user")
-		db.Where("postID = ?", postID).Find(&stars)
-		timing.step("query_rstar_list")
-
-		var cnt [5]int
-		var totalRatings float64
-		for _, star := range stars {
-			if star.StarNum == 0 {
-				continue
-			}
-			cnt[star.StarNum-1]++
-			totalRatings += float64(star.StarNum)
-		}
-		averageStar := 0.0
-		if len(stars) > 0 {
-			averageStar = totalRatings / float64(len(stars))
-		}
-
-		postDetailsResponse := RpostDetailsResponse{
-			PostID:        uint(post.PostID),
-			UserID:        uint(user.UserID),
-			UserName:      user.Name,
-			UserScore:     user.Score,
-			UserTelephone: user.Phone,
-			UserAvatar:    user.AvatarURL,
-			UserIdentity:  user.Identity,
-			Title:         post.Title,
-			Content:       post.Ptext,
-			Like:          post.LikeNum,
-			Comment:       post.CommentNum,
-			PostTime:      post.PostTime,
-			IsSaved:       false,
-			IsLiked:       isLiked,
-			Browse:        post.BrowseNum,
-			Heat:          post.Heat,
-			Photos:        post.Photos,
-			Tag:           post.Tag,
-			AverageStar:   averageStar,
-			Stars:         cnt,
-			UserStar:      userStar.StarNum,
-		}
-		c.JSON(http.StatusOK, postDetailsResponse)
-		timing.step("write_json")
+	isLiked := queryIsLiked()
+	timing.step("query_plike")
+	isSaved := false
+	var save model.Psave
+	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
+	if save.PsaveID != 0 {
+		isSaved = true
 	}
-}
-func getAverageRating(postID uint) float64 {
-	db := common.GetDB()
-	var post model.Post
-	db.Where("postID = ?", postID).First(&post)
-	if post.PostID == 0 {
-		return 0
-	}
-	var totalRatings float64
-	var stars []model.Rstar
-	db.Model(&model.Rstar{}).Where("postID = ?", postID).Find(&stars)
+	timing.step("query_psave")
 
-	for _, star := range stars {
-		totalRatings += float64(star.StarNum)
+	postDetailsResponse := PostDetailsResponse{
+		PostID:        uint(post.PostID),
+		UserID:        uint(user.UserID),
+		UserName:      user.Name,
+		UserScore:     user.Score,
+		UserTelephone: user.Phone,
+		UserAvatar:    user.AvatarURL,
+		UserIdentity:  user.Identity,
+		Title:         post.Title,
+		Content:       post.Ptext,
+		Like:          post.LikeNum,
+		Comment:       post.CommentNum,
+		PostTime:      post.PostTime,
+		IsSaved:       isSaved,
+		IsLiked:       isLiked,
+		Browse:        post.BrowseNum,
+		Heat:          post.Heat,
+		Photos:        post.Photos,
+		Tag:           post.Tag,
 	}
-	if totalRatings == 0 {
-		return 0
-	}
-	// 计算平均评分
-	averageRating := totalRatings / float64(len(stars))
-	return averageRating
+	c.JSON(http.StatusOK, postDetailsResponse)
+	timing.step("write_json")
 }
 
 func UploadPhotos(c *gin.Context) {

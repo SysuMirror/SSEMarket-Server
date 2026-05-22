@@ -33,24 +33,6 @@ type CommentResponse struct {
 	IsDenied        bool
 }
 
-type RCommentResponse struct {
-	PcommentID      int
-	AuthorID        int
-	Author          string
-	AuthorTelephone string
-	AuthorScore     int
-	AuthorAvatar    string
-	AuthorIdentity  string
-	CommentTime     time.Time
-	Content         string
-	LikeNum         int
-	DenyNum         int
-	SubComments     []Subcomment
-	IsLiked         bool
-	IsDenied        bool
-	AuthorRating    int
-}
-
 type Commentsmsg struct {
 	UserTelephone string `json:"userTelephone"`
 	PostID        int    `json:"postID"`
@@ -88,8 +70,12 @@ func GetComments(c *gin.Context) {
 	postType := msg.TypePost
 
 	// 原有参数校验逻辑（完全保留）
-	if usertelephone == "" || postid == 0 || postType == "" {
+	if usertelephone == "" || postid == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
+		return
+	}
+	if postType != "" && postType != "post" {
+		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
 
@@ -125,75 +111,31 @@ func GetComments(c *gin.Context) {
 	likeMap := getBatchCommentLike(db, userID, commentIDs)
 	// 批量查询踩状态
 	denyMap := getBatchCommentDeny(db, userID, commentIDs)
-	// 批量查询评分（仅评分分支）
-	starMap := make(map[int]int)
-	if postType != "post" {
-		starMap = getBatchCommentStar(db, postid, userIDs)
-	}
 
-	// ------------------- 原有分支逻辑（完全保留变量/结构） -------------------
-	if postType == "post" {
-		var comments []CommentResponse
-		// 纯内存组装数据，循环内无任何数据库查询
-		for _, pcomment := range pcomments {
-			// 从批量Map中取数据
-			isLike := likeMap[pcomment.PcommentID]
-			isDeny := denyMap[pcomment.PcommentID]
-			commentuser := getUserByMap(userMap, pcomment.UserID)
-
-			// 原有响应结构体（完全保留）
-			comment := CommentResponse{
-				PcommentID:      pcomment.PcommentID,
-				Author:          commentuser.Name,
-				AuthorID:        commentuser.UserID,
-				AuthorTelephone: commentuser.Phone,
-				AuthorScore:     commentuser.Score,
-				AuthorAvatar:    commentuser.AvatarURL,
-				AuthorIdentity:  commentuser.Identity,
-				CommentTime:     pcomment.Time,
-				Content:         pcomment.Pctext,
-				LikeNum:         pcomment.LikeNum,
-				DenyNum:         pcomment.DenyNum,
-				SubComments:     GetSubComments(pcomment, temUser.UserID),
-				IsLiked:         isLike,
-				IsDenied:        isDeny,
-			}
-			comments = append(comments, comment)
+	var comments []CommentResponse
+	for _, pcomment := range pcomments {
+		isLike := likeMap[pcomment.PcommentID]
+		isDeny := denyMap[pcomment.PcommentID]
+		commentuser := getUserByMap(userMap, pcomment.UserID)
+		comment := CommentResponse{
+			PcommentID:      pcomment.PcommentID,
+			Author:          commentuser.Name,
+			AuthorID:        commentuser.UserID,
+			AuthorTelephone: commentuser.Phone,
+			AuthorScore:     commentuser.Score,
+			AuthorAvatar:    commentuser.AvatarURL,
+			AuthorIdentity:  commentuser.Identity,
+			CommentTime:     pcomment.Time,
+			Content:         pcomment.Pctext,
+			LikeNum:         pcomment.LikeNum,
+			DenyNum:         pcomment.DenyNum,
+			SubComments:     GetSubComments(pcomment, temUser.UserID),
+			IsLiked:         isLike,
+			IsDenied:        isDeny,
 		}
-		c.JSON(http.StatusOK, comments)
-	} else {
-		var comments []RCommentResponse
-		// 纯内存组装数据，循环内无任何数据库查询
-		for _, pcomment := range pcomments {
-			// 从批量Map中取数据
-			isLike := likeMap[pcomment.PcommentID]
-			isDeny := denyMap[pcomment.PcommentID]
-			commentuser := getUserByMap(userMap, pcomment.UserID)
-			// 从批量Map中取评分
-			starNum := starMap[pcomment.UserID]
-
-			// 原有响应结构体（完全保留）
-			comment := RCommentResponse{
-				PcommentID:      pcomment.PcommentID,
-				Author:          commentuser.Name,
-				AuthorID:        commentuser.UserID,
-				AuthorTelephone: commentuser.Phone,
-				AuthorScore:     commentuser.Score,
-				AuthorAvatar:    commentuser.AvatarURL,
-				AuthorIdentity:  commentuser.Identity,
-				CommentTime:     pcomment.Time,
-				Content:         pcomment.Pctext,
-				LikeNum:         pcomment.LikeNum,
-				DenyNum:         pcomment.DenyNum,
-				SubComments:     GetSubComments(pcomment, temUser.UserID),
-				IsLiked:         isLike,
-				IsDenied:        isDeny,
-				AuthorRating:    starNum,
-			}
-			comments = append(comments, comment)
-		}
-		c.JSON(http.StatusOK, comments)
+		comments = append(comments, comment)
 	}
+	c.JSON(http.StatusOK, comments)
 }
 
 // getBatchUserMap 批量查询用户，保留原有逻辑
@@ -240,24 +182,6 @@ func getBatchCommentDeny(db *gorm.DB, userID int, commentIDs []int) map[int]bool
 		denyMap[deny.PctargetID] = true
 	}
 	return denyMap
-}
-
-// getBatchCommentStar 批量查询评论用户评分
-func getBatchCommentStar(db *gorm.DB, postID int, userIDs map[int]struct{}) map[int]int {
-	ids := make([]int, 0, len(userIDs))
-	for id := range userIDs {
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return map[int]int{}
-	}
-	var stars []model.Rstar
-	db.Where("postID = ? AND userID IN (?)", postID, ids).Find(&stars)
-	starMap := make(map[int]int)
-	for _, star := range stars {
-		starMap[star.UserID] = star.StarNum
-	}
-	return starMap
 }
 
 // getUserByMap 从Map中获取用户，保留原有管理员逻辑
@@ -514,130 +438,6 @@ func PostPcomment(c *gin.Context) {
 		SubComments:    GetSubComments(pcomment, user.UserID),
 		IsLiked:        false,
 	}
-	c.JSON(http.StatusOK, comment)
-}
-
-type RpcommentMsg struct {
-	UserTelephone string
-	PostID        int
-	Content       string
-	Rating        int
-}
-
-func PostRcomment(c *gin.Context) {
-	db := common.GetDB()
-	var msg RpcommentMsg
-	c.Bind(&msg)
-	if len(msg.Content) == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
-		return
-	}
-	// 这里不能直接用len(),否则中文字符会计算错误
-	if utf8.RuneCountInString(msg.Content) > 1000 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
-		return
-	}
-	if len(msg.UserTelephone) == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
-		return
-	}
-
-	if msg.Rating < 0 || msg.Rating > 5 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "评分必须在0-5之间")
-		return
-	}
-	// if api.GetSuggestion(msg.Content) == "Block" {
-	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-	// 	// return
-	// }
-	var user model.User
-	var receiver model.User
-	var tempost model.Post
-	db.Where("phone = ?", msg.UserTelephone).First(&user)
-	if user.UserID == 0 {
-		return
-	}
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
-		return
-	}
-	currentDateTime := time.Now()
-	if user.Banend.After(currentDateTime) {
-		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
-		return
-	}
-
-	db.Where("postID =?", msg.PostID).First(&tempost)
-	db.Where("userID =?", tempost.UserID).First(&receiver)
-	if tempost.PostID == 0 {
-		return
-	}
-	pcomment := model.Pcomment{
-		UserID:    user.UserID,
-		PtargetID: msg.PostID,
-		Pctext:    msg.Content,
-		Time:      time.Now(),
-		LikeNum:   0,
-		DenyNum:   0,
-	}
-	// 创建一条帖子评论
-	db.Create(&pcomment)
-
-	// 如果用户自己评论自己的帖子，则不用通知
-	if tempost.UserID != user.UserID {
-		notice := model.Notice{
-			Receiver: tempost.UserID,
-			User:     model.User{},
-			Sender:   user.UserID,
-			Type:     "pcomment",
-			Ntext:    msg.Content,
-			Time:     time.Now(),
-			Read:     false,
-			Target:   pcomment.PcommentID,
-		}
-		// 创建一条通知
-		db.Create(&notice)
-		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 1, msg.Content)
-		}
-	}
-
-	var post model.Post
-	db.Where("postID = ?", msg.PostID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
-	db.Model(&post).Update("comment_num", post.CommentNum+1)
-	// 在这里设置 评论 的权重
-	weightComment := float64(6)
-	db.Model(&post).Update("heat", post.Heat+weightComment)
-	common.InvalidatePostDetailCache(post.PostID)
-	comment := CommentResponse{
-		PcommentID:     pcomment.PcommentID,
-		Author:         user.Name,
-		AuthorAvatar:   user.AvatarURL,
-		AuthorIdentity: user.Identity,
-		CommentTime:    pcomment.Time,
-		Content:        pcomment.Pctext,
-		LikeNum:        pcomment.LikeNum,
-		DenyNum:        pcomment.DenyNum,
-		SubComments:    GetSubComments(pcomment, user.UserID),
-		IsLiked:        false,
-	}
-
-	var star model.Rstar
-	db.Where("postID = ? AND userID = ?", msg.PostID, user.UserID).First(&star)
-	if star.RstarID != 0 {
-		db.Model(&star).Update("star_num", msg.Rating)
-	} else {
-		star.PostID = int(msg.PostID)
-		star.UserID = int(user.UserID)
-		star.StarNum = msg.Rating
-		db.Create(&star)
-	}
-
 	c.JSON(http.StatusOK, comment)
 }
 

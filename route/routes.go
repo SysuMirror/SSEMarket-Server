@@ -32,12 +32,19 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	//OAuth2授权记录管理
 	auth.GET("/api/auth/connect/records", controller.GetOAuth2AuthRecords)
 
-	auth.POST("/api/auth/submitRating", controller.UpdateRating) // 评分
-	auth.POST("api/auth/userPostRating", controller.GetUserPostRating)
-	auth.POST("/api/auth/getPostType", controller.GetPostType)           // 获取帖子类型
-	auth.POST("/api/auth/getAverageRating", controller.GetAverageRating) // 评分贴评分
-	auth.POST("/api/auth/getStars", controller.GetStars)
-	auth.POST("api/auth/postRcomment", controller.PostRcomment)
+	// 打分专区（独立数据与接口）
+	auth.POST("/api/auth/rating/category/list", controller.RatingCategoryList)
+	auth.POST("/api/auth/rating/category/create", controller.RatingCategoryCreate)
+	auth.POST("/api/auth/rating/post/list", controller.RatingPostList)
+	auth.POST("/api/auth/rating/post/count", controller.RatingPostCount)
+	auth.POST("/api/auth/rating/post/create", controller.RatingPostCreate)
+	auth.POST("/api/auth/rating/post/detail", controller.RatingPostDetail)
+	auth.POST("/api/auth/rating/post/delete", controller.RatingPostDelete)
+	auth.POST("/api/auth/rating/post/like", controller.RatingPostLike)
+	auth.POST("/api/auth/rating/star/submit", controller.RatingStarSubmit)
+	auth.POST("/api/auth/rating/comment/list", controller.RatingCommentList)
+	auth.POST("/api/auth/rating/comment/create", controller.RatingCommentCreate)
+	auth.POST("/api/auth/rating/comment/like", controller.RatingCommentLike)
 
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", controller.Login)
