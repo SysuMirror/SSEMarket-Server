@@ -53,11 +53,15 @@ services:
     container_name: server
     restart: on-failure:3
     # build: ../SSE_market_server_old
+    depends_on:
+      - redis
+      - mysql
     build: .
     ports:
       - 8080:8080
     environment:
       - TZ=Asia/Shanghai
+      - GIN_MODE=release
     volumes:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log
@@ -100,6 +104,8 @@ services:
       - 80:80
       - 443:443
     volumes:
+      - /root/SSE_Market/nginx_proxy/nginx.conf:/etc/nginx/custom.conf
+      - /root/SSE_Market/certbot/www:/var/www/certbot
       - /root/SSE_Market/Nginx:/etc/letsencrypt/
       - /root/SSE_Market/sse_market_mobile/dist:/usr/share/nginx/mb
       - /root/SSE_Market/SSE_market_client/dist:/usr/share/nginx/pc
@@ -108,6 +114,18 @@ services:
       - /root/SSE_Market/hexo_blog/public:/usr/share/nginx/blog
       - /root/SSE_Market/sse_market_new_client/newSSE/dist:/usr/share/nginx/new
       - /root/SSE_Market/qiu/admin/dist:/usr/share/nginx/test_admin
+      - /root/SSE_Market/tx/ai_interview/web/dist:/usr/share/nginx/interview
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    restart: on-failure:3
+    volumes:
+      - /root/SSE_Market/certbot/www:/var/www/certbot
+      - /root/SSE_Market/Nginx:/etc/letsencrypt/
+    profiles:
+      - manual
+    depends_on:
+      - nginx_proxy
 # db:
 #   image: mysql:5.7
 #   volumes:
@@ -152,9 +170,9 @@ services:
 
 volumes:
   my-vol:
-    # blog_db_data: 
+    # blog_db_data:
     #   external: true
-    # wordpress_data: 
+    # wordpress_data:
     # blog_wordpress_data:
     #   external: true
     # --------------
