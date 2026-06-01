@@ -20,4 +20,5 @@ type Post struct {
 	Heat       float64   `gorm:"column:heat;type:double"`
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
 	Tag        string    `gorm:"column:tag;type:varchar(100)"`
+	IsPrivate  bool      `gorm:"column:is_private;type:tinyint(1);default:0"`
 }

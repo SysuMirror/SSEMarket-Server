@@ -23,6 +23,7 @@ type PostCacheItem struct {
 	BrowseNum  int    `json:"browse_num"`
 	Photos     string `json:"photos"`
 	Tag        string `json:"tag"`
+	IsPrivate  bool   `json:"is_private"`
 	PostTime   string `json:"post_time"`
 }
 
@@ -53,6 +54,7 @@ func (d *PostDetailCacheDTO) ConvertFromModel(post model.Post, user model.User) 
 		BrowseNum:  post.BrowseNum,
 		Photos:     post.Photos,
 		Tag:        post.Tag,
+		IsPrivate:  post.IsPrivate,
 		PostTime:   post.PostTime.Format(time.RFC3339), // 时间格式化，无崩溃
 	}
 
@@ -88,6 +90,7 @@ func (d *PostDetailCacheDTO) ConvertToModel() (model.Post, model.User) {
 		BrowseNum:  d.Post.BrowseNum,
 		Photos:     d.Post.Photos,
 		Tag:        d.Post.Tag,
+		IsPrivate:  d.Post.IsPrivate,
 		PostTime:   postTime,
 	}
 

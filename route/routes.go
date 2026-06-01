@@ -67,6 +67,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
+	auth.POST("/api/auth/updatePostPrivacy", controller.UpdatePostPrivacy)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
 	auth.POST("/api/auth/deletePcomment", controller.DeletePcomment)
 	auth.POST("/api/auth/deleteCcomment", controller.DeleteCcomment)

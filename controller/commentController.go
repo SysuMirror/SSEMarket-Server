@@ -87,6 +87,13 @@ func GetComments(c *gin.Context) {
 	}
 	userID := temUser.UserID
 
+	var post model.Post
+	db.Where("postID = ?", postid).First(&post)
+	if post.PostID == 0 || !canViewPost(post, userID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
+
 	// ------------------- 核心优化：批量查询，消除N+1 -------------------
 	// 1. 一次性查询所有主评论（保留原有变量名 pcomments）
 	var pcomments []model.Pcomment
@@ -386,6 +393,10 @@ func PostPcomment(c *gin.Context) {
 	if tempost.PostID == 0 {
 		return
 	}
+	if !canViewPost(tempost, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
 	pcomment := model.Pcomment{
 		UserID:    user.UserID,
 		PtargetID: msg.PostID,
@@ -496,6 +507,13 @@ func PostCcomment(c *gin.Context) {
 		return
 	}
 
+	var post model.Post
+	db.Where("postID = ?", msg.PostID).First(&post)
+	if post.PostID == 0 || !canViewPost(post, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
+
 	newCcomment := model.Ccomment{
 		UserID:         user.UserID,
 		CtargetID:      msg.PcommentID,
@@ -562,11 +580,6 @@ func PostCcomment(c *gin.Context) {
 	}
 	// 如果是评论的回复
 
-	var post model.Post
-	db.Where("postID = ?", msg.PostID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
 	db.Model(&post).Update("comment_num", post.CommentNum+1)
 	// 在这里设置 评论 的权重
 	weightComment := float64(6)

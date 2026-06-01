@@ -64,7 +64,7 @@ func SearchPostsByTitle(c *gin.Context) {
 	}
 
 	var posts []model.Post
-	db.Where("title LIKE ?", "%"+keyword+"%").
+	db.Where("title LIKE ? AND (is_private = ? OR userID = ?)", "%"+keyword+"%", false, user.UserID).
 		Order("postID DESC").
 		Limit(20).
 		Find(&posts)

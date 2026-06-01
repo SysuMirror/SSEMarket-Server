@@ -179,6 +179,7 @@ type PostResponse struct {
 	IsLiked       bool
 	Photos        string
 	Tag           string
+	IsPrivate     bool
 }
 
 type BrowseMeg struct {
@@ -193,6 +194,39 @@ type BrowseMeg struct {
 	Limit         int
 	Offset        int
 	PostType      string
+}
+
+func canViewPost(post model.Post, viewerUserID int) bool {
+	return !post.IsPrivate || post.UserID == viewerUserID
+}
+
+func applyPostVisibilityScope(query *gorm.DB, viewerUserID int) *gorm.DB {
+	return query.Where("(is_private = ? OR userID = ?)", false, viewerUserID)
+}
+
+func buildPostResponse(post model.Post, user model.User, isSaved bool, isLiked bool) PostResponse {
+	return PostResponse{
+		PostID:        uint(post.PostID),
+		Partition:     post.Partition,
+		UserID:        post.UserID,
+		UserName:      user.Name,
+		UserScore:     user.Score,
+		UserTelephone: user.Phone,
+		UserAvatar:    user.AvatarURL,
+		UserIdentity:  user.Identity,
+		Title:         post.Title,
+		Content:       post.Ptext,
+		Like:          post.LikeNum,
+		Comment:       post.CommentNum,
+		Browse:        post.BrowseNum,
+		Heat:          post.Heat,
+		PostTime:      post.PostTime,
+		IsSaved:       isSaved,
+		IsLiked:       isLiked,
+		Photos:        post.Photos,
+		Tag:           post.Tag,
+		IsPrivate:     post.IsPrivate,
+	}
 }
 
 func parseBrowseTime(s string, endOfDay bool) (time.Time, bool) {
@@ -284,27 +318,7 @@ func Browse(c *gin.Context) {
 			isSaved = true
 		}
 		_, isLiked := likedSet[post.PostID]
-		postResponses = append(postResponses, PostResponse{
-			PostID:        uint(post.PostID),
-			Partition:     post.Partition,
-			UserID:        post.UserID,
-			UserName:      user.Name,
-			UserScore:     user.Score,
-			UserTelephone: user.Phone,
-			UserAvatar:    user.AvatarURL,
-			UserIdentity:  user.Identity,
-			Title:         post.Title,
-			Content:       post.Ptext,
-			Like:          post.LikeNum,
-			Comment:       post.CommentNum,
-			Browse:        post.BrowseNum,
-			Heat:          post.Heat,
-			PostTime:      post.PostTime,
-			IsSaved:       isSaved,
-			IsLiked:       isLiked,
-			Photos:        post.Photos,
-			Tag:           post.Tag,
-		})
+		postResponses = append(postResponses, buildPostResponse(post, user, isSaved, isLiked))
 	}
 	c.JSON(http.StatusOK, postResponses)
 }
@@ -348,7 +362,11 @@ func UserProfilePosts(c *gin.Context) {
 		offset = 0
 	}
 	var posts []model.Post
-	db.Where("userID = ?", target.UserID).
+	query := db.Where("userID = ?", target.UserID)
+	if viewer.UserID != target.UserID {
+		query = query.Where("is_private = ?", false)
+	}
+	query.
 		Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
 	if len(posts) == 0 {
 		c.JSON(http.StatusOK, []PostResponse{})
@@ -370,27 +388,7 @@ func UserProfilePosts(c *gin.Context) {
 		u := browseGetUserForPost(userMap, post.UserID)
 		_, isSaved := savedSet[post.PostID]
 		_, isLiked := likedSet[post.PostID]
-		postResponses = append(postResponses, PostResponse{
-			PostID:        uint(post.PostID),
-			Partition:     post.Partition,
-			UserID:        post.UserID,
-			UserName:      u.Name,
-			UserScore:     u.Score,
-			UserTelephone: u.Phone,
-			UserAvatar:    u.AvatarURL,
-			UserIdentity:  u.Identity,
-			Title:         post.Title,
-			Content:       post.Ptext,
-			Like:          post.LikeNum,
-			Comment:       post.CommentNum,
-			Browse:        post.BrowseNum,
-			Heat:          post.Heat,
-			PostTime:      post.PostTime,
-			IsSaved:       isSaved,
-			IsLiked:       isLiked,
-			Photos:        post.Photos,
-			Tag:           post.Tag,
-		})
+		postResponses = append(postResponses, buildPostResponse(post, u, isSaved, isLiked))
 	}
 	c.JSON(http.StatusOK, postResponses)
 }
@@ -425,9 +423,11 @@ func UserProfilePostNum(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"Postcount": 0})
 		return
 	}
-	db.Model(&model.Post{}).
-		Where("userID = ?", target.UserID).
-		Count(&count)
+	query := db.Model(&model.Post{}).Where("userID = ?", target.UserID)
+	if viewer.UserID != target.UserID {
+		query = query.Where("is_private = ?", false)
+	}
+	query.Count(&count)
 	c.JSON(http.StatusOK, gin.H{"Postcount": count})
 }
 
@@ -449,7 +449,7 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 			postIDs = append(postIDs, s.PtargetID)
 		}
 		var posts []model.Post
-		db.Where("postID IN (?)", postIDs).Find(&posts)
+		applyPostVisibilityScope(db.Where("postID IN (?)", postIDs), temUser.UserID).Find(&posts)
 		postMap := make(map[int]model.Post, len(posts))
 		for _, p := range posts {
 			postMap[p.PostID] = p
@@ -466,13 +466,14 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 	var posts []model.Post
 	base := db.Offset(offset).Limit(limit)
 	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
+	base = applyPostVisibilityScope(base, temUser.UserID)
 	if searchsort == "home" {
 		base = browseApplyOrder(base, req.OrderBy)
 	} else {
 		base = base.Order("postID DESC")
 	}
 	if searchsort == "history" {
-		base.Find(&posts, "`userID` = ?", temUser.UserID)
+		base.Where("userID = ?", temUser.UserID).Find(&posts)
 		return posts
 	}
 	if partition == "主页" || len(partition) == 0 {
@@ -563,12 +564,19 @@ func GetPostNum(c *gin.Context) {
 	timeFrom := requestBrowseMeg.TimeFrom
 	timeTo := requestBrowseMeg.TimeTo
 	var count int
+	viewerUserID := 0
+	if userTelephone != "" {
+		var viewer model.User
+		db.Where("phone = ?", userTelephone).First(&viewer)
+		viewerUserID = viewer.UserID
+	}
 	if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
 			if len(searchinfo) == 0 && timeFrom == "" && timeTo == "" {
-				db.Model(&model.Post{}).Count(&count)
+				applyPostVisibilityScope(db.Model(&model.Post{}), viewerUserID).Count(&count)
 			} else {
 				q := db.Model(&model.Post{}).Where("postId != ?", 0)
+				q = applyPostVisibilityScope(q, viewerUserID)
 				q = browseApplyTimeRange(q, timeFrom, timeTo)
 				if len(searchinfo) > 0 {
 					q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
@@ -576,11 +584,11 @@ func GetPostNum(c *gin.Context) {
 				q.Count(&count)
 			}
 		} else if partition == "优质贴" {
-			q := db.Model(&model.Post{}).Where("is_high_quality =?", 1)
+			q := applyPostVisibilityScope(db.Model(&model.Post{}).Where("is_high_quality =?", 1), viewerUserID)
 			q = browseApplyTimeRange(q, timeFrom, timeTo)
 			q.Count(&count)
 		} else {
-			q := db.Model(&model.Post{}).Where("`partition` = ?", partition)
+			q := applyPostVisibilityScope(db.Model(&model.Post{}).Where("`partition` = ?", partition), viewerUserID)
 			q = browseApplyTimeRange(q, timeFrom, timeTo)
 			if len(searchinfo) > 0 {
 				q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
@@ -597,7 +605,7 @@ func GetPostNum(c *gin.Context) {
 		if searchsort == "save" {
 			db.Model(&model.Psave{}).
 				Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
-				Where("psaves.userID = ? AND posts.postID != ?", user.UserID, 0).
+				Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)", user.UserID, 0, false, user.UserID).
 				Count(&count)
 		} else if searchsort == "history" {
 			db.Model(&model.Post{}).
@@ -610,6 +618,45 @@ func GetPostNum(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"Postcount": count,
 	})
+}
+
+type PostPrivacyMsg struct {
+	UserTelephone string `json:"userTelephone"`
+	PostID        uint   `json:"postID"`
+	IsPrivate     bool   `json:"isPrivate"`
+}
+
+func UpdatePostPrivacy(c *gin.Context) {
+	db := common.GetDB()
+	var req PostPrivacyMsg
+	if err := c.Bind(&req); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
+		return
+	}
+	var user model.User
+	db.Where("phone = ?", req.UserTelephone).First(&user)
+	if user.UserID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
+		return
+	}
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	var post model.Post
+	db.Where("postID = ?", req.PostID).First(&post)
+	if post.PostID == 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
+		return
+	}
+	if post.UserID != user.UserID {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	db.Model(&post).Update("is_private", req.IsPrivate)
+	common.DelMultiLevelCache(util.GetPostDetailKey(int(req.PostID)))
+	response.Success(c, gin.H{"isPrivate": req.IsPrivate}, "更新成功")
 }
 
 type SaveMsg struct {
@@ -641,6 +688,10 @@ func UpdateSave(c *gin.Context) {
 	}
 	db.Where("postID = ?", postID).First(&post)
 	if post.PostID == 0 {
+		return
+	}
+	if !canViewPost(post, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 
@@ -692,6 +743,10 @@ func UpdateLike(c *gin.Context) {
 	}
 	db.Where("postID = ?", postID).First(&post)
 	if post.PostID == 0 {
+		return
+	}
+	if !canViewPost(post, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 
@@ -856,6 +911,7 @@ type PostDetailsResponse struct {
 	IsLiked       bool
 	Photos        string
 	Tag           string
+	IsPrivate     bool
 }
 
 type PostDetailsMsg struct {
@@ -988,6 +1044,12 @@ func ShowDetails(c *gin.Context) {
 	post, user = dtoObj.ConvertToModel()
 	timing.step("dto_to_model")
 
+	if !canViewPost(post, temUser.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
+	timing.step("check_visibility")
+
 	// ===================== 【浏览数高并发优化：本地聚合 + 批量同步】 =====================
 	post.BrowseNum = int(service.HotData.IncrBrowseCount(postIDInt))
 	timing.step("browse_incr")
@@ -1032,6 +1094,7 @@ func ShowDetails(c *gin.Context) {
 		Heat:          post.Heat,
 		Photos:        post.Photos,
 		Tag:           post.Tag,
+		IsPrivate:     post.IsPrivate,
 	}
 	c.JSON(http.StatusOK, postDetailsResponse)
 	timing.step("write_json")
