@@ -80,8 +80,8 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	if utf8.RuneCountInString(title) > 10000 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "内容最多为10000个字")
+	if utf8.RuneCountInString(content) > 5000 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "内容最多为5000个字")
 		return
 	}
 
