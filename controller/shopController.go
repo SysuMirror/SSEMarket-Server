@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"loginTest/common"
 	"loginTest/model"
 	"loginTest/response"
@@ -16,12 +17,13 @@ import (
 )
 
 type ProductMsg struct {
-	UserID      int      `json:"UserID"`
-	Price       int      `json:"Price"`
-	Title       string   `json:"Title"`
-	Content     string   `json:"Content"`
-	Photos      []string `json:"Photos"`
-	ISAnonymous bool     `json:"ISAnonymous"`
+	UserID       int      `json:"UserID"`
+	Price        int      `json:"Price"`
+	Title        string   `json:"Title"`
+	Content      string   `json:"Content"`
+	Photos       []string `json:"Photos"`
+	ISAnonymous  bool     `json:"ISAnonymous"`
+	SyncFeedPost *bool    `json:"syncFeedPost"`
 }
 
 type ProductReponse struct {
@@ -93,6 +95,14 @@ func PostProduct(c *gin.Context) {
 			photos = append(photos, s)
 		}
 	}
+	syncFeed := true
+	if msg.SyncFeedPost != nil {
+		syncFeed = *msg.SyncFeedPost
+	}
+
+	var user model.User
+	db.Where("userID = ?", msg.UserID).First(&user)
+
 	newProduct := model.Product{
 		UserID:      msg.UserID,
 		Name:        title,
@@ -103,7 +113,21 @@ func PostProduct(c *gin.Context) {
 		ISAnonymous: msg.ISAnonymous,
 		Price:       msg.Price,
 	}
-	if err := db.Create(&newProduct).Error; err != nil {
+
+	tx := db.Begin()
+	if err := tx.Create(&newProduct).Error; err != nil {
+		tx.Rollback()
+		response.Response(c, http.StatusInternalServerError, 500, nil, "发布失败")
+		return
+	}
+	if syncFeed {
+		if err := createProductFeedPost(tx, user, newProduct); err != nil {
+			tx.Rollback()
+			response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "发布失败")
 		return
 	}
@@ -301,4 +325,32 @@ func isUserExist(db *gorm.DB, userID int) bool {
 
 func replaceResizedWithURL(photoURL string) string {
 	return strings.ReplaceAll(photoURL, "/resized/", "/uploads/")
+}
+
+func createProductFeedPost(db *gorm.DB, user model.User, product model.Product) error {
+	feedTitle := common.FeedTitleWithPrefix("新上架-", product.Name)
+	feedContent := productFeedPostContent(product)
+	return common.CreateHomeFeedPost(db, user, feedTitle, feedContent)
+}
+
+func productFeedPostContent(product model.Product) string {
+	link := fmt.Sprintf("%s/shop/productdetail/%d", common.NewFrontendBaseURL, product.ProductID)
+	var b strings.Builder
+	b.WriteString("商城有新商品上架「")
+	b.WriteString(product.Name)
+	b.WriteString(fmt.Sprintf("」，标价 ¥%d。\n\n", product.Price))
+	b.WriteString("商品链接：\n")
+	b.WriteString(link)
+	b.WriteString("\n")
+	desc := strings.TrimSpace(product.Description)
+	if desc != "" {
+		if utf8.RuneCountInString(desc) > 400 {
+			runes := []rune(desc)
+			desc = string(runes[:400]) + "…"
+		}
+		b.WriteString("\n")
+		b.WriteString(desc)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
