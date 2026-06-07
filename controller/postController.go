@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"loginTest/api"
 	"loginTest/common"
+	"loginTest/config"
 	"loginTest/core"
 	"loginTest/dto"
 	"loginTest/model"
@@ -80,8 +81,8 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	if utf8.RuneCountInString(content) > 5000 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "内容最多为5000个字")
+	if utf8.RuneCountInString(content) > config.PostContentMaxRunes {
+		response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("内容最多为%d个字", config.PostContentMaxRunes))
 		return
 	}
 

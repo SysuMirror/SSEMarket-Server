@@ -11,7 +11,7 @@ type Post struct {
 	User       User      `gorm:"association_foreignkey:userID;foreignkey:userID"`
 	Partition  string    `gorm:"column:partition;type:varchar(10)"`
 	Title      string    `gorm:"column:title;type:varchar(90)"`
-	Ptext      string    `gorm:"column:ptext;type:varchar(5000)"`
+	Ptext      string    `gorm:"column:ptext;type:varchar(10000)"`
 	CommentNum int       `gorm:"column:comment_num;type:int"`
 	LikeNum    int       `gorm:"column:like_num;type:int"`
 	VoteNum    int       `gorm:"column:vote_num;type:int;default:0"`

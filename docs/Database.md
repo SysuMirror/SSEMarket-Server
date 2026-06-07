@@ -8,7 +8,7 @@
 - 用户ID（用户的外键） userID int
 - 所属主题  partition varchar(10)
 - 标题 title varchar(20)
-- 正文内容 ptext varchar(5000) 
+- 正文内容 ptext varchar(10000)，发帖接口单篇正文最多 10000 字
 - 评论数量 comment_num int
 - 点赞数量 like_num int
 - 发帖时间 post_time datetime
