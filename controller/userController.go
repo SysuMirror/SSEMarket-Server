@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"log"
@@ -21,8 +22,8 @@ import (
 	"github.com/brianvoe/gofakeit"
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 const (
@@ -286,7 +287,7 @@ func Register(c *gin.Context) {
 	}
 	// 修改激活码
 	// 警告：当使用 struct 更新时，GORM只会更新那些非零值的字段
-	db.Model(&key).Update(model.CDKey{
+	db.Model(&key).Updates(model.CDKey{
 		Used:     true,
 		UsedTime: time.Now(),
 	})
@@ -1046,8 +1047,12 @@ func UpdateAvatar(c *gin.Context) {
 	db := common.GetDB()
 	var user model.User
 
-	if db.Where("phone = ?", phone).First(&user).RecordNotFound() {
-		response.Response(c, http.StatusNotFound, 404, nil, "User not found")
+	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "User not found")
+		} else {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "Database error")
+		}
 		return
 	}
 	timestamp := time.Now().UnixNano()
@@ -1113,7 +1118,7 @@ func GetAvatar(c *gin.Context) {
 	// 在数据库中查找用户
 	var user model.User
 	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
-		if gorm.IsRecordNotFoundError(err) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
 		} else {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
@@ -1133,7 +1138,7 @@ func GetInfo(c *gin.Context) {
 	// 在数据库中查找用户
 	var user model.User
 	if err := db.Where("phone = ? or userID = ?", phone, userID).First(&user).Error; err != nil {
-		if gorm.IsRecordNotFoundError(err) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
 		} else {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
@@ -1189,7 +1194,7 @@ func UpdateUserInfo(c *gin.Context) {
 	// 根据用户ID查找用户
 	var user model.User
 	if err := db.Where("userID = ?", userInfo.UserID).First(&user).Error; err != nil {
-		if gorm.IsRecordNotFoundError(err) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
 		} else {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
@@ -1248,13 +1253,13 @@ func CalculateAndSaveScores() {
 			totalLikeNum += likeNum
 		}
 		// 统计被收藏个数
-		var psaveCount int
+		var psaveCount int64
 		db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&psaveCount)
 		// 统计帖子被评论个数
-		var commentedCount int
+		var commentedCount int64
 		db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
 		// 统计评论被回复个数
-		var repliedCount int
+		var repliedCount int64
 		db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
 		// 查询用户的 ccomment ID
 		var ccommentIDs []int
@@ -1266,13 +1271,13 @@ func CalculateAndSaveScores() {
 			totalLikeNum += likeNum
 		}
 		// 统计成功举报个数
-		var sueCount int
+		var sueCount int64
 		db.Model(&model.Sue{}).Where("status = ? AND finish = ? AND userID = ?", " ok", 1, user.UserID).
 			Select("DISTINCT targettype, targetID").
 			Count(&sueCount)
 		// 计算总积分并保存
-		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum + psaveCount*3 +
-			(commentedCount+repliedCount)*2 + sueCount*20 - (user.Punishnum)*20
+		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum + int(psaveCount)*3 +
+			int(commentedCount+repliedCount)*2 + int(sueCount)*20 - (user.Punishnum)*20
 		db.Model(&user).Update("Score", totalScore)
 	}
 	log.Println("Score updated")
@@ -1362,13 +1367,13 @@ func GetStatistics(c *gin.Context) {
 		pCommentLikeNum += likeNum
 	}
 	// 统计被收藏个数
-	var besavedCount int
+	var besavedCount int64
 	db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&besavedCount)
 	// 统计帖子被评论个数
-	var commentedCount int
+	var commentedCount int64
 	db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
 	// 统计评论被回复个数
-	var repliedCount int
+	var repliedCount int64
 	db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
 	// 查询用户的 ccomment ID
 	var ccommentIDs []int
@@ -1382,7 +1387,7 @@ func GetStatistics(c *gin.Context) {
 		ccommentLikeNum += likeNum
 	}
 
-	var savedCount int
+	var savedCount int64
 	db.Model(&model.Psave{}).Where("userID = ?", user.UserID).Count(&savedCount)
 
 	chatMsgs := []model.ChatMsg{}

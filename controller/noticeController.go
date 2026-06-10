@@ -59,8 +59,8 @@ func GetNotice(c *gin.Context) {
 	}
 	//执行操作，分页返回通知
 	var notices []model.Notice
-	var total int
-	var unreadTotal int
+	var total int64
+	var unreadTotal int64
 	// requireID==0说明是首次查询,返回pagesize条通知,计算totalNum
 	if requireID == 0 {
 		db.Model(&model.Notice{}).Where("receiver =?", user.UserID).Count(&total)
@@ -76,7 +76,7 @@ func GetNotice(c *gin.Context) {
 
 	}
 	var noticeGet NoticeGet
-	noticeGet.TotalNum = total
+	noticeGet.TotalNum = int(total)
 	noticeGet.LastID = notices[len(notices)-1].NoticeID
 	for _, notice := range notices {
 		var temuser model.User
@@ -160,13 +160,13 @@ func GetNoticeNum(c *gin.Context) {
 		user = value.(model.User)
 	}
 	var noticeNum NoticeNumResponse
-	var readNum int
-	var unreadNum int
+	var readNum int64
+	var unreadNum int64
 	db.Model(&model.Notice{}).Where("receiver =? AND `read` =0", user.UserID).Count(&unreadNum)
 	db.Model(&model.Notice{}).Where("receiver =? AND `read` =1", user.UserID).Count(&readNum)
-	noticeNum.TotalNum = readNum + unreadNum
-	noticeNum.ReadTotalNum = readNum
-	noticeNum.UnreadTotalNum = unreadNum
+	noticeNum.TotalNum = int(readNum + unreadNum)
+	noticeNum.ReadTotalNum = int(readNum)
+	noticeNum.UnreadTotalNum = int(unreadNum)
 	c.JSON(http.StatusOK, &noticeNum)
 }
 

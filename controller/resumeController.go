@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 const (
@@ -242,7 +242,7 @@ func ResumeUpload(c *gin.Context) {
 	}
 
 	db := common.GetDB()
-	var count int
+	var count int64
 	db.Model(&model.Resume{}).Where("userID = ? AND is_delete = ?", user.UserID, false).Count(&count)
 	if count >= resumeMaxPerUser {
 		response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("每人最多上传%d份简历", resumeMaxPerUser))

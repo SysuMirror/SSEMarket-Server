@@ -11,6 +11,8 @@ import (
 // 创建路由
 
 func CollectRoute(r *gin.Engine) *gin.Engine {
+	r.GET("/health", controller.Health)
+	r.GET("/ready", controller.Ready)
 
 	r.Use(middleware.CORSMiddleware())
 	// 这里把路由分成了三组，其中auth是需要token验证的，也就是需要用户登录

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"loginTest/common"
@@ -15,13 +16,15 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	rpprof "runtime/pprof"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/robfig/cron"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/viper"
 )
 
@@ -33,28 +36,24 @@ var (
 )
 
 func Copy() {
-	// 数据库连接信息
 	dbHost := viper.GetString("datasource.host")
 	dbPort := viper.GetInt("datasource.port")
 	dbUser := viper.GetString("datasource.username")
 	dbPassword := viper.GetString("datasource.password")
 	dbName := viper.GetString("datasource.database")
-
-	// 备份目录
 	backupDir := "/app/database"
 
 	c := cron.New()
-	c.AddFunc("@every 12h", func() {
+	_, _ = c.AddFunc("@every 12h", func() {
 		backupFile := fmt.Sprintf("%s/backup_%s.sql", backupDir, time.Now().Format("2006-01-02 15:04:05"))
 		cmd := exec.Command("mysqldump", fmt.Sprintf("-h%s", dbHost), fmt.Sprintf("-P%d", dbPort), fmt.Sprintf("-u%s", dbUser), fmt.Sprintf("-p%s", dbPassword), dbName, "--skip-ssl", "--result-file="+backupFile)
-		err := cmd.Run()
-		if err != nil {
+		if err := cmd.Run(); err != nil {
 			log.Println("备份失败:", err)
 			return
 		}
 		log.Println("备份成功:", backupFile)
 	})
-	c.AddFunc("@every 1h", controller.CalculateAndSaveScores)
+	_, _ = c.AddFunc("@every 1h", controller.CalculateAndSaveScores)
 	c.Start()
 }
 
@@ -69,13 +68,11 @@ func startPprof(c *gin.Context) {
 	pprofRunning = true
 	pprofMutex.Unlock()
 
-	// 解析时长
 	duration, _ := time.ParseDuration(c.DefaultQuery("duration", "30s"))
 	saveDir := "/app/pprof"
 	_ = os.MkdirAll(saveDir, 0755)
 	now := time.Now().Format("20060102_150405")
 
-	// 异步采集
 	go func() {
 		defer func() {
 			pprofMutex.Lock()
@@ -84,14 +81,12 @@ func startPprof(c *gin.Context) {
 			log.Println("✅ pprof 采集完成")
 		}()
 
-		// CPU采集（修复：使用别名rpprof）
 		f, _ := os.Create(filepath.Join(saveDir, fmt.Sprintf("cpu_%s.pprof", now)))
 		_ = rpprof.StartCPUProfile(f)
 		time.Sleep(duration)
 		rpprof.StopCPUProfile()
 		_ = f.Close()
 
-		// 内存采集（修复：使用别名rpprof）
 		f2, _ := os.Create(filepath.Join(saveDir, fmt.Sprintf("heap_%s.pprof", now)))
 		_ = rpprof.WriteHeapProfile(f2)
 		_ = f2.Close()
@@ -102,6 +97,19 @@ func startPprof(c *gin.Context) {
 		"duration": duration.String(),
 		"savePath": "/app/pprof",
 	})
+}
+
+func registerPprofRoutes(r *gin.Engine) {
+	guard := middleware.PprofGuard()
+	debug := r.Group("/debug/pprof", guard)
+	{
+		debug.GET("/", gin.WrapF(pprof.Index))
+		debug.GET("/profile", gin.WrapF(pprof.Profile))
+		debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+		debug.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		debug.GET("/trace", gin.WrapF(pprof.Trace))
+	}
+	r.GET("/debug/pprof/start", guard, startPprof)
 }
 
 func main() {
@@ -116,30 +124,47 @@ func main() {
 	common.InitBloomFilter()
 	service.InitHotDataService()
 
-	defer rds.Close()
-	defer db.Close()
-
 	r = gin.Default()
 	r.Use(middleware.LoggerToFile())
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
-
-	debug := r.Group("/debug/pprof")
-	{
-		debug.GET("/", gin.WrapF(pprof.Index))
-		debug.GET("/profile", gin.WrapF(pprof.Profile))
-		debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))
-		debug.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
-		debug.GET("/trace", gin.WrapF(pprof.Trace))
-	}
-	r.GET("/debug/pprof/start", startPprof)
-
+	registerPprofRoutes(r)
 	route.CollectRoute(r)
 	go heat.StartHeat()
 
-	srv := &http.Server{Addr: ":8080", Handler: r}
-	log.Println("🚀 服务启动: 8080")
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	port := viper.GetString("server.port")
+	if port == "" {
+		port = "8080"
 	}
+	srv := &http.Server{Addr: ":" + port, Handler: r}
+
+	go func() {
+		log.Printf("🚀 服务启动: %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("收到关闭信号，开始优雅关闭...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP 服务关闭: %v", err)
+	}
+
+	if service.HotData != nil {
+		service.HotData.Shutdown()
+	}
+
+	if err := rds.Close(); err != nil {
+		log.Printf("Redis 关闭: %v", err)
+	}
+	common.CloseDB()
+
+	log.Println("服务已优雅关闭")
 }

@@ -25,6 +25,8 @@ type HotDataService struct {
 	browseDirty     sync.Map // postID -> struct{}，该帖 Redis 计数有变更、待落库
 	redisHealthy    bool
 	stopChan        chan struct{}
+	shutdownOnce    sync.Once
+	wg              sync.WaitGroup
 	lastSyncedPosts map[int]int64 // 上次已成功写入 DB 的浏览数，避免重复 UPDATE
 	lastSyncedMutex sync.Mutex
 }
@@ -43,8 +45,15 @@ func InitHotDataService() {
 		lastSyncedPosts: make(map[int]int64),
 	}
 
-	go HotData.startHealthCheck()
-	go HotData.startDBSyncTask()
+	HotData.wg.Add(2)
+	go func() {
+		defer HotData.wg.Done()
+		HotData.startHealthCheck()
+	}()
+	go func() {
+		defer HotData.wg.Done()
+		HotData.startDBSyncTask()
+	}()
 }
 
 func (s *HotDataService) browseNumFromDB(postID int) int64 {
@@ -201,7 +210,10 @@ func (s *HotDataService) syncToDB() {
 	}
 }
 
-// Shutdown 关闭
+// Shutdown 停止后台任务并 flush Redis 浏览数到 MySQL。
 func (s *HotDataService) Shutdown() {
-	close(s.stopChan)
+	s.shutdownOnce.Do(func() {
+		close(s.stopChan)
+	})
+	s.wg.Wait()
 }

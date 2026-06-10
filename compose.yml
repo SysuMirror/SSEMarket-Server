@@ -62,6 +62,12 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - GIN_MODE=release
+      - DATASOURCE_PASSWORD=admin
+      - REDIS_PASSWORD=123456
+      - JWT_KEY=qeYc&*s18lP+3Ga%w^I59Paq3jx3&o!X
+      - COS_APPID=1320172928
+      - COS_SECRET_ID=AKID0yDPbghgaRG3lMF9zoP1gKtMrNq561qi
+      - COS_SECRET_KEY=6GTZYODxYG3wlbo1KezDKH6ulSxJi3GR
     volumes:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log

@@ -169,14 +169,14 @@ func AddAdmin(ctx *gin.Context) {
 		return
 	}
 
-	cnt := 0
+	var cnt int64
 	db.Model(&model.Admin{}).Count(&cnt)
 	fmt.Println(cnt)
 
 	addAdmin := model.Admin{
 		Account:  account,
 		Password: pass1,
-		AdminID:  cnt + 1,
+		AdminID:  int(cnt) + 1,
 	}
 	db.Create(&addAdmin)
 

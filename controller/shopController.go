@@ -13,7 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 type ProductMsg struct {
@@ -204,7 +204,7 @@ func GetProductNum(c *gin.Context) {
 		like := "%" + searchinfo + "%"
 		query = query.Where("(product_name LIKE ? OR description LIKE ?)", like, like)
 	}
-	var count int
+	var count int64
 	query.Count(&count)
 	c.JSON(http.StatusOK, gin.H{"Productcount": count})
 }

@@ -3,7 +3,7 @@ package service
 import (
 	"loginTest/model"
 
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 // AdjustUserReceivedLike 调整用户收到的点赞累计（帖子被赞总和）
@@ -38,10 +38,10 @@ func OnPostDeleted(db *gorm.DB, post *model.Post) {
 	if post.PostID == 0 || post.UserID == 0 {
 		return
 	}
-	var voteCount int
+	var voteCount int64
 	db.Model(&model.Pvote{}).Where("postID = ?", post.PostID).Count(&voteCount)
 	AdjustUserReceivedLike(db, post.UserID, -post.LikeNum)
-	AdjustUserReceivedVote(db, post.UserID, -voteCount)
+	AdjustUserReceivedVote(db, post.UserID, -int(voteCount))
 }
 
 // RebuildRankStats 从 pvotes / posts.like_num 全量重建排行冗余字段（部署或修复时调用）
@@ -61,7 +61,7 @@ func RebuildRankStats(db *gorm.DB) {
 		db.Model(&model.Post{}).Where("userID = ?", u.UserID).
 			Select("COALESCE(SUM(like_num), 0)").Row().Scan(&likeSum)
 
-		var voteSum int
+		var voteSum int64
 		db.Table("pvotes").
 			Joins("INNER JOIN posts ON posts.postID = pvotes.postID").
 			Where("posts.userID = ?", u.UserID).
@@ -69,7 +69,7 @@ func RebuildRankStats(db *gorm.DB) {
 
 		db.Model(&model.User{}).Where("userID = ?", u.UserID).Updates(map[string]interface{}{
 			"received_like_num": likeSum,
-			"received_vote_num": voteSum,
+			"received_vote_num": int(voteSum),
 		})
 	}
 }

@@ -2,37 +2,40 @@ package common
 
 import (
 	"fmt"
-	//_ "github.com/alexbrainman/odbc"
+	"log"
 	"loginTest/model"
+	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/jinzhu/gorm"
 	"github.com/spf13/viper"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 var DB *gorm.DB
 
 func InitDB() *gorm.DB {
-	// 使用viper从配置文件中读取数据库配置
-	driverName := viper.GetString("datasource.driverName")
 	host := viper.GetString("datasource.host")
 	port := viper.GetString("datasource.port")
 	database := viper.GetString("datasource.database")
 	username := viper.GetString("datasource.username")
 	password := viper.GetString("datasource.password")
 	charset := viper.GetString("datasource.charset")
-	args := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=true&loc=Local",
-		username,
-		password,
-		host,
-		port,
-		database,
-		charset)
-	db, err := gorm.Open(driverName, args)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=true&loc=Local",
+		username, password, host, port, database, charset)
+
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database, err: " + err.Error())
 	}
-	// 若没有相应数据库，运行时将根据对应结构体自动创建数据库
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic("failed to get sql.DB, err: " + err.Error())
+	}
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetMaxIdleConns(20)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+
 	db.AutoMigrate(&model.User{})
 	db.AutoMigrate(&model.Post{})
 	db.AutoMigrate(&model.Plike{})
@@ -58,25 +61,25 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Pvote{})
 	db.AutoMigrate(&model.Resume{})
 	RunRatingMigration(db)
-	// 历史简历：浏览次数初始化为下载量 × 3（仅 view_num 仍为 0 的行，避免重复覆盖）
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
-	db.Model(&model.Pcomment{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
-	db.Model(&model.Ccomment{}).AddForeignKey("ctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Plike{}).AddForeignKey("ptargetID", "posts(postID)", "CASCADE", "CASCADE")
-	db.Model(&model.Cclike{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Pclike{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Ccdeny{}).AddForeignKey("cctargetID", "ccomments(ccommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Pcdeny{}).AddForeignKey("pctargetID", "pcomments(pcommentID)", "CASCADE", "CASCADE")
-	db.Model(&model.Pvote{}).AddForeignKey("postID", "posts(postID)", "CASCADE", "CASCADE")
-
-	//db.Model(&model.Post{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
-	//db.Model(&model.Pcomment{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
-	//db.Model(&model.Ccomment{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
-	//db.Model(&model.Plike{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
-	//db.Model(model.Cclike{}).AddForeignKey("userID", "users(userID)", "CASCADE", "CASCADE")
 
 	DB = db
 	return db
+}
+
+// CloseDB 关闭底层连接池（优雅关闭时调用）。
+func CloseDB() {
+	if DB == nil {
+		return
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		log.Printf("close db: %v", err)
+		return
+	}
+	if err := sqlDB.Close(); err != nil {
+		log.Printf("close db: %v", err)
+	}
 }
 
 func GetDB() *gorm.DB {

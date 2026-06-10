@@ -27,7 +27,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 const (
@@ -200,7 +200,7 @@ type BrowseMeg struct {
 }
 
 func freshDB() *gorm.DB {
-	return common.GetDB().New()
+	return common.GetDB().Session(&gorm.Session{})
 }
 
 // viewerFromAuth 从 JWT 中间件注入的上下文取当前用户（以 userID 为准，不用手机号）
@@ -468,7 +468,7 @@ func UserProfilePostNum(c *gin.Context) {
 	db := freshDB()
 	var req UserProfilePostNumMsg
 	_ = c.Bind(&req)
-	count := 0
+	var count int64
 	if req.TargetUserID <= 0 {
 		c.JSON(http.StatusOK, gin.H{"Postcount": count})
 		return
@@ -651,7 +651,7 @@ func GetPostNum(c *gin.Context) {
 	}
 	timeFrom := requestBrowseMeg.TimeFrom
 	timeTo := requestBrowseMeg.TimeTo
-	var count int
+	var count int64
 	viewerUserID := viewer.UserID
 	if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
@@ -1323,9 +1323,7 @@ func SubmitFeedback(c *gin.Context) {
 		Status:     "wait",
 	}
 
-	db.Create(&feedback)
-
-	if db.NewRecord(feedback) {
+	if err := db.Create(&feedback).Error; err != nil || feedback.FeedbackID == 0 {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Failed to submit feedback")
 		return
 	}

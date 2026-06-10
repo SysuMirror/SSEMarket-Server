@@ -12,7 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 type RatingBrowseMsg struct {
@@ -233,7 +233,7 @@ func RatingPostCount(c *gin.Context) {
 	var msg RatingBrowseMsg
 	_ = c.ShouldBindBodyWith(&msg, binding.JSON)
 	q := ratingApplyBrowseFilter(db, db.Model(&model.RatingPost{}), &msg)
-	var count int
+	var count int64
 	q.Count(&count)
 	c.JSON(http.StatusOK, gin.H{"count": count})
 }
