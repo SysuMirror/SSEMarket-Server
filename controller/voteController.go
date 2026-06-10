@@ -45,15 +45,9 @@ func SearchPostsByTitle(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	db.Where("phone = ?", req.UserTelephone).First(&user)
-	if user.UserID == 0 {
+	user, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
 
@@ -96,15 +90,9 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	db.Where("phone = ?", req.UserTelephone).First(&user)
-	if user.UserID == 0 {
+	user, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
 
@@ -112,6 +100,10 @@ func SubmitVote(c *gin.Context) {
 	db.Where("postID = ?", req.PostID).First(&post)
 	if post.PostID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
+		return
+	}
+	if !canViewPost(post, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 
@@ -146,14 +138,14 @@ type VoteRankItem struct {
 	PostTime  string `json:"postTime"`
 }
 
-// GetPostRanking 优质榜（帖子榜）：按帖子得票数
+// GetPostRanking 优质榜（帖子榜）：按帖子得票数（不含任何私密帖）
 func GetPostRanking(c *gin.Context) {
-	db := common.GetDB()
+	db := freshDB()
 
 	var posts []model.Post
-	err := db.Where("vote_num > 0").
+	err := db.Where("vote_num > 0 AND (is_private = ? OR is_private IS NULL)", false).
 		Order("vote_num DESC, postID DESC").
-		Limit(100).
+		Limit(120).
 		Find(&posts).Error
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "获取优质榜失败")
@@ -162,6 +154,12 @@ func GetPostRanking(c *gin.Context) {
 
 	items := make([]VoteRankItem, 0, len(posts))
 	for _, post := range posts {
+		if post.IsPrivate {
+			continue
+		}
+		if len(items) >= 100 {
+			break
+		}
 		items = append(items, VoteRankItem{
 			PostID:    post.PostID,
 			Title:     post.Title,
@@ -251,15 +249,16 @@ func CheckUserVoted(c *gin.Context) {
 		return
 	}
 
-	var user model.User
-	db.Where("phone = ?", req.UserTelephone).First(&user)
-	if user.UserID == 0 {
+	user, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
 		return
 	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+
+	var post model.Post
+	db.Where("postID = ?", req.PostID).First(&post)
+	if post.PostID == 0 || !canViewPost(post, user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 

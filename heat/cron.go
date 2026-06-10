@@ -51,7 +51,7 @@ func RefreshHeat() {
 
 	// 获取10天内的所有帖子，排除课程交流分区
 	var posts []model.Post
-	db.Where("post_time >= ? AND `partition` != ?", tenDaysAgo, CoursePartition).Find(&posts)
+	db.Where("post_time >= ? AND `partition` != ? AND is_private = ?", tenDaysAgo, CoursePartition, false).Find(&posts)
 
 	// Redis ZSet的key，用来存储帖子热度
 	redisKey := "hot_posts_zset"

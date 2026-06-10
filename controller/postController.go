@@ -42,6 +42,7 @@ type PostMsg struct {
 	Partition     string
 	Photos        string
 	TagList       string
+	IsPrivate     bool `json:"isPrivate"`
 }
 
 func Post(c *gin.Context) {
@@ -132,6 +133,7 @@ func Post(c *gin.Context) {
 		PostTime:   time.Now(),
 		Photos:     photos,
 		Tag:        tagString,
+		IsPrivate:  requestPostMsg.IsPrivate,
 	}
 	db.Create(&newPost)
 	common.BloomFilter.Add([]byte(strconv.FormatUint(uint64(newPost.PostID), 10)))
@@ -184,17 +186,34 @@ type PostResponse struct {
 }
 
 type BrowseMeg struct {
-	UserTelephone string
-	Partition     string
-	Searchinfo    string
-	Tag           string
-	Searchsort    string //用于分表查询 分为home,history,save三种
-	OrderBy       string // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc
+	UserTelephone string `json:"userTelephone"`
+	Partition     string `json:"partition"`
+	Searchinfo    string `json:"searchinfo"`
+	Tag           string `json:"tag"`
+	Searchsort    string `json:"searchsort"` // home | history | save
+	OrderBy       string `json:"orderBy"`    // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc
 	TimeFrom      string `json:"timeFrom"`
 	TimeTo        string `json:"timeTo"`
-	Limit         int
-	Offset        int
-	PostType      string
+	Limit         int    `json:"limit"`
+	Offset        int    `json:"offset"`
+	PostType      string `json:"postType"`
+}
+
+func freshDB() *gorm.DB {
+	return common.GetDB().New()
+}
+
+// viewerFromAuth 从 JWT 中间件注入的上下文取当前用户（以 userID 为准，不用手机号）
+func viewerFromAuth(c *gin.Context) (model.User, bool) {
+	value, exists := c.Get("user")
+	if !exists {
+		return model.User{}, false
+	}
+	user, ok := value.(model.User)
+	if !ok || user.UserID == 0 {
+		return model.User{}, false
+	}
+	return user, true
 }
 
 func canViewPost(post model.Post, viewerUserID int) bool {
@@ -203,6 +222,42 @@ func canViewPost(post model.Post, viewerUserID int) bool {
 
 func applyPostVisibilityScope(query *gorm.DB, viewerUserID int) *gorm.DB {
 	return query.Where("(is_private = ? OR userID = ?)", false, viewerUserID)
+}
+
+func loadViewablePost(db *gorm.DB, postID int, viewerUserID int) (model.Post, bool) {
+	var post model.Post
+	db.Where("postID = ?", postID).First(&post)
+	if post.PostID == 0 || !canViewPost(post, viewerUserID) {
+		return post, false
+	}
+	return post, true
+}
+
+func canViewPostByPcommentID(db *gorm.DB, pcommentID int, viewerUserID int) bool {
+	var pcomment model.Pcomment
+	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
+	if pcomment.PcommentID == 0 {
+		return false
+	}
+	var post model.Post
+	db.Where("postID = ?", pcomment.PtargetID).First(&post)
+	return canViewPost(post, viewerUserID)
+}
+
+func canViewPostByCcommentID(db *gorm.DB, ccommentID int, viewerUserID int) bool {
+	var ccomment model.Ccomment
+	db.Where("ccommentID = ?", ccommentID).First(&ccomment)
+	if ccomment.CcommentID == 0 {
+		return false
+	}
+	var pcomment model.Pcomment
+	db.Where("pcommentID = ?", ccomment.CtargetID).First(&pcomment)
+	if pcomment.PcommentID == 0 {
+		return false
+	}
+	var post model.Post
+	db.Where("postID = ?", pcomment.PtargetID).First(&post)
+	return canViewPost(post, viewerUserID)
 }
 
 func buildPostResponse(post model.Post, user model.User, isSaved bool, isLiked bool) PostResponse {
@@ -282,19 +337,23 @@ func browseApplyOrder(query *gorm.DB, orderBy string) *gorm.DB {
 }
 
 func Browse(c *gin.Context) {
-	db := common.GetDB()
-	var requestBrowseMeg BrowseMeg
-	c.Bind(&requestBrowseMeg)
-	userTelephone := requestBrowseMeg.UserTelephone
-	searchsort := requestBrowseMeg.Searchsort
-	fmt.Println("searchsort:", searchsort)
-	var temUser model.User
-	db.Where("phone = ?", userTelephone).First(&temUser)
-	if temUser.UserID == 0 {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
+	db := freshDB()
+	var requestBrowseMeg BrowseMeg
+	if err := c.ShouldBindJSON(&requestBrowseMeg); err != nil {
+		_ = c.ShouldBind(&requestBrowseMeg)
+	}
+	searchsort := requestBrowseMeg.Searchsort
+	if searchsort == "" {
+		searchsort = "home"
+	}
+	requestBrowseMeg.Searchsort = searchsort
 
-	posts := browseFetchPosts(db, &requestBrowseMeg, &temUser)
+	posts := browseFetchPosts(db, &requestBrowseMeg, &viewer)
 	if len(posts) == 0 {
 		c.JSON(http.StatusOK, []PostResponse{})
 		return
@@ -302,17 +361,23 @@ func Browse(c *gin.Context) {
 	postIDs := make([]int, 0, len(posts))
 	userIDs := make(map[int]struct{})
 	for _, p := range posts {
+		if !canViewPost(p, viewer.UserID) {
+			continue
+		}
 		postIDs = append(postIDs, p.PostID)
 		if p.UserID != 0 {
 			userIDs[p.UserID] = struct{}{}
 		}
 	}
-	savedSet := browseBatchSavedSet(db, temUser.UserID, postIDs)
-	likedSet := browseBatchLikedSet(db, temUser.UserID, postIDs)
+	savedSet := browseBatchSavedSet(db, viewer.UserID, postIDs)
+	likedSet := browseBatchLikedSet(db, viewer.UserID, postIDs)
 	userMap := browseBatchUserMap(db, userIDs)
 	postResponses := make([]PostResponse, 0, len(posts))
 	isSaveMode := (searchsort == "save")
 	for _, post := range posts {
+		if !canViewPost(post, viewer.UserID) {
+			continue
+		}
 		user := browseGetUserForPost(userMap, post.UserID)
 		_, isSaved := savedSet[post.PostID]
 		if isSaveMode {
@@ -333,16 +398,15 @@ type UserProfilePostsMsg struct {
 
 // UserProfilePosts 个人主页发帖列表；对方开启「隐藏发帖」且浏览者非本人时返回空。
 func UserProfilePosts(c *gin.Context) {
-	db := common.GetDB()
+	db := freshDB()
 	var req UserProfilePostsMsg
 	_ = c.Bind(&req)
 	if req.TargetUserID <= 0 {
 		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
-	var viewer model.User
-	db.Where("phone = ?", req.UserTelephone).First(&viewer)
-	if viewer.UserID == 0 {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
 		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
@@ -401,7 +465,7 @@ type UserProfilePostNumMsg struct {
 
 // UserProfilePostNum 个人主页可展示的发帖总数（不含「打分」）；隐藏时对非本人返回 0。
 func UserProfilePostNum(c *gin.Context) {
-	db := common.GetDB()
+	db := freshDB()
 	var req UserProfilePostNumMsg
 	_ = c.Bind(&req)
 	count := 0
@@ -409,9 +473,8 @@ func UserProfilePostNum(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"Postcount": count})
 		return
 	}
-	var viewer model.User
-	db.Where("phone = ?", req.UserTelephone).First(&viewer)
-	if viewer.UserID == 0 {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
 		c.JSON(http.StatusOK, gin.H{"Postcount": count})
 		return
 	}
@@ -434,14 +497,27 @@ func UserProfilePostNum(c *gin.Context) {
 
 func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.Post {
 	limit, offset := req.Limit, req.Offset
+	if limit <= 0 {
+		limit = 15
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	partition := req.Partition
 	searchinfo := req.Searchinfo
 	tag := req.Tag
 	searchsort := req.Searchsort
+	if searchsort == "" {
+		searchsort = "home"
+	}
 
 	if searchsort == "save" {
 		var saves []model.Psave
-		db.Order("psaveID DESC").Offset(offset).Limit(limit).Where("userID = ?", temUser.UserID).Find(&saves)
+		db.Model(&model.Psave{}).
+			Where("userID = ?", temUser.UserID).
+			Order("psaveID DESC").
+			Offset(offset).Limit(limit).
+			Find(&saves)
 		if len(saves) == 0 {
 			return nil
 		}
@@ -450,7 +526,7 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 			postIDs = append(postIDs, s.PtargetID)
 		}
 		var posts []model.Post
-		applyPostVisibilityScope(db.Where("postID IN (?)", postIDs), temUser.UserID).Find(&posts)
+		applyPostVisibilityScope(db.Model(&model.Post{}).Where("postID IN (?)", postIDs), temUser.UserID).Find(&posts)
 		postMap := make(map[int]model.Post, len(posts))
 		for _, p := range posts {
 			postMap[p.PostID] = p
@@ -465,7 +541,7 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 	}
 
 	var posts []model.Post
-	base := db.Offset(offset).Limit(limit)
+	base := db.Model(&model.Post{})
 	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
 	base = applyPostVisibilityScope(base, temUser.UserID)
 	if searchsort == "home" {
@@ -474,28 +550,31 @@ func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.
 		base = base.Order("postID DESC")
 	}
 	if searchsort == "history" {
-		base.Where("userID = ?", temUser.UserID).Find(&posts)
+		base = base.Where("userID = ?", temUser.UserID)
+		base.Offset(offset).Limit(limit).Find(&posts)
 		return posts
 	}
 	if partition == "主页" || len(partition) == 0 {
-		if len(searchinfo) == 0 {
-			base.Find(&posts)
-		} else {
+		if len(searchinfo) > 0 {
 			if tag == "" {
-				base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts)
+				base = base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%")
 			} else {
-				base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts)
+				base = base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag)
 			}
 		}
 	} else if partition == "优质贴" {
-		base.Where("is_high_quality = ?", 1).Find(&posts)
+		base = base.Where("is_high_quality = ?", 1)
 	} else {
-		if tag == "" {
-			base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%").Find(&posts, "`partition` = ?", partition)
-		} else {
-			base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag).Find(&posts, "`partition` = ?", partition)
+		base = base.Where("`partition` = ?", partition)
+		if len(searchinfo) > 0 {
+			if tag == "" {
+				base = base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%")
+			} else {
+				base = base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag)
+			}
 		}
 	}
+	base.Offset(offset).Limit(limit).Find(&posts)
 	return posts
 }
 
@@ -554,23 +633,26 @@ func browseGetUserForPost(userMap map[int]model.User, userID int) model.User {
 }
 
 func GetPostNum(c *gin.Context) {
-	db := common.GetDB()
-	// 获取参数
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"Postcount": 0})
+		return
+	}
+	db := freshDB()
 	var requestBrowseMeg BrowseMeg
-	c.Bind(&requestBrowseMeg)
-	userTelephone := requestBrowseMeg.UserTelephone
+	if err := c.ShouldBindJSON(&requestBrowseMeg); err != nil {
+		_ = c.ShouldBind(&requestBrowseMeg)
+	}
 	partition := requestBrowseMeg.Partition
 	searchinfo := requestBrowseMeg.Searchinfo
 	searchsort := requestBrowseMeg.Searchsort
+	if searchsort == "" {
+		searchsort = "home"
+	}
 	timeFrom := requestBrowseMeg.TimeFrom
 	timeTo := requestBrowseMeg.TimeTo
 	var count int
-	viewerUserID := 0
-	if userTelephone != "" {
-		var viewer model.User
-		db.Where("phone = ?", userTelephone).First(&viewer)
-		viewerUserID = viewer.UserID
-	}
+	viewerUserID := viewer.UserID
 	if searchsort == "home" {
 		if partition == "主页" || len(partition) == 0 {
 			if len(searchinfo) == 0 && timeFrom == "" && timeTo == "" {
@@ -597,20 +679,14 @@ func GetPostNum(c *gin.Context) {
 			q.Count(&count)
 		}
 	} else {
-		// 查询用户
-		var user model.User
-		db.Where("phone = ?", userTelephone).First(&user)
-		if user.UserID == 0 {
-			return
-		}
 		if searchsort == "save" {
 			db.Model(&model.Psave{}).
 				Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
-				Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)", user.UserID, 0, false, user.UserID).
+				Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)", viewer.UserID, 0, false, viewer.UserID).
 				Count(&count)
 		} else if searchsort == "history" {
 			db.Model(&model.Post{}).
-				Where("userID = ?", user.UserID).
+				Where("userID = ?", viewer.UserID).
 				Where("postId != ?", 0).
 				Count(&count)
 		}
@@ -628,21 +704,15 @@ type PostPrivacyMsg struct {
 }
 
 func UpdatePostPrivacy(c *gin.Context) {
-	db := common.GetDB()
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	db := freshDB()
 	var req PostPrivacyMsg
 	if err := c.Bind(&req); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
-		return
-	}
-	var user model.User
-	db.Where("phone = ?", req.UserTelephone).First(&user)
-	if user.UserID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
 	var post model.Post
@@ -651,7 +721,7 @@ func UpdatePostPrivacy(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
 		return
 	}
-	if post.UserID != user.UserID {
+	if post.UserID != viewer.UserID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -807,6 +877,9 @@ func UpdateBrowseNum(c *gin.Context) {
 	if post.PostID == 0 {
 		return
 	}
+	if !canViewPost(post, user.UserID) {
+		return
+	}
 	var browsed model.Pbrowse
 	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
 	if browsed.PbrowseID == 0 {
@@ -878,6 +951,12 @@ func SubmitReport(c *gin.Context) {
 	if tokenUserID != user.UserID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
+	}
+	if Targettype == "post" {
+		if _, ok := loadViewablePost(db, int(TargetID), user.UserID); !ok {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
 	}
 	newSue := model.Sue{
 		Targettype: Targettype,
@@ -982,16 +1061,15 @@ func ShowDetails(c *gin.Context) {
 	}
 	timing.step("bind_body")
 
-	userTelephone := requestPostDetailsMsg.UserTelephone
 	postID := requestPostDetailsMsg.PostID
 
-	var temUser model.User
-	if err := db.Where("phone = ?", userTelephone).First(&temUser).Error; err != nil {
-		timing.step("load_user_by_phone")
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		timing.step("load_viewer_from_auth")
 		response.Response(c, http.StatusNotFound, 404, nil, "无法解析当前用户")
 		return
 	}
-	timing.step("load_user_by_phone")
+	timing.step("load_viewer_from_auth")
 
 	// 校验帖子ID
 	if postID == 0 {
@@ -1045,7 +1123,7 @@ func ShowDetails(c *gin.Context) {
 	post, user = dtoObj.ConvertToModel()
 	timing.step("dto_to_model")
 
-	if !canViewPost(post, temUser.UserID) {
+	if !canViewPost(post, viewer.UserID) {
 		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
@@ -1059,7 +1137,7 @@ func ShowDetails(c *gin.Context) {
 	queryIsLiked := func() bool {
 		isLiked := false
 		var like model.Plike
-		db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&like)
+		db.Where("userID = ? AND ptargetID = ?", viewer.UserID, postID).First(&like)
 		if like.PlikeID != 0 {
 			isLiked = true
 		}
@@ -1070,7 +1148,7 @@ func ShowDetails(c *gin.Context) {
 	timing.step("query_plike")
 	isSaved := false
 	var save model.Psave
-	db.Where("userID = ? AND ptargetID = ?", temUser.UserID, postID).First(&save)
+	db.Where("userID = ? AND ptargetID = ?", viewer.UserID, postID).First(&save)
 	if save.PsaveID != 0 {
 		isSaved = true
 	}
@@ -1313,12 +1391,13 @@ type PostInfo struct {
 }
 
 func CalculateHeat(c *gin.Context) {
+	db := common.GetDB()
 	// Redis ZSet的key
 	redisKey := "hot_posts_zset"
 	ctx := context.Background()
 
 	// 从Redis中获取热度前10的帖子
-	topPosts, err := core.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 9).Result()
+	topPosts, err := core.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 19).Result()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取热度前10帖子失败"})
 		return
@@ -1326,8 +1405,11 @@ func CalculateHeat(c *gin.Context) {
 
 	var heatResponsesTop10 []HeatResponse
 
-	// 处理 Redis 返回的数据
+	// 处理 Redis 返回的数据（跳过私密帖，最多返回 10 条公开帖）
 	for _, post := range topPosts {
+		if len(heatResponsesTop10) >= 10 {
+			break
+		}
 		var postInfo PostInfo
 		err := json.Unmarshal([]byte(post.Member.(string)), &postInfo)
 		if err != nil {
@@ -1335,10 +1417,15 @@ func CalculateHeat(c *gin.Context) {
 			return
 		}
 
+		var dbPost model.Post
+		if err := db.Where("postID = ? AND is_private = ?", postInfo.PostID, false).First(&dbPost).Error; err != nil {
+			continue
+		}
+
 		heatResponse := HeatResponse{
 			PostID: postInfo.PostID,
-			Title:  postInfo.Title,
-			Heat:   postInfo.BrowseNum, // 使用从Redis中获取的热度分数
+			Title:  dbPost.Title,
+			Heat:   postInfo.BrowseNum,
 		}
 		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
 	}

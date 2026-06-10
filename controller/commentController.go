@@ -65,12 +65,10 @@ func GetComments(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
 		return
 	}
-	usertelephone := msg.UserTelephone
 	postid := msg.PostID
 	postType := msg.TypePost
 
-	// 原有参数校验逻辑（完全保留）
-	if usertelephone == "" || postid == 0 {
+	if postid == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
 		return
 	}
@@ -79,9 +77,8 @@ func GetComments(c *gin.Context) {
 		return
 	}
 
-	// 原有用户查询逻辑（新增错误处理，保留变量名）
-	var temUser model.User
-	if err := db.Where("phone = ?", usertelephone).First(&temUser).Error; err != nil {
+	temUser, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
 		return
 	}
@@ -622,6 +619,10 @@ func UpdatePcommentLike(c *gin.Context) {
 	if pcomment.PcommentID == 0 {
 		return
 	}
+	if !canViewPostByPcommentID(db, int(pcommentID), user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
 	//数据库查询点赞和踩的记录
 	isLiked := false
 	isDenied := false
@@ -685,6 +686,10 @@ func UpdatePcommentDeny(c *gin.Context) {
 	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
 	if pcomment.PcommentID == 0 {
 		//找不到评论
+		return
+	}
+	if !canViewPostByPcommentID(db, int(pcommentID), user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 
@@ -755,6 +760,10 @@ func UpdateCcommentLike(c *gin.Context) {
 	if ccomment.CcommentID == 0 {
 		return
 	}
+	if !canViewPostByCcommentID(db, int(ccommentID), user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		return
+	}
 
 	isLiked := false
 	isDenied := false
@@ -817,6 +826,10 @@ func UpdateCcommentDeny(c *gin.Context) {
 	db.Where("ccommentID = ?", ccommentID).First(&ccomment)
 	if ccomment.CcommentID == 0 {
 		//找不到评论
+		return
+	}
+	if !canViewPostByCcommentID(db, int(ccommentID), user.UserID) {
+		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		return
 	}
 
