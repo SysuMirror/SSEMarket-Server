@@ -16,6 +16,7 @@ const (
 	PrefixPostBrowse      = "post:browse:"       // 帖子浏览列表（home/history/save/rating）
 	PrefixProductList     = "product:list:"      // 商品列表（home/个人商品）
 	PrefixPostBrowseCount = "post:browse:count:" // 帖子浏览数独立Key
+	PrefixUserSession     = "user:session:"       // JWT 用户快照缓存
 )
 
 // GetPostBrowseCountKey 生成帖子浏览数缓存Key（适配ShowDetails函数，postID为int）

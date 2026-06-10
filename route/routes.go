@@ -22,9 +22,10 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth := r.Group("")
 	oauth := r.Group("")
 
-	auth.Use(middleware.AuthMiddleware())
+	auth.Use(middleware.StrictAuthMiddleware())
 	auth.Use(middleware.BloomFilterMiddleware()) // 使用布隆过滤器防止恶意攻击
 	oauth.Use(middleware.OAuthMiddleware())
+	noauth.Use(middleware.OptionalAuthMiddleware())
 
 	//OAuth2认证
 	auth.POST("/api/auth/connect/check", controller.CheckOAuth2App)

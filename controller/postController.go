@@ -8,9 +8,11 @@ import (
 	"image"
 	"io/ioutil"
 	"loginTest/api"
+	"loginTest/apperr"
 	"loginTest/common"
 	"loginTest/config"
 	"loginTest/core"
+	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/response"
@@ -638,63 +640,29 @@ func GetPostNum(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"Postcount": 0})
 		return
 	}
-	db := freshDB()
 	var requestBrowseMeg BrowseMeg
 	if err := c.ShouldBindJSON(&requestBrowseMeg); err != nil {
 		_ = c.ShouldBind(&requestBrowseMeg)
 	}
-	partition := requestBrowseMeg.Partition
-	searchinfo := requestBrowseMeg.Searchinfo
 	searchsort := requestBrowseMeg.Searchsort
 	if searchsort == "" {
 		searchsort = "home"
 	}
-	timeFrom := requestBrowseMeg.TimeFrom
-	timeTo := requestBrowseMeg.TimeTo
-	var count int64
-	viewerUserID := viewer.UserID
-	if searchsort == "home" {
-		if partition == "主页" || len(partition) == 0 {
-			if len(searchinfo) == 0 && timeFrom == "" && timeTo == "" {
-				applyPostVisibilityScope(db.Model(&model.Post{}), viewerUserID).Count(&count)
-			} else {
-				q := db.Model(&model.Post{}).Where("postId != ?", 0)
-				q = applyPostVisibilityScope(q, viewerUserID)
-				q = browseApplyTimeRange(q, timeFrom, timeTo)
-				if len(searchinfo) > 0 {
-					q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
-				}
-				q.Count(&count)
-			}
-		} else if partition == "优质贴" {
-			q := applyPostVisibilityScope(db.Model(&model.Post{}).Where("is_high_quality =?", 1), viewerUserID)
-			q = browseApplyTimeRange(q, timeFrom, timeTo)
-			q.Count(&count)
-		} else {
-			q := applyPostVisibilityScope(db.Model(&model.Post{}).Where("`partition` = ?", partition), viewerUserID)
-			q = browseApplyTimeRange(q, timeFrom, timeTo)
-			if len(searchinfo) > 0 {
-				q = q.Where("title LIKE ? OR ptext LIKE ? OR tag LIKE ?", "%"+searchinfo+"%", "%"+searchinfo+"%", "%"+searchinfo+"%")
-			}
-			q.Count(&count)
-		}
-	} else {
-		if searchsort == "save" {
-			db.Model(&model.Psave{}).
-				Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
-				Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)", viewer.UserID, 0, false, viewer.UserID).
-				Count(&count)
-		} else if searchsort == "history" {
-			db.Model(&model.Post{}).
-				Where("userID = ?", viewer.UserID).
-				Where("postId != ?", 0).
-				Count(&count)
-		}
+	filter := domain.BrowseFilter{
+		ViewerUserID: viewer.UserID,
+		Partition:    requestBrowseMeg.Partition,
+		Searchinfo:   requestBrowseMeg.Searchinfo,
+		Tag:          requestBrowseMeg.Tag,
+		Searchsort:   searchsort,
+		TimeFrom:     requestBrowseMeg.TimeFrom,
+		TimeTo:       requestBrowseMeg.TimeTo,
 	}
-	// 将结果返回给客户端
-	c.JSON(http.StatusOK, gin.H{
-		"Postcount": count,
-	})
+	count, err := service.Posts.CountBrowse(c.Request.Context(), filter)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"Postcount": count})
 }
 
 type PostPrivacyMsg struct {
