@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"loginTest/common"
-	"loginTest/model"
+	"loginTest/domain"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,17 +32,17 @@ func parseBearerToken(c *gin.Context) (token string, isWS bool, ok bool) {
 	return tokenString, isWS, true
 }
 
-func loadUserFromToken(c *gin.Context, tokenString string, isWS bool) (model.User, bool) {
+func loadUserFromToken(c *gin.Context, tokenString string, isWS bool) (*domain.User, bool) {
 	token, claims, err := common.ParseToken(tokenString)
 	if err != nil || !token.Valid || claims.UserID == 0 {
 		if isWS {
 			fmt.Println(tokenString)
 		}
-		return model.User{}, false
+		return nil, false
 	}
 	user, err := LoadUserSession(c.Request.Context(), claims.UserID)
-	if err != nil || user.UserID == 0 {
-		return model.User{}, false
+	if err != nil || user == nil || user.ID == 0 {
+		return nil, false
 	}
 	return user, true
 }

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"loginTest/api"
-	"loginTest/model"
+	"loginTest/domain"
 	"loginTest/response"
 	"net/http"
 	"strings"
@@ -18,9 +18,9 @@ func GetFileList(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
@@ -53,9 +53,9 @@ func TeachUpload(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 || user.Identity != "teacher" {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 || user.Identity != "teacher" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
@@ -84,9 +84,9 @@ func AddFolder(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 || user.Identity != "teacher" {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 || user.Identity != "teacher" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
@@ -112,9 +112,9 @@ func DeleteFile(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 || user.Identity != "teacher" {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 || user.Identity != "teacher" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
@@ -137,9 +137,9 @@ func DeleteFolder(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 || user.Identity != "teacher" {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 || user.Identity != "teacher" {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
@@ -159,9 +159,9 @@ func GetObjectUrl(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
-	if user.UserID == 0 {
+	var user *domain.User
+	user = value.(*domain.User)
+	if user.ID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}

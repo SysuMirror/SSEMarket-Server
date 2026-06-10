@@ -8,6 +8,7 @@ import (
 
 // AdminRepository 管理员持久化接口。
 type AdminRepository interface {
+	FindByID(ctx context.Context, id int) (*domain.Admin, error)
 	FindByAccount(ctx context.Context, account string) (*domain.Admin, error)
 	Count(ctx context.Context) (int64, error)
 	Create(ctx context.Context, admin *domain.Admin) error

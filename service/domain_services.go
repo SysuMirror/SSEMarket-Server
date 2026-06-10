@@ -4,42 +4,33 @@ import (
 	"context"
 
 	"loginTest/domain"
-	"loginTest/model"
-
-	"gorm.io/gorm"
+	"loginTest/repository"
 )
 
 type rankService struct {
-	db *gorm.DB
+	repo repository.RankRepository
 }
 
-func NewRankService(db *gorm.DB) RankService {
-	return &rankService{db: db}
+func NewRankService(repo repository.RankRepository) RankService {
+	return &rankService{repo: repo}
 }
 
-func (s *rankService) AdjustUserReceivedLike(_ context.Context, authorUserID, delta int) {
-	AdjustUserReceivedLike(s.db, authorUserID, delta)
+func (s *rankService) AdjustUserReceivedLike(ctx context.Context, authorUserID, delta int) {
+	s.repo.AdjustUserReceivedLike(ctx, authorUserID, delta)
 }
 
-func (s *rankService) AdjustUserReceivedVote(_ context.Context, authorUserID, delta int) {
-	AdjustUserReceivedVote(s.db, authorUserID, delta)
+func (s *rankService) AdjustUserReceivedVote(ctx context.Context, authorUserID, delta int) {
+	s.repo.AdjustUserReceivedVote(ctx, authorUserID, delta)
 }
 
-func (s *rankService) AdjustPostVoteNum(_ context.Context, postID, delta int) {
-	AdjustPostVoteNum(s.db, postID, delta)
+func (s *rankService) AdjustPostVoteNum(ctx context.Context, postID, delta int) {
+	s.repo.AdjustPostVoteNum(ctx, postID, delta)
 }
 
-func (s *rankService) OnPostDeleted(_ context.Context, post *domain.Post) {
-	if post == nil {
-		return
-	}
-	OnPostDeleted(s.db, &model.Post{
-		PostID:  post.ID,
-		UserID:  post.UserID,
-		LikeNum: post.LikeNum,
-	})
+func (s *rankService) OnPostDeleted(ctx context.Context, post *domain.Post) {
+	s.repo.OnPostDeleted(ctx, post)
 }
 
-func (s *rankService) RebuildRankStats(_ context.Context) {
-	RebuildRankStats(s.db)
+func (s *rankService) RebuildRankStats(ctx context.Context) {
+	s.repo.RebuildRankStats(ctx)
 }

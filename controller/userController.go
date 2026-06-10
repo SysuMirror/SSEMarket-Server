@@ -10,7 +10,6 @@ import (
 	"loginTest/common"
 	"loginTest/domain"
 	"loginTest/dto"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"loginTest/util"
@@ -263,7 +262,7 @@ func ModifyPassword(c *gin.Context) {
 		}
 		return
 	}
-	response.Success(c, gin.H{"data": service.DomainUserToModel(u)}, "修改密码成功")
+	response.Success(c, gin.H{"data": u}, "修改密码成功")
 }
 
 type OAuth2Info struct {
@@ -311,14 +310,14 @@ func AuthorizeOAuth2App(c *gin.Context) {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
 		return
 	}
-	user := userInterface.(model.User)
+	user := userInterface.(*domain.User)
 	redirectURL, err := service.Users.AuthorizeOAuth2App(c.Request.Context(), domain.OAuth2AuthorizeInput{
 		AppID:        requestInfo.AppId,
 		RedirectURI:  requestInfo.RedirectURL,
 		ResponseType: requestInfo.ResponseType,
 		Scope:        requestInfo.Scope,
 		State:        requestInfo.State,
-		UserID:       user.UserID,
+		UserID:       user.ID,
 		IPAddress:    c.ClientIP(),
 		UserAgent:    c.GetHeader("User-Agent"),
 	})
@@ -386,7 +385,7 @@ func GetInfobyOAuth2(c *gin.Context) {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "OAuth2认证失败")
 		return
 	}
-	user := userInterface.(model.User)
+	user := userInterface.(*domain.User)
 
 	// 获取权限范围
 	scopeInterface, exists := c.Get("oauth2_scope")
@@ -401,7 +400,7 @@ func GetInfobyOAuth2(c *gin.Context) {
 
 	if scope == "read_basic" {
 		userInfo = gin.H{
-			"user_id":    user.UserID,
+			"user_id":    user.ID,
 			"name":       user.Name,
 			"email":      user.Email,
 			"avatar_url": user.AvatarURL,
@@ -423,7 +422,7 @@ func GetOAuth2AuthRecords(c *gin.Context) {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
 		return
 	}
-	user := userInterface.(model.User)
+	user := userInterface.(*domain.User)
 	page := 1
 	pageSize := 10
 	if p := c.Query("page"); p != "" {
@@ -436,7 +435,7 @@ func GetOAuth2AuthRecords(c *gin.Context) {
 			pageSize = parsedPageSize
 		}
 	}
-	result, err := service.Users.ListOAuth2AuthRecords(c.Request.Context(), user.UserID, page, pageSize)
+	result, err := service.Users.ListOAuth2AuthRecords(c.Request.Context(), user.ID, page, pageSize)
 	if err != nil {
 		apperr.WriteMsg(c, err, "查询授权记录失败")
 		return
@@ -498,7 +497,7 @@ func ValidateEmail(c *gin.Context) {
 
 func Info(c *gin.Context) {
 	user, _ := c.Get("user")
-	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"user": dto.ToUserDto(user.(model.User))}})
+	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"user": dto.ToUserDto(*user.(*domain.User))}})
 }
 
 func UploadAvatar(c *gin.Context) {
@@ -657,9 +656,13 @@ func GetAvatar(c *gin.Context) {
 	response.Success(c, gin.H{"phone": user.Phone, "AvatarURL": user.AvatarURL}, "获取成功")
 }
 func GetInfo(c *gin.Context) {
-	var requestUser = model.User{}
-	c.Bind(&requestUser)
-	user, err := service.Users.GetInfo(c.Request.Context(), requestUser.Phone, requestUser.UserID)
+	type getInfoReq struct {
+		Phone  string `json:"phone"`
+		UserID int    `json:"userID"`
+	}
+	var req getInfoReq
+	c.Bind(&req)
+	user, err := service.Users.GetInfo(c.Request.Context(), req.Phone, req.UserID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")

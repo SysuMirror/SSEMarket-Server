@@ -120,12 +120,11 @@ func (s *userService) Register(ctx context.Context, in domain.RegisterInput) (*d
 }
 
 func (s *userService) issueTokens(ctx context.Context, u *domain.User) (*domain.AuthTokens, error) {
-	modelUser := DomainUserToModel(u)
-	access, err := common.ReleaseToken(modelUser)
+	access, err := common.ReleaseToken(*u)
 	if err != nil {
 		return nil, domain.ErrInternal
 	}
-	refresh, err := common.ReleaseRefreshToken(modelUser)
+	refresh, err := common.ReleaseRefreshToken(*u)
 	if err != nil {
 		return nil, domain.ErrInternal
 	}
@@ -133,7 +132,7 @@ func (s *userService) issueTokens(ctx context.Context, u *domain.User) (*domain.
 	if err := s.users.SaveRefreshToken(ctx, u.ID, refresh, expires); err != nil {
 		return nil, err
 	}
-	CacheUserAfterAuth(ctx, modelUser)
+	CacheUserAfterAuth(ctx, u)
 	return &domain.AuthTokens{
 		AccessToken:  access,
 		RefreshToken: refresh,

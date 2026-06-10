@@ -3,7 +3,6 @@ package controller
 import (
 	"loginTest/config"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
@@ -66,14 +65,14 @@ func GetNotice(c *gin.Context) {
 	requireID, _ := strconv.Atoi(requireIDStr)
 	pageSize, _ := strconv.Atoi(pageSizeStr)
 	read, _ := strconv.Atoi(readStr)
-	var user model.User
+	var user *domain.User
 	if !exisits {
 		response.Response(c, http.StatusBadRequest, 400, nil, "游客无法访问通知")
 		return
 	}
-	user = value.(model.User)
+	user = value.(*domain.User)
 
-	page, err := service.Notices.List(c.Request.Context(), user.UserID, read, requireID, pageSize, user.Name)
+	page, err := service.Notices.List(c.Request.Context(), user.ID, read, requireID, pageSize, user.Name)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, err.Error())
 		return
@@ -96,14 +95,14 @@ func GetNotice(c *gin.Context) {
 
 func GetNoticeNum(c *gin.Context) {
 	value, exisits := c.Get("user")
-	var user model.User
+	var user *domain.User
 	if !exisits {
 		response.Response(c, http.StatusBadRequest, 400, nil, "游客无法获得通知数量")
 		return
 	}
-	user = value.(model.User)
+	user = value.(*domain.User)
 
-	counts, err := service.Notices.GetCounts(c.Request.Context(), user.UserID)
+	counts, err := service.Notices.GetCounts(c.Request.Context(), user.ID)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, err.Error())
 		return
@@ -127,13 +126,13 @@ func ReadNotice(c *gin.Context) {
 
 func EmailNotice(c *gin.Context) {
 	value, exists := c.Get("admin")
-	var admin model.Admin
+	var admin *domain.Admin
 	if !exists {
 		response.Fail(c, nil, "验证错误")
 		return
 	}
-	admin = value.(model.Admin)
-	if admin.AdminID == 0 {
+	admin = value.(*domain.Admin)
+	if admin.ID == 0 {
 		response.Fail(c, nil, "管理员不存在")
 	}
 

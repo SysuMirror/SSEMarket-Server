@@ -7,7 +7,6 @@ import (
 
 	"loginTest/common"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/service"
 
 	"github.com/gin-gonic/gin"
@@ -59,9 +58,8 @@ func OAuthMiddleware() gin.HandlerFunc {
 			ctx.Abort()
 			return
 		}
-		user := service.DomainUserToModel(u)
 
-		appDomain, err := service.Users.CheckOAuth2App(ctx.Request.Context(), appID)
+		app, err := service.Users.CheckOAuth2App(ctx.Request.Context(), appID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "OAuth2应用不存在或未激活"})
@@ -71,18 +69,9 @@ func OAuthMiddleware() gin.HandlerFunc {
 			ctx.Abort()
 			return
 		}
-		app := model.OAuth2App{
-			AppID:       appDomain.AppID,
-			AppName:     appDomain.AppName,
-			AppSecret:   appDomain.AppSecret,
-			AppIcon:     appDomain.AppIcon,
-			RedirectURI: appDomain.RedirectURI,
-			Description: appDomain.Description,
-			IsActive:    true,
-		}
 
 		// 将用户信息、应用信息和权限范围写入上下文
-		ctx.Set("oauth2_user", user)
+		ctx.Set("oauth2_user", u)
 		ctx.Set("oauth2_app", app)
 		ctx.Set("oauth2_scope", claims.Scope)
 		ctx.Set("oauth2_user_id", userID)

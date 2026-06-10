@@ -11,6 +11,7 @@ import (
 	"loginTest/heat"
 	"loginTest/middleware"
 	"loginTest/route"
+	gormrepo "loginTest/repository/gorm"
 	"loginTest/service"
 	"net/http"
 	"net/http/pprof"
@@ -123,7 +124,7 @@ func main() {
 	common.InitJWTkey()
 	core.InitLocalCache()
 	common.InitBloomFilter()
-	service.InitHotDataService()
+	service.InitHotDataService(gormrepo.NewHotDataRepository(db))
 
 	r = gin.Default()
 	r.Use(middleware.LoggerToFile())

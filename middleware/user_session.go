@@ -3,17 +3,17 @@ package middleware
 import (
 	"context"
 
-	"loginTest/model"
+	"loginTest/domain"
 	"loginTest/service"
 )
 
 // LoadUserSession 委托 Service 层 session 缓存。
-func LoadUserSession(ctx context.Context, userID int) (model.User, error) {
+func LoadUserSession(ctx context.Context, userID int) (*domain.User, error) {
 	return service.LoadUserSession(ctx, userID)
 }
 
 // StoreUserSession 委托 Service 层 session 缓存。
-func StoreUserSession(ctx context.Context, user model.User) error {
+func StoreUserSession(ctx context.Context, user *domain.User) error {
 	return service.StoreUserSession(ctx, user)
 }
 
@@ -23,6 +23,6 @@ func InvalidateUserSession(ctx context.Context, userID int) {
 }
 
 // RefreshUserSession 登录成功后写入 session 缓存。
-func RefreshUserSession(ctx context.Context, user model.User) {
+func RefreshUserSession(ctx context.Context, user *domain.User) {
 	service.CacheUserAfterAuth(ctx, user)
 }

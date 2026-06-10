@@ -44,7 +44,7 @@ func SearchPostsByTitle(c *gin.Context) {
 		return
 	}
 
-	items, err := service.Votes.SearchByTitle(c.Request.Context(), keyword, user.UserID)
+	items, err := service.Votes.SearchByTitle(c.Request.Context(), keyword, user.ID)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "搜索失败")
 		return
@@ -82,7 +82,7 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	err := service.Votes.SubmitVote(c.Request.Context(), user.UserID, req.PostID)
+	err := service.Votes.SubmitVote(c.Request.Context(), user.ID, req.PostID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
@@ -181,7 +181,7 @@ func CheckUserVoted(c *gin.Context) {
 		return
 	}
 
-	voted, err := service.Votes.HasVoted(c.Request.Context(), user.UserID, req.PostID)
+	voted, err := service.Votes.HasVoted(c.Request.Context(), user.ID, req.PostID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")

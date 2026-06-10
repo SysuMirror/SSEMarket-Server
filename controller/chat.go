@@ -8,7 +8,7 @@ import (
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/core"
-	"loginTest/model"
+	"loginTest/domain"
 	"loginTest/response"
 	"loginTest/service"
 	"loginTest/util"
@@ -68,8 +68,8 @@ func GetChatHistory(c *gin.Context) {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 		return
 	}
-	currentUser, _ := ctxUser.(model.User)
-	if currentUser.UserID != chatQuery.SenderUserID {
+	currentUser, _ := ctxUser.(*domain.User)
+	if currentUser.ID != chatQuery.SenderUserID {
 		response.Fail(c, gin.H{}, "没有权利查看他人聊天记录")
 		return
 	}
@@ -141,8 +141,8 @@ func ChatHandler(c *gin.Context) {
 		}
 		userID = claim.UserID
 	} else {
-		user := userInterface.(model.User)
-		userID = user.UserID
+		user := userInterface.(*domain.User)
+		userID = user.ID
 	}
 
 	go removeChatViewInRedis(userID)
@@ -233,7 +233,13 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 }
 
 func dispatch(data []byte, userID int) error {
-	msg := model.ChatMsg{}
+	type wsChatMsg struct {
+		ChatMsgID    int    `json:"chatMsgID"`
+		TargetUserID int    `json:"targetUserID"`
+		SenderUserID int    `json:"senderUserID"`
+		Content      string `json:"content"`
+	}
+	msg := wsChatMsg{}
 	err := json.Unmarshal(data, &msg)
 	if msg.ChatMsgID != 0 {
 		return errors.New("非法操作！")
@@ -370,8 +376,8 @@ func LeaveChatView(c *gin.Context) {
 		response.Fail(c, gin.H{}, "操作失败，请重试")
 		return
 	}
-	currentUser, _ := ctxUser.(model.User)
-	if currentUser.UserID != chatQuery.SenderUserID {
+	currentUser, _ := ctxUser.(*domain.User)
+	if currentUser.ID != chatQuery.SenderUserID {
 		response.Fail(c, gin.H{}, "非法操作")
 		return
 	}
@@ -392,8 +398,8 @@ func GetChatNotice(c *gin.Context) {
 	userIDStr := c.Query("userID")
 	userID, err := strconv.Atoi(userIDStr)
 	userFromCtx, ok := c.Get("user")
-	user := userFromCtx.(model.User)
-	if err != nil || userID == 0 || !ok || user.UserID != userID {
+	user := userFromCtx.(*domain.User)
+	if err != nil || userID == 0 || !ok || user.ID != userID {
 		response.Fail(c, gin.H{}, "操作异常")
 		return
 	}

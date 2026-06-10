@@ -11,7 +11,6 @@ import (
 	"loginTest/apperr"
 	"loginTest/config"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"mime/multipart"
@@ -154,14 +153,14 @@ type BrowseMeg struct {
 }
 
 // viewerFromAuth 从 JWT 中间件注入的上下文取当前用户（以 userID 为准，不用手机号）
-func viewerFromAuth(c *gin.Context) (model.User, bool) {
+func viewerFromAuth(c *gin.Context) (*domain.User, bool) {
 	value, exists := c.Get("user")
 	if !exists {
-		return model.User{}, false
+		return nil, false
 	}
-	user, ok := value.(model.User)
-	if !ok || user.UserID == 0 {
-		return model.User{}, false
+	user, ok := value.(*domain.User)
+	if !ok || user.ID == 0 {
+		return nil, false
 	}
 	return user, true
 }
@@ -181,7 +180,7 @@ func Browse(c *gin.Context) {
 		searchsort = "home"
 	}
 	filter := domain.BrowseFilter{
-		ViewerUserID: viewer.UserID,
+		ViewerUserID: viewer.ID,
 		Partition:    requestBrowseMeg.Partition,
 		Searchinfo:   requestBrowseMeg.Searchinfo,
 		Tag:          requestBrowseMeg.Tag,
@@ -259,7 +258,7 @@ func UserProfilePosts(c *gin.Context) {
 	}
 	items, err := service.Posts.UserProfilePosts(c.Request.Context(), domain.UserProfilePostsFilter{
 		TargetUserID: req.TargetUserID,
-		ViewerUserID: viewer.UserID,
+		ViewerUserID: viewer.ID,
 		Limit:        req.Limit,
 		Offset:       req.Offset,
 	})
@@ -293,7 +292,7 @@ func UserProfilePostNum(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"Postcount": count})
 		return
 	}
-	count, err := service.Posts.UserProfilePostNum(c.Request.Context(), req.TargetUserID, viewer.UserID)
+	count, err := service.Posts.UserProfilePostNum(c.Request.Context(), req.TargetUserID, viewer.ID)
 	if err != nil {
 		apperr.WriteMsg(c, err, "查询失败")
 		return
@@ -316,7 +315,7 @@ func GetPostNum(c *gin.Context) {
 		searchsort = "home"
 	}
 	filter := domain.BrowseFilter{
-		ViewerUserID: viewer.UserID,
+		ViewerUserID: viewer.ID,
 		Partition:    requestBrowseMeg.Partition,
 		Searchinfo:   requestBrowseMeg.Searchinfo,
 		Tag:          requestBrowseMeg.Tag,
@@ -350,7 +349,7 @@ func UpdatePostPrivacy(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
 		return
 	}
-	err := service.Posts.UpdatePrivacy(c.Request.Context(), int(req.PostID), viewer.UserID, req.IsPrivate)
+	err := service.Posts.UpdatePrivacy(c.Request.Context(), int(req.PostID), viewer.ID, req.IsPrivate)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
@@ -624,7 +623,7 @@ func ShowDetails(c *gin.Context) {
 	timing.setPostID(postID)
 	timing.step("validate_post_id")
 
-	detail, err := service.Posts.GetDetail(c.Request.Context(), int(postID), viewer.UserID)
+	detail, err := service.Posts.GetDetail(c.Request.Context(), int(postID), viewer.ID)
 	timing.step("service_get_detail")
 	if err != nil {
 		apperr.WriteMsg(c, err, "帖子不存在")
@@ -820,11 +819,11 @@ func GetAllFeedback(c *gin.Context) {
 		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	feedbacks := make([]model.Feedback, 0, len(list))
+	feedbacks := make([]domain.Feedback, 0, len(list))
 	for _, f := range list {
-		feedbacks = append(feedbacks, model.Feedback{
-			FeedbackID: f.ID,
-			Ftext:      f.Text,
+		feedbacks = append(feedbacks, domain.Feedback{
+			ID:         f.ID,
+			Text:       f.Text,
 			Attachment: f.Attachment,
 			Time:       f.Time,
 			Status:     f.Status,
@@ -891,8 +890,8 @@ func GetTags(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	user := value.(model.User)
-	if user.UserID == 0 {
+	user := value.(*domain.User)
+	if user.ID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
@@ -901,10 +900,10 @@ func GetTags(c *gin.Context) {
 		apperr.WriteMsg(c, err, "获取tag列表失败")
 		return
 	}
-	tags := make([]model.Tag, 0, len(tagList))
+	tags := make([]domain.Tag, 0, len(tagList))
 	for _, t := range tagList {
-		tags = append(tags, model.Tag{
-			TagID: t.ID,
+		tags = append(tags, domain.Tag{
+			ID:    t.ID,
 			Name:  t.Name,
 			Value: t.Value,
 			Type:  t.Type,

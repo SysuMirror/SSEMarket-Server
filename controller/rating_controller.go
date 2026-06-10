@@ -4,7 +4,6 @@ import (
 	"errors"
 	"loginTest/apperr"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
@@ -211,7 +210,7 @@ func RatingCategoryCreate(c *gin.Context) {
 		syncFeed = *msg.SyncFeedPost
 	}
 	cat, err := service.Ratings.CreateCategory(c.Request.Context(), domain.RatingCategoryCreateInput{
-		CreatorID:    user.UserID,
+		CreatorID:    user.ID,
 		Name:         msg.Name,
 		Description:  msg.Description,
 		SyncFeedPost: syncFeed,
@@ -265,7 +264,7 @@ func RatingPostList(c *gin.Context) {
 		c.JSON(http.StatusOK, []RatingPostListItem{})
 		return
 	}
-	catMap, userMap, likedSet, summary, err := service.Ratings.EnrichPosts(ctx, posts, user.UserID)
+	catMap, userMap, likedSet, summary, err := service.Ratings.EnrichPosts(ctx, posts, user.ID)
 	if err != nil {
 		apperr.Write(c, err)
 		return
@@ -296,7 +295,7 @@ func RatingPostCreate(c *gin.Context) {
 	}
 	id, err := service.Ratings.CreatePost(c.Request.Context(), domain.RatingPostCreateInput{
 		CategoryID: msg.CategoryID,
-		UserID:     user.UserID,
+		UserID:     user.ID,
 		Title:      msg.Title,
 		Content:    msg.Content,
 		Photos:     msg.Photos,
@@ -343,7 +342,7 @@ func RatingPostDetail(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
-	post, userStar, err := service.Ratings.GetPostDetail(ctx, msg.RatingPostID, user.UserID)
+	post, userStar, err := service.Ratings.GetPostDetail(ctx, msg.RatingPostID, user.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "评分帖不存在")
@@ -352,7 +351,7 @@ func RatingPostDetail(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
-	catMap, userMap, likedSet, summary, err := service.Ratings.EnrichPosts(ctx, []*domain.RatingPost{post}, user.UserID)
+	catMap, userMap, likedSet, summary, err := service.Ratings.EnrichPosts(ctx, []*domain.RatingPost{post}, user.ID)
 	if err != nil {
 		apperr.Write(c, err)
 		return
@@ -376,7 +375,7 @@ func RatingPostDelete(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "无效的评分帖 ID")
 		return
 	}
-	err := service.Ratings.DeletePost(c.Request.Context(), msg.RatingPostID, user.UserID)
+	err := service.Ratings.DeletePost(c.Request.Context(), msg.RatingPostID, user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
@@ -402,7 +401,7 @@ func RatingPostLike(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "无效的评分帖 ID")
 		return
 	}
-	err := service.Ratings.TogglePostLike(c.Request.Context(), msg.RatingPostID, user.UserID)
+	err := service.Ratings.TogglePostLike(c.Request.Context(), msg.RatingPostID, user.ID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return
 	}
@@ -424,7 +423,7 @@ func RatingStarSubmit(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评分须为 1～5 星")
 		return
 	}
-	err := service.Ratings.SubmitStar(c.Request.Context(), msg.RatingPostID, user.UserID, msg.StarNum)
+	err := service.Ratings.SubmitStar(c.Request.Context(), msg.RatingPostID, user.ID, msg.StarNum)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "评分帖不存在")
@@ -447,7 +446,7 @@ func RatingCommentList(c *gin.Context) {
 		c.JSON(http.StatusOK, []RatingCommentResponse{})
 		return
 	}
-	comments, userMap, likeMap, err := service.Ratings.ListComments(c.Request.Context(), msg.RatingPostID, user.UserID)
+	comments, userMap, likeMap, err := service.Ratings.ListComments(c.Request.Context(), msg.RatingPostID, user.ID)
 	if err != nil {
 		apperr.Write(c, err)
 		return
@@ -489,7 +488,7 @@ func RatingCommentCreate(c *gin.Context) {
 	}
 	cm, notifyReceiver, err := service.Ratings.CreateComment(c.Request.Context(), domain.RatingCommentCreateInput{
 		RatingPostID: msg.RatingPostID,
-		UserID:       user.UserID,
+		UserID:       user.ID,
 		Content:      msg.Content,
 		StarNum:      msg.StarNum,
 	})
@@ -509,7 +508,7 @@ func RatingCommentCreate(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, RatingCommentResponse{
 		CommentID:       cm.ID,
-		AuthorID:        user.UserID,
+		AuthorID:        user.ID,
 		Author:          user.Name,
 		AuthorTelephone: user.Phone,
 		AuthorScore:     user.Score,
@@ -523,7 +522,7 @@ func RatingCommentCreate(c *gin.Context) {
 	})
 }
 
-func ratingCommentCreateMsg(msg RatingCommentCreateMsg, user model.User) string {
+func ratingCommentCreateMsg(msg RatingCommentCreateMsg, user *domain.User) string {
 	content := strings.TrimSpace(msg.Content)
 	if content == "" {
 		return "评论内容不能为空"
@@ -535,7 +534,7 @@ func ratingCommentCreateMsg(msg RatingCommentCreateMsg, user model.User) string 
 		return "评分须在 0～5 之间"
 	}
 	currentDateTime := time.Now()
-	if user.Banend.After(currentDateTime) {
+	if user.BanEnd.After(currentDateTime) {
 		return "你尚处于禁言状态中，不得评论"
 	}
 	return "参数错误"
@@ -552,7 +551,7 @@ func RatingCommentLike(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "无效的评论 ID")
 		return
 	}
-	err := service.Ratings.ToggleCommentLike(c.Request.Context(), msg.CommentID, user.UserID)
+	err := service.Ratings.ToggleCommentLike(c.Request.Context(), msg.CommentID, user.ID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return
 	}

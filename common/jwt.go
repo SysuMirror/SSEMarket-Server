@@ -2,7 +2,7 @@
 package common
 
 import (
-	"loginTest/model"
+	"loginTest/domain"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -50,9 +50,9 @@ func registeredClaims(exp time.Time, subject string) jwt.RegisteredClaims {
 	}
 }
 
-func ReleaseToken(user model.User) (string, error) {
+func ReleaseToken(user domain.User) (string, error) {
 	claims := &Claims{
-		UserID:           user.UserID,
+		UserID:           user.ID,
 		RegisteredClaims: registeredClaims(time.Now().Add(7*24*time.Hour), "user token"),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -61,18 +61,18 @@ func ReleaseToken(user model.User) (string, error) {
 
 // ReleaseRefreshToken 生成用于刷新 access token 的 refresh token
 // 有效期：30 天
-func ReleaseRefreshToken(user model.User) (string, error) {
+func ReleaseRefreshToken(user domain.User) (string, error) {
 	claims := &RefreshClaims{
-		UserID:           user.UserID,
+		UserID:           user.ID,
 		RegisteredClaims: registeredClaims(time.Now().Add(30*24*time.Hour), "refresh token"),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(jwtKey)
 }
 
-func ReleaseToken_admin(admin model.Admin) (string, error) {
+func ReleaseToken_admin(admin domain.Admin) (string, error) {
 	claims := &Claims_admin{
-		AdminID:          admin.AdminID,
+		AdminID:          admin.ID,
 		RegisteredClaims: registeredClaims(time.Now().Add(24*time.Hour), "admin token"),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -35,9 +35,10 @@ func InitServices(db *gorm.DB) {
 	adminRepo := gormrepo.NewAdminRepository(db)
 	sueRepo := gormrepo.NewSueRepository(db)
 	voteRepo := gormrepo.NewVoteRepository(db)
+	rankRepo := gormrepo.NewRankRepository(db)
 
 	Users = NewUserService(userRepo)
-	Ranks = NewRankService(db)
+	Ranks = NewRankService(rankRepo)
 	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks)
 	Comments = NewCommentService(commentRepo)
 	Chats = NewChatService(chatRepo)

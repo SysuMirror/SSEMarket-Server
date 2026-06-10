@@ -145,6 +145,7 @@ type NoticeService interface {
 
 // AdminService 管理端领域服务。
 type AdminService interface {
+	GetByID(ctx context.Context, id int) (*domain.Admin, error)
 	Login(ctx context.Context, account, encryptedPassword string) (string, error)
 	AddAdmin(ctx context.Context, account, pass1, pass2 string) (*domain.Admin, error)
 	ChangePassword(ctx context.Context, account, pass1, pass2 string) (*domain.Admin, error)

@@ -24,6 +24,18 @@ func (r *adminRepository) session(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx)
 }
 
+func (r *adminRepository) FindByID(ctx context.Context, id int) (*domain.Admin, error) {
+	var m model.Admin
+	err := r.session(ctx).Where("adminID = ?", id).First(&m).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return adminToDomain(&m), nil
+}
+
 func (r *adminRepository) FindByAccount(ctx context.Context, account string) (*domain.Admin, error) {
 	var m model.Admin
 	err := r.session(ctx).Where("account = ?", account).First(&m).Error

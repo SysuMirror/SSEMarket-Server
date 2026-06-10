@@ -1,13 +1,12 @@
-// token结构体
 package dto
 
-import "loginTest/model"
+import "loginTest/domain"
 
 type AdminDto struct {
-	Account  string `json:"account"`
+	Account string `json:"account"`
 }
 
-func ToAdminDto(admin model.Admin) AdminDto {
+func ToAdminDto(admin domain.Admin) AdminDto {
 	return AdminDto{
 		Account: admin.Account,
 	}

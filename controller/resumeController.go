@@ -9,7 +9,6 @@ import (
 	"loginTest/api"
 	"loginTest/apperr"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
@@ -119,25 +118,25 @@ type ResumeResponse struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
-func requireLoginUser(c *gin.Context) (model.User, bool) {
+func requireLoginUser(c *gin.Context) (*domain.User, bool) {
 	userID := GetTokenUserID(c)
 	if userID == 0 {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")
-		return model.User{}, false
+		return nil, false
 	}
 	u, err := service.Users.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户不存在")
-		return model.User{}, false
+		return nil, false
 	}
-	return service.DomainUserToModel(u), true
+	return u, true
 }
 
-func viewerIsOwnerDomain(resume *domain.Resume, viewer model.User) bool {
-	return resume.UserID == viewer.UserID
+func viewerIsOwnerDomain(resume *domain.Resume, viewer *domain.User) bool {
+	return resume.UserID == viewer.ID
 }
 
-func shouldMaskAnonymousDomain(resume *domain.Resume, viewer model.User) bool {
+func shouldMaskAnonymousDomain(resume *domain.Resume, viewer *domain.User) bool {
 	return resume.IsAnonymous && !viewerIsOwnerDomain(resume, viewer)
 }
 
@@ -184,7 +183,7 @@ func sanitizeDownloadFileSegment(s string) string {
 	return out
 }
 
-func resumeToResponse(r *domain.Resume, uploader *domain.User, viewer model.User) ResumeResponse {
+func resumeToResponse(r *domain.Resume, uploader *domain.User, viewer *domain.User) ResumeResponse {
 	mask := shouldMaskAnonymousDomain(r, viewer)
 	owner := viewerIsOwnerDomain(r, viewer)
 
@@ -267,7 +266,7 @@ func ResumeUpload(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := service.Resumes.CanUpload(ctx, user.UserID); err != nil {
+	if err := service.Resumes.CanUpload(ctx, user.ID); err != nil {
 		if errors.Is(err, domain.ErrBadRequest) {
 			response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("每人最多上传%d份简历", resumeMaxPerUser))
 			return
@@ -337,7 +336,7 @@ func ResumeUpload(c *gin.Context) {
 	}
 
 	resumeID, err := service.Resumes.Create(c.Request.Context(), domain.ResumeCreateInput{
-		UserID:      user.UserID,
+		UserID:      user.ID,
 		Title:       title,
 		Description: description,
 		FileName:    safeName,
@@ -396,7 +395,7 @@ func ResumeList(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	resumes, err := service.Resumes.List(ctx, domain.ResumeFilter{
-		UserID:     user.UserID,
+		UserID:     user.ID,
 		SearchInfo: req.Searchinfo,
 		SearchSort: req.Searchsort,
 		Limit:      req.Limit,
@@ -594,7 +593,7 @@ func ResumeUpdate(c *gin.Context) {
 	ctx := c.Request.Context()
 	resume, err := service.Resumes.Update(ctx, domain.ResumeUpdateInput{
 		ResumeID:    req.ResumeID,
-		UserID:      user.UserID,
+		UserID:      user.ID,
 		Title:       title,
 		Description: description,
 	})
@@ -626,7 +625,7 @@ func ResumeDelete(c *gin.Context) {
 		return
 	}
 
-	cosKey, err := service.Resumes.Delete(c.Request.Context(), req.ResumeID, user.UserID)
+	cosKey, err := service.Resumes.Delete(c.Request.Context(), req.ResumeID, user.ID)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):

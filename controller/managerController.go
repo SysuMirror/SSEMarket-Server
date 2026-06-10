@@ -7,7 +7,6 @@ import (
 	"loginTest/config"
 	"loginTest/domain"
 	"loginTest/dto"
-	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
@@ -49,7 +48,7 @@ type Check struct {
 }
 
 func AdminLogin(ctx *gin.Context) {
-	var requesrAdmin model.Admin
+	var requesrAdmin domain.Admin
 	ctx.Bind(&requesrAdmin)
 
 	token, err := service.Admins.Login(ctx.Request.Context(), requesrAdmin.Account, requesrAdmin.Password)
@@ -70,7 +69,7 @@ func AdminLogin(ctx *gin.Context) {
 
 func AdminInfo(c *gin.Context) {
 	admin, _ := c.Get("admin")
-	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"admin": dto.ToAdminDto(admin.(model.Admin))}})
+	c.JSON(http.StatusOK, gin.H{"code": 200, "data": gin.H{"admin": dto.ToAdminDto(*admin.(*domain.Admin))}})
 }
 
 func ShowFilterUsers(ctx *gin.Context) {
@@ -115,8 +114,8 @@ func AddAdmin(ctx *gin.Context) {
 		}
 		return
 	}
-	response.Success(ctx, gin.H{"data": model.Admin{
-		AdminID:  admin.ID,
+	response.Success(ctx, gin.H{"data": domain.Admin{
+		ID:       admin.ID,
 		Account:  admin.Account,
 		Password: admin.Password,
 	}}, "添加管理员成功")
@@ -148,8 +147,8 @@ func ChangeAdminPassword(ctx *gin.Context) {
 		}
 		return
 	}
-	response.Success(ctx, gin.H{"data": model.Admin{
-		AdminID:  updated.ID,
+	response.Success(ctx, gin.H{"data": domain.Admin{
+		ID:       updated.ID,
 		Account:  updated.Account,
 		Password: updated.Password,
 	}}, "成功修改管理员密码")
@@ -174,7 +173,7 @@ func DeleteUser(ctx *gin.Context) {
 }
 
 func DeleteAdmin(ctx *gin.Context) {
-	var user model.Admin
+	var user domain.Admin
 	ctx.Bind(&user)
 
 	err := service.Admins.DeleteAdmin(ctx.Request.Context(), user.Account)

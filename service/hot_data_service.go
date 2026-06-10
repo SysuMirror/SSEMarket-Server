@@ -4,9 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
-	"loginTest/common"
 	"loginTest/core"
-	"loginTest/model"
+	"loginTest/repository"
 	"loginTest/util"
 	"sync"
 	"time"
@@ -21,6 +20,7 @@ var ctx = context.Background()
 
 // HotDataService 浏览数计数服务：Redis INCR 为跨实例唯一真相，周期同步到 MySQL。
 type HotDataService struct {
+	repo            repository.HotDataRepository
 	dbSyncInterval  time.Duration
 	browseDirty     sync.Map // postID -> struct{}，该帖 Redis 计数有变更、待落库
 	redisHealthy    bool
@@ -32,13 +32,14 @@ type HotDataService struct {
 }
 
 // InitHotDataService 初始化
-func InitHotDataService() {
+func InitHotDataService(repo repository.HotDataRepository) {
 	dbSyncInterval := viper.GetDuration("hot_data.db_sync_interval")
 	if dbSyncInterval == 0 {
 		dbSyncInterval = 5 * time.Second
 	}
 
 	HotData = &HotDataService{
+		repo:            repo,
 		dbSyncInterval:  dbSyncInterval,
 		redisHealthy:    true,
 		stopChan:        make(chan struct{}),
@@ -57,15 +58,7 @@ func InitHotDataService() {
 }
 
 func (s *HotDataService) browseNumFromDB(postID int) int64 {
-	db := common.GetDB()
-	if db == nil {
-		return 0
-	}
-	var p model.Post
-	if err := db.Select("browse_num").Where("postID = ?", postID).First(&p).Error; err != nil {
-		return 0
-	}
-	return int64(p.BrowseNum)
+	return s.repo.GetBrowseNum(context.Background(), postID)
 }
 
 // ensureBrowseCountKeySeeded 在 Redis 中不存在计数 key 时用 DB 的 browse_num 做 SetNX，避免 Incr 从 0 起算导致与 MySQL 分叉。
@@ -91,7 +84,6 @@ func (s *HotDataService) ensureBrowseCountKeySeeded(postID int) {
 // IncrBrowseCount 浏览数 +1：直接 Redis INCR，多副本下与 MySQL 最终由 syncToDB 对齐。
 func (s *HotDataService) IncrBrowseCount(postID int) int64 {
 	if !s.redisHealthy {
-		// Redis 不可用时不上报虚假增长，避免与恢复后的 Redis 剧烈跳变
 		return s.browseNumFromDB(postID)
 	}
 	s.ensureBrowseCountKeySeeded(postID)
@@ -162,14 +154,9 @@ func (s *HotDataService) startDBSyncTask() {
 	}
 }
 
-// syncToDB 将 Redis 中的浏览数同步到数据库（处理所有 browseDirty 中的帖子，与本地 pending 无关）
+// syncToDB 将 Redis 中的浏览数同步到数据库
 func (s *HotDataService) syncToDB() {
 	if !s.redisHealthy {
-		return
-	}
-
-	db := common.GetDB()
-	if db == nil {
 		return
 	}
 
@@ -199,9 +186,7 @@ func (s *HotDataService) syncToDB() {
 			continue
 		}
 
-		err = db.Model(&model.Post{}).
-			Where("postID = ?", postID).
-			Update("browse_num", redisBrowseNum).Error
+		err = s.repo.UpdateBrowseNum(context.Background(), postID, redisBrowseNum)
 		if err != nil {
 			continue
 		}

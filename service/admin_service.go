@@ -9,7 +9,6 @@ import (
 	"loginTest/common"
 	"loginTest/config"
 	"loginTest/domain"
-	"loginTest/model"
 	"loginTest/repository"
 	"loginTest/util"
 )
@@ -20,6 +19,10 @@ type adminService struct {
 
 func NewAdminService(admins repository.AdminRepository) AdminService {
 	return &adminService{admins: admins}
+}
+
+func (s *adminService) GetByID(ctx context.Context, id int) (*domain.Admin, error) {
+	return s.admins.FindByID(ctx, id)
 }
 
 func (s *adminService) Login(ctx context.Context, account, encryptedPassword string) (string, error) {
@@ -34,11 +37,7 @@ func (s *adminService) Login(ctx context.Context, account, encryptedPassword str
 	if password != admin.Password {
 		return "", domain.ErrUnauthorized
 	}
-	token, err := common.ReleaseToken_admin(model.Admin{
-		AdminID:  admin.ID,
-		Account:  admin.Account,
-		Password: admin.Password,
-	})
+	token, err := common.ReleaseToken_admin(*admin)
 	if err != nil {
 		return "", domain.ErrInternal
 	}

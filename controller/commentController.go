@@ -132,7 +132,7 @@ func GetComments(c *gin.Context) {
 		return
 	}
 
-	items, err := service.Comments.ListForPost(c.Request.Context(), postid, postType, temUser.UserID)
+	items, err := service.Comments.ListForPost(c.Request.Context(), postid, postType, temUser.ID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
