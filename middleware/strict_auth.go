@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -85,9 +84,4 @@ func OptionalAuthMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
-}
-
-// RefreshUserSession 登录成功后写入 session 缓存。
-func RefreshUserSession(ctx context.Context, user model.User) {
-	_ = StoreUserSession(ctx, user)
 }

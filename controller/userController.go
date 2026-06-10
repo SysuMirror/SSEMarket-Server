@@ -7,11 +7,14 @@ import (
 	"image"
 	"log"
 	"loginTest/api"
+	"loginTest/apperr"
 	"loginTest/common"
 	"loginTest/core"
+	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/response"
+	"loginTest/service"
 	"loginTest/util"
 	"net/http"
 	"path/filepath"
@@ -19,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brianvoe/gofakeit"
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -153,170 +155,54 @@ func DeleteMe(c *gin.Context) {
 }
 
 func Register(c *gin.Context) {
-	// 连接数据库
-	db := common.GetDB()
-	// 从前端获取信息
 	var requestUser = registerUser{}
 	c.Bind(&requestUser)
-	//获取参数
-	name := requestUser.Name
-	telephone := requestUser.Phone
-	password1 := requestUser.Password
-	password2 := requestUser.Password2
-	password1 = util.Decrypt(password1)
-	password2 = util.Decrypt(password2)
-	email := strings.TrimSpace(requestUser.Email)
-	print(email)
-	//num := requestUser.Num
-	valiCode := requestUser.ValiCode
-	cdkey := requestUser.CDKey
-	//若使用postman等工具，写法如下：
-	// name := c.PostForm("name")
-	// telephone := c.PostForm("telephone")
-	// password := c.PostForm("password")
-	// PostForm中的参数与在postman中发送信息的名字要一致
-	if len(telephone) == 0 {
-		for {
-			telephone = util.GenerateRandomDigits(11)
-			// 如果存在，继续生成新的随机字符串
-			// 如果不存在，退出循环
-			if !isTelephoneExist(db, telephone) {
-				break
-			}
-		}
-	}
-	//验证数据
-	if len(telephone) != 11 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "手机号必须为11位!!!")
-		println(telephone)
-		return
-	}
-	if len(password1) < 6 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码不能少于6位")
-		return
-	}
+	password1 := util.Decrypt(requestUser.Password)
+	password2 := util.Decrypt(requestUser.Password2)
 	if len(password2) < 6 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码不能少于6位")
+		response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
 		return
 	}
 	if password1 != password2 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "两次密码不相同，请重新输入")
+		response.Response(c, http.StatusUnprocessableEntity, 422, nil, "两次密码不相同，请重新输入")
 		return
 	}
-	//如果名称没有传，给一个10位的随机字符串
-	if len(name) == 0 {
-		name = gofakeit.Name()
-	}
-	// 判断手机号是否存在
-	if isTelephoneExist(db, telephone) {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该手机号已存在")
-		return
-	}
-	check := false
-	for i := 0; i < len(email); i++ {
-		if email[i] == '@' {
-			check = true
-		}
-	}
-	if !check {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-		return
-	}
-	if isEmailExist(db, email) {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱已存在")
-		return
-	}
-	rds := core.MyRedis
-	ctx := context.Background()
-	codeKey := "vcode:" + email
-	failKey := "vcode_fail:" + email
-	correctValiCode, err := rds.Get(ctx, codeKey).Result()
-	if err != nil || correctValiCode != valiCode {
-		failCountStr, _ := rds.Get(ctx, failKey).Result()
-		failCount := 0
-		if failCountStr != "" {
-			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
-				failCount = v
-			}
-		}
-		failCount++
-		rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute)
-		if failCount >= MAX_VALIDATE_FAIL {
-			rds.Del(ctx, codeKey)
-		}
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
-	}
-	var key model.CDKey
-	db.Where("content =? AND used = 0", cdkey).First(&key)
-	if key.CDKeyID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "激活码错误")
-		return
-	}
-	// 创建用户
-	hasedPassword, err := bcrypt.GenerateFromPassword([]byte(password1), bcrypt.DefaultCost)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "密码加密错误")
-		return
-	}
-	//numInt, err := strconv.Atoi(num)
-	//fmt.Println(num, numInt)
-	//if err != nil {
-	//	response.Response(c, http.StatusInternalServerError, 400, nil, "学号异常")
-	//	return
-	//}
-	//if isNumExist(db, numInt) {
-	//	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该学号已存在")
-	//	return
-	//}
-	// 创建新用户结构体
-	newUser := model.User{
-		Name:     name,
-		Phone:    telephone,
-		Password: string(hasedPassword),
-		Banend:   time.Now(),
-		Email:    email,
-		//Num:      numInt,
-	}
-	// 将结构体传进Create函数即可在数据库中添加一条记录
-	// 其他的增删查改功能参见postController里的updateLike函数
-	db.Create(&newUser)
-	if newUser.UserID == 0 {
-		response.Response(c, http.StatusInternalServerError, 400, nil, "userID为0")
-		return
-	}
-	// 修改激活码
-	// 警告：当使用 struct 更新时，GORM只会更新那些非零值的字段
-	db.Model(&key).Updates(model.CDKey{
-		Used:     true,
-		UsedTime: time.Now(),
+
+	tokens, err := service.Users.Register(c.Request.Context(), domain.RegisterInput{
+		Name:     requestUser.Name,
+		Phone:    requestUser.Phone,
+		Email:    strings.TrimSpace(requestUser.Email),
+		Password: password1,
+		ValiCode: requestUser.ValiCode,
+		CDKey:    requestUser.CDKey,
 	})
-	//发放 access token 和 refresh token
-	token, err := common.ReleaseToken(newUser)
 	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 400, nil, "账号已注册，但无法返回token")
-		log.Printf("token generate error: %v", err)
+		switch {
+		case errors.Is(err, domain.ErrConflict):
+			msg := "该邮箱已存在"
+			if requestUser.Phone != "" {
+				msg = "该手机号已存在"
+			}
+			response.Response(c, http.StatusUnprocessableEntity, 422, nil, msg)
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		case errors.Is(err, domain.ErrBadRequest):
+			if strings.TrimSpace(requestUser.Email) == "" || !strings.Contains(requestUser.Email, "@") {
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "邮箱不符合要求")
+			} else if requestUser.CDKey != "" {
+				response.Response(c, http.StatusBadRequest, 400, nil, "激活码错误")
+			} else {
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "手机号必须为11位!!!")
+			}
+		default:
+			apperr.WriteMsg(c, err, "注册失败")
+		}
 		return
 	}
-	refreshToken, err := common.ReleaseRefreshToken(newUser)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 400, nil, "账号已注册，但无法返回refresh token")
-		log.Printf("refresh token generate error: %v", err)
-		return
-	}
-	// 将 refresh token 记录到数据库，使其一次性使用
-	refreshRecord := model.RefreshToken{
-		UserID:    newUser.UserID,
-		Token:     refreshToken,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
-		IsUsed:    false,
-		CreatedAt: time.Now(),
-	}
-	db.Create(&refreshRecord)
-	//返回结果
-	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "注册成功")
-	rds.Del(ctx, codeKey)
-	rds.Del(ctx, failKey)
+	response.Success(c, gin.H{
+		"token":         tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
+	}, "注册成功")
 }
 
 func IdentityValidate(c *gin.Context) {
@@ -391,80 +277,36 @@ type loginuser struct {
 }
 
 func Login(c *gin.Context) {
-	// 邮箱登录
-	db := common.GetDB()
 	var requestUser = loginuser{}
 	c.Bind(&requestUser)
-	//获取参数
-	//telephone := requestUser.Phone
 	email := requestUser.Email
-	password := requestUser.Password
-	password = util.Decrypt(password)
-	//数据验证
-	//if len(telephone) == 0 {
-	//	msg := "手机号为空！" + telephone
-	//	response.Response(c, http.StatusUnprocessableEntity, 400, nil, msg)
-	//	return
-	//}
-	//if len(telephone) != 11 {
-	//	msg := "手机号必须为11位" + telephone
-	//	response.Response(c, http.StatusUnprocessableEntity, 400, nil, msg)
-	//	return
-	//}
-	if len(email) == 0 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱号为空！"+email)
-		return
-	}
-	//if !(strings.HasSuffix(email, "@mail.sysu.edu.cn") || strings.HasSuffix(email, "@mail2.sysu.edu.cn")) {
-	//	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "请输入正确的中大邮箱")
-	//	return
-	//}
-	if len(password) < 6 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码不能少于6位")
-		return
-	}
+	password := util.Decrypt(requestUser.Password)
 
-	//判断手机号是否存在
-	var user model.User
-	//db.Where("phone = ?", telephone).First(&user)
-	db.Where("email = ?", email).First(&user)
-	if user.UserID == 0 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户不存在")
-		return
-	}
-	//判断密码是否正确
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		response.Response(c, http.StatusBadRequest, 400, nil, "密码错误")
-		return
-	}
-	// if user.IDpass == false {
-	// 	response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户注册尚未通过审核，请耐心等待")
-	// 	return
-	// }
-	//发放 access token 和 refresh token
-	token, err := common.ReleaseToken(user)
+	tokens, err := service.Users.Login(c.Request.Context(), domain.LoginInput{
+		Email:    email,
+		Password: password,
+	})
 	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 400, nil, "系统异常")
-		log.Printf("token generate error: %v", err)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusBadRequest, 400, nil, "密码错误")
+		case errors.Is(err, domain.ErrBadRequest):
+			if email == "" {
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "邮箱号为空！"+email)
+			} else {
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
+			}
+		default:
+			apperr.WriteMsg(c, err, "系统异常")
+		}
 		return
 	}
-	refreshToken, err := common.ReleaseRefreshToken(user)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 400, nil, "系统异常")
-		log.Printf("refresh token generate error: %v", err)
-		return
-	}
-	// 将 refresh token 记录到数据库，使其一次性使用
-	refreshRecord := model.RefreshToken{
-		UserID:    user.UserID,
-		Token:     refreshToken,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
-		IsUsed:    false,
-		CreatedAt: time.Now(),
-	}
-	db.Create(&refreshRecord)
-	//返回结果
-	response.Success(c, gin.H{"token": token, "refresh_token": refreshToken}, "登录成功")
+	response.Success(c, gin.H{
+		"token":         tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
+	}, "登录成功")
 }
 
 // 通过 refresh token 刷新 access token
@@ -1221,6 +1063,7 @@ func UpdateUserInfo(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
 		return
 	}
+	service.InvalidateUserSession(c.Request.Context(), user.UserID)
 	response.Response(c, http.StatusOK, 200, nil, "用户信息更新成功")
 }
 

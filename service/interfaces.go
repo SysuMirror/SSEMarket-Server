@@ -10,6 +10,8 @@ import (
 // PostService 帖子领域服务。
 type PostService interface {
 	CountBrowse(ctx context.Context, filter domain.BrowseFilter) (int64, error)
+	Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error)
+	GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error)
 	FindByID(ctx context.Context, postID, viewerUserID int) (*domain.Post, error)
 	IncrBrowse(ctx context.Context, postID int) int64
 }
@@ -17,6 +19,8 @@ type PostService interface {
 // UserService 用户领域服务。
 type UserService interface {
 	GetByID(ctx context.Context, id int) (*domain.User, error)
+	Login(ctx context.Context, in domain.LoginInput) (*domain.AuthTokens, error)
+	Register(ctx context.Context, in domain.RegisterInput) (*domain.AuthTokens, error)
 }
 
 // CommentService 评论领域服务（Phase 2 骨架，待从 commentController 迁移）。

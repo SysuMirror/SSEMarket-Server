@@ -13,7 +13,6 @@ import (
 	"loginTest/config"
 	"loginTest/core"
 	"loginTest/domain"
-	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
@@ -344,7 +343,6 @@ func Browse(c *gin.Context) {
 		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
-	db := freshDB()
 	var requestBrowseMeg BrowseMeg
 	if err := c.ShouldBindJSON(&requestBrowseMeg); err != nil {
 		_ = c.ShouldBind(&requestBrowseMeg)
@@ -353,42 +351,61 @@ func Browse(c *gin.Context) {
 	if searchsort == "" {
 		searchsort = "home"
 	}
-	requestBrowseMeg.Searchsort = searchsort
-
-	posts := browseFetchPosts(db, &requestBrowseMeg, &viewer)
-	if len(posts) == 0 {
-		c.JSON(http.StatusOK, []PostResponse{})
+	filter := domain.BrowseFilter{
+		ViewerUserID: viewer.UserID,
+		Partition:    requestBrowseMeg.Partition,
+		Searchinfo:   requestBrowseMeg.Searchinfo,
+		Tag:          requestBrowseMeg.Tag,
+		Searchsort:   searchsort,
+		OrderBy:      requestBrowseMeg.OrderBy,
+		TimeFrom:     requestBrowseMeg.TimeFrom,
+		TimeTo:       requestBrowseMeg.TimeTo,
+		Limit:        requestBrowseMeg.Limit,
+		Offset:       requestBrowseMeg.Offset,
+	}
+	items, err := service.Posts.Browse(c.Request.Context(), filter)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	postIDs := make([]int, 0, len(posts))
-	userIDs := make(map[int]struct{})
-	for _, p := range posts {
-		if !canViewPost(p, viewer.UserID) {
-			continue
-		}
-		postIDs = append(postIDs, p.PostID)
-		if p.UserID != 0 {
-			userIDs[p.UserID] = struct{}{}
-		}
+	responses := make([]PostResponse, 0, len(items))
+	for _, item := range items {
+		responses = append(responses, browseItemToResponse(item))
 	}
-	savedSet := browseBatchSavedSet(db, viewer.UserID, postIDs)
-	likedSet := browseBatchLikedSet(db, viewer.UserID, postIDs)
-	userMap := browseBatchUserMap(db, userIDs)
-	postResponses := make([]PostResponse, 0, len(posts))
-	isSaveMode := (searchsort == "save")
-	for _, post := range posts {
-		if !canViewPost(post, viewer.UserID) {
-			continue
-		}
-		user := browseGetUserForPost(userMap, post.UserID)
-		_, isSaved := savedSet[post.PostID]
-		if isSaveMode {
-			isSaved = true
-		}
-		_, isLiked := likedSet[post.PostID]
-		postResponses = append(postResponses, buildPostResponse(post, user, isSaved, isLiked))
+	c.JSON(http.StatusOK, responses)
+}
+
+func browseItemToResponse(item domain.BrowseItem) PostResponse {
+	p, a := item.Post, item.Author
+	if p == nil {
+		return PostResponse{}
 	}
-	c.JSON(http.StatusOK, postResponses)
+	name, phone, avatar, identity, score := "", "", "", "", 0
+	if a != nil {
+		name, phone, avatar, identity, score = a.Name, a.Phone, a.AvatarURL, a.Identity, a.Score
+	}
+	return PostResponse{
+		PostID:        uint(p.ID),
+		Partition:     p.Partition,
+		UserID:        p.UserID,
+		UserName:      name,
+		UserScore:     score,
+		UserTelephone: phone,
+		UserAvatar:    avatar,
+		UserIdentity:  identity,
+		Title:         p.Title,
+		Content:       p.Content,
+		Like:          p.LikeNum,
+		Comment:       p.CommentNum,
+		Browse:        p.BrowseNum,
+		Heat:          p.Heat,
+		PostTime:      p.PostTime,
+		IsSaved:       item.IsSaved,
+		IsLiked:       item.IsLiked,
+		Photos:        p.Photos,
+		Tag:           p.Tag,
+		IsPrivate:     p.IsPrivate,
+	}
 }
 
 type UserProfilePostsMsg struct {
@@ -654,6 +671,7 @@ func GetPostNum(c *gin.Context) {
 		Searchinfo:   requestBrowseMeg.Searchinfo,
 		Tag:          requestBrowseMeg.Tag,
 		Searchsort:   searchsort,
+		OrderBy:      requestBrowseMeg.OrderBy,
 		TimeFrom:     requestBrowseMeg.TimeFrom,
 		TimeTo:       requestBrowseMeg.TimeTo,
 	}
@@ -694,7 +712,7 @@ func UpdatePostPrivacy(c *gin.Context) {
 		return
 	}
 	db.Model(&post).Update("is_private", req.IsPrivate)
-	common.DelMultiLevelCache(util.GetPostDetailKey(int(req.PostID)))
+	service.InvalidatePostDetail(int(req.PostID))
 	response.Success(c, gin.H{"isPrivate": req.IsPrivate}, "更新成功")
 }
 
@@ -1013,138 +1031,79 @@ func (s *showDetailStepTimer) finish() {
 	fmt.Println(b.String())
 }
 
-// ShowDetails 重构最终版：两级缓存 + 浏览数高并发优化 + 无HEAT维护
+// ShowDetails 帖子详情：Service 层多级缓存 + 浏览数 Redis 计数。
 func ShowDetails(c *gin.Context) {
 	timing := newShowDetailStepTimer()
 	defer timing.finish()
 
-	db := common.GetDB()
 	var requestPostDetailsMsg PostDetailsMsg
-
-	// 绑定参数
 	if err := c.ShouldBindBodyWith(&requestPostDetailsMsg, binding.JSON); err != nil {
 		timing.step("bind_body")
-		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析失败")
+		apperr.WriteMsg(c, domain.ErrBadRequest, "参数解析失败")
 		return
 	}
 	timing.step("bind_body")
 
 	postID := requestPostDetailsMsg.PostID
-
 	viewer, ok := viewerFromAuth(c)
 	if !ok {
 		timing.step("load_viewer_from_auth")
-		response.Response(c, http.StatusNotFound, 404, nil, "无法解析当前用户")
+		apperr.WriteMsg(c, domain.ErrNotFound, "无法解析当前用户")
 		return
 	}
 	timing.step("load_viewer_from_auth")
 
-	// 校验帖子ID
 	if postID == 0 {
 		timing.setPostID(0)
 		timing.step("validate_post_id")
-		response.Response(c, http.StatusBadRequest, 404, nil, "接收到的postID为空")
+		apperr.WriteMsg(c, domain.ErrBadRequest, "接收到的postID为空")
 		return
 	}
 	timing.setPostID(postID)
 	timing.step("validate_post_id")
 
-	// ===================== 【核心：两级缓存读取冷数据】 =====================
-	var post model.Post
-	var user model.User
-	postIDInt := int(postID)
-	cacheKey := util.GetPostDetailKey(postIDInt)
-	baseExpire := 30 * time.Minute
-
-	// 调用你原有的两级缓存模板 L1 → L2 → DB
-	dtoObj, err := common.MultiLevelGet(cacheKey, func() (*dto.PostDetailCacheDTO, error) {
-
-		var dbPost model.Post
-		// 查询帖子+用户
-		err := db.Preload("User").Where("postID = ?", postID).First(&dbPost).Error
-		if err != nil {
-			return nil, err
-		}
-
-		key := util.GetPostBrowseCountKey(int(postID))
-		core.MyRedis.SetNX(context.Background(), key, dbPost.BrowseNum, 0).Err()
-
-		// 构建 DTO（解决time.Time反序列化崩溃）
-		var cacheUser model.User
-		if dbPost.UserID == 0 {
-			cacheUser = model.User{Name: "管理员", Phone: "11111111111"}
-		} else {
-			cacheUser = dbPost.User
-		}
-
-		var dto dto.PostDetailCacheDTO
-		dto.ConvertFromModel(dbPost, cacheUser)
-		return &dto, nil
-	}, baseExpire)
-	timing.step("multilevel_get")
-
+	detail, err := service.Posts.GetDetail(c.Request.Context(), int(postID), viewer.UserID)
+	timing.step("service_get_detail")
 	if err != nil {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
-		return
-	}
-
-	post, user = dtoObj.ConvertToModel()
-	timing.step("dto_to_model")
-
-	if !canViewPost(post, viewer.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		apperr.WriteMsg(c, err, "帖子不存在")
 		return
 	}
 	timing.step("check_visibility")
 
-	// ===================== 【浏览数高并发优化：本地聚合 + 批量同步】 =====================
-	post.BrowseNum = int(service.HotData.IncrBrowseCount(postIDInt))
-	timing.step("browse_incr")
-
-	// ===================== 以下所有逻辑 100% 完全不变 =====================
-	queryIsLiked := func() bool {
-		isLiked := false
-		var like model.Plike
-		db.Where("userID = ? AND ptargetID = ?", viewer.UserID, postID).First(&like)
-		if like.PlikeID != 0 {
-			isLiked = true
-		}
-		return isLiked
-	}
-
-	isLiked := queryIsLiked()
-	timing.step("query_plike")
-	isSaved := false
-	var save model.Psave
-	db.Where("userID = ? AND ptargetID = ?", viewer.UserID, postID).First(&save)
-	if save.PsaveID != 0 {
-		isSaved = true
-	}
-	timing.step("query_psave")
-
-	postDetailsResponse := PostDetailsResponse{
-		PostID:        uint(post.PostID),
-		UserID:        uint(user.UserID),
-		UserName:      user.Name,
-		UserScore:     user.Score,
-		UserTelephone: user.Phone,
-		UserAvatar:    user.AvatarURL,
-		UserIdentity:  user.Identity,
-		Title:         post.Title,
-		Content:       post.Ptext,
-		Like:          post.LikeNum,
-		Comment:       post.CommentNum,
-		PostTime:      post.PostTime,
-		IsSaved:       isSaved,
-		IsLiked:       isLiked,
-		Browse:        post.BrowseNum,
-		Heat:          post.Heat,
-		Photos:        post.Photos,
-		Tag:           post.Tag,
-		IsPrivate:     post.IsPrivate,
-	}
-	c.JSON(http.StatusOK, postDetailsResponse)
+	resp := postDetailToResponse(detail)
+	c.JSON(http.StatusOK, resp)
 	timing.step("write_json")
+}
+
+func postDetailToResponse(d *domain.PostDetail) PostDetailsResponse {
+	p, u := d.Post, d.Author
+	name, phone, avatar, identity, score := "", "", "", "", 0
+	userID := 0
+	if u != nil {
+		name, phone, avatar, identity, score = u.Name, u.Phone, u.AvatarURL, u.Identity, u.Score
+		userID = u.ID
+	}
+	return PostDetailsResponse{
+		PostID:        uint(p.ID),
+		UserID:        uint(userID),
+		UserName:      name,
+		UserScore:     score,
+		UserTelephone: phone,
+		UserAvatar:    avatar,
+		UserIdentity:  identity,
+		Title:         p.Title,
+		Content:       p.Content,
+		Like:          p.LikeNum,
+		Comment:       p.CommentNum,
+		PostTime:      p.PostTime,
+		IsSaved:       d.IsSaved,
+		IsLiked:       d.IsLiked,
+		Browse:        d.BrowseNum,
+		Heat:          p.Heat,
+		Photos:        p.Photos,
+		Tag:           p.Tag,
+		IsPrivate:     p.IsPrivate,
+	}
 }
 
 func UploadPhotos(c *gin.Context) {
