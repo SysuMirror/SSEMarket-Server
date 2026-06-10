@@ -20,4 +20,23 @@ type PostRepository interface {
 	AuthorsByIDs(ctx context.Context, userIDs []int) (map[int]*domain.User, error)
 	IsLiked(ctx context.Context, userID, postID int) (bool, error)
 	IsSaved(ctx context.Context, userID, postID int) (bool, error)
+	Create(ctx context.Context, post *domain.Post) error
+	Delete(ctx context.Context, postID int) error
+	UpdatePrivacy(ctx context.Context, postID int, isPrivate bool) error
+	UpdateLikeNum(ctx context.Context, postID int, delta int) error
+	UpdateHeat(ctx context.Context, postID int, delta float64) error
+	HasBrowsed(ctx context.Context, userID, postID int) (bool, error)
+	CreateBrowse(ctx context.Context, userID, postID int) error
+	DeleteSave(ctx context.Context, userID, postID int) error
+	CreateSave(ctx context.Context, userID, postID int) error
+	DeleteLike(ctx context.Context, userID, postID int) error
+	CreateLike(ctx context.Context, userID, postID int) error
+	ListUserProfile(ctx context.Context, targetUserID, viewerUserID, limit, offset int) ([]*domain.Post, error)
+	CountUserProfile(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
+	FindPublicByID(ctx context.Context, postID int) (*domain.Post, error)
+	ListAllTags(ctx context.Context) ([]*domain.Tag, error)
+	FindTagByName(ctx context.Context, name string) (*domain.Tag, error)
+	CreatePostNotice(ctx context.Context, receiver, sender int, noticeType, text string, target int) error
+	CreateFeedback(ctx context.Context, text, attachment string) (*domain.Feedback, error)
+	ListAllFeedback(ctx context.Context) ([]*domain.Feedback, error)
 }

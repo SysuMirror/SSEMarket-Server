@@ -2,24 +2,20 @@ package controller
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"io/ioutil"
 	"loginTest/api"
 	"loginTest/apperr"
-	"loginTest/common"
 	"loginTest/config"
-	"loginTest/core"
 	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/response"
 	"loginTest/service"
-	"loginTest/util"
 	"mime/multipart"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +24,6 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"gorm.io/gorm"
 )
 
 const (
@@ -47,10 +42,8 @@ type PostMsg struct {
 }
 
 func Post(c *gin.Context) {
-	db := common.GetDB()
 	var requestPostMsg PostMsg
 	c.Bind(&requestPostMsg)
-	// 获取参数
 	userTelephone := requestPostMsg.UserTelephone
 	title := requestPostMsg.Title
 	content := requestPostMsg.Content
@@ -58,107 +51,67 @@ func Post(c *gin.Context) {
 	photos := requestPostMsg.Photos
 	tagList := requestPostMsg.TagList
 	tags := strings.Split(tagList, "|")
-	tagString := strings.Join(tags, ",")
-	// 验证数据
+
 	if len(userTelephone) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "返回的手机号为空")
-		return
-	}
-	if !isTelephoneExist(db, userTelephone) {
-		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
 		return
 	}
 	if len(title) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题不能为空")
 		return
 	}
-	// 这里不能直接用len()否则会出现中文字符的计算错误
 	if utf8.RuneCountInString(title) > 30 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题最多为30个字")
 		return
 	}
-
 	if len(content) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "内容不能为空")
 		return
 	}
-
 	if utf8.RuneCountInString(content) > config.PostContentMaxRunes {
 		response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("内容最多为%d个字", config.PostContentMaxRunes))
 		return
 	}
-
 	if len(partition) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "分区不能为空")
 		return
 	}
 
-	// if api.GetSuggestion(title) == "Block" || api.GetSuggestion(content) == "Block" {
-	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "标题或内容可能含有不良信息")
-	// }
-
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+	tokenUserID := GetTokenUserID(c)
+	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
+	if err != nil || user == nil || user.ID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
 		return
 	}
-
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if user.Phone != userTelephone {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-
-	currentDateTime := time.Now()
-	if user.Banend.After(currentDateTime) {
+	if user.BanEnd.After(time.Now()) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得发帖")
 		return
 	}
-
 	if partition == CoursePartition {
 		response.Response(c, http.StatusBadRequest, 400, nil, "权限不足")
 		return
 	}
 
-	newPost := model.Post{
-		UserID:     int(user.UserID),
-		Partition:  partition,
-		Title:      title,
-		Ptext:      content,
-		LikeNum:    0,
-		CommentNum: 0,
-		BrowseNum:  0,
-		Heat:       0,
-		PostTime:   time.Now(),
-		Photos:     photos,
-		Tag:        tagString,
-		IsPrivate:  requestPostMsg.IsPrivate,
-	}
-	db.Create(&newPost)
-	common.BloomFilter.Add([]byte(strconv.FormatUint(uint64(newPost.PostID), 10)))
-
-	// 判断tag，看是否需要发通知
-	tempTag := model.Tag{}
-	db.Where("name = ?", tags[0]).First(&tempTag)
-	if tempTag.TagID == 0 || tempTag.Type != "course" {
-	} else {
-		receiver := model.User{}
-		db.Where("email = ?", tempTag.Value).First(&receiver)
-		fmt.Println("receiver:" + receiver.Name + " email:" + receiver.Email)
-		if receiver.UserID != 0 && receiver.Phone != userTelephone {
-			newNotice := model.Notice{
-				Receiver: receiver.UserID,
-				Sender:   user.UserID,
-				Type:     "post",
-				Ntext:    title,
-				Time:     time.Now(),
-				Read:     false,
-				Target:   newPost.PostID,
-			}
-			db.Create(&newNotice)
+	err = service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
+		UserID:    user.ID,
+		Title:     title,
+		Content:   content,
+		Partition: partition,
+		Photos:    photos,
+		Tags:      tags,
+		IsPrivate: requestPostMsg.IsPrivate,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "权限不足")
+			return
 		}
+		apperr.WriteMsg(c, err, "发帖失败")
+		return
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
@@ -200,10 +153,6 @@ type BrowseMeg struct {
 	PostType      string `json:"postType"`
 }
 
-func freshDB() *gorm.DB {
-	return common.GetDB().Session(&gorm.Session{})
-}
-
 // viewerFromAuth 从 JWT 中间件注入的上下文取当前用户（以 userID 为准，不用手机号）
 func viewerFromAuth(c *gin.Context) (model.User, bool) {
 	value, exists := c.Get("user")
@@ -215,126 +164,6 @@ func viewerFromAuth(c *gin.Context) (model.User, bool) {
 		return model.User{}, false
 	}
 	return user, true
-}
-
-func canViewPost(post model.Post, viewerUserID int) bool {
-	return !post.IsPrivate || post.UserID == viewerUserID
-}
-
-func applyPostVisibilityScope(query *gorm.DB, viewerUserID int) *gorm.DB {
-	return query.Where("(is_private = ? OR userID = ?)", false, viewerUserID)
-}
-
-func loadViewablePost(db *gorm.DB, postID int, viewerUserID int) (model.Post, bool) {
-	var post model.Post
-	db.Where("postID = ?", postID).First(&post)
-	if post.PostID == 0 || !canViewPost(post, viewerUserID) {
-		return post, false
-	}
-	return post, true
-}
-
-func canViewPostByPcommentID(db *gorm.DB, pcommentID int, viewerUserID int) bool {
-	var pcomment model.Pcomment
-	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
-	if pcomment.PcommentID == 0 {
-		return false
-	}
-	var post model.Post
-	db.Where("postID = ?", pcomment.PtargetID).First(&post)
-	return canViewPost(post, viewerUserID)
-}
-
-func canViewPostByCcommentID(db *gorm.DB, ccommentID int, viewerUserID int) bool {
-	var ccomment model.Ccomment
-	db.Where("ccommentID = ?", ccommentID).First(&ccomment)
-	if ccomment.CcommentID == 0 {
-		return false
-	}
-	var pcomment model.Pcomment
-	db.Where("pcommentID = ?", ccomment.CtargetID).First(&pcomment)
-	if pcomment.PcommentID == 0 {
-		return false
-	}
-	var post model.Post
-	db.Where("postID = ?", pcomment.PtargetID).First(&post)
-	return canViewPost(post, viewerUserID)
-}
-
-func buildPostResponse(post model.Post, user model.User, isSaved bool, isLiked bool) PostResponse {
-	return PostResponse{
-		PostID:        uint(post.PostID),
-		Partition:     post.Partition,
-		UserID:        post.UserID,
-		UserName:      user.Name,
-		UserScore:     user.Score,
-		UserTelephone: user.Phone,
-		UserAvatar:    user.AvatarURL,
-		UserIdentity:  user.Identity,
-		Title:         post.Title,
-		Content:       post.Ptext,
-		Like:          post.LikeNum,
-		Comment:       post.CommentNum,
-		Browse:        post.BrowseNum,
-		Heat:          post.Heat,
-		PostTime:      post.PostTime,
-		IsSaved:       isSaved,
-		IsLiked:       isLiked,
-		Photos:        post.Photos,
-		Tag:           post.Tag,
-		IsPrivate:     post.IsPrivate,
-	}
-}
-
-func parseBrowseTime(s string, endOfDay bool) (time.Time, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, false
-	}
-	layouts := []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-		"2006-01-02",
-	}
-	for _, layout := range layouts {
-		t, err := time.ParseInLocation(layout, s, time.Local)
-		if err != nil {
-			continue
-		}
-		if layout == "2006-01-02" && endOfDay {
-			t = t.Add(24*time.Hour - time.Nanosecond)
-		}
-		return t, true
-	}
-	return time.Time{}, false
-}
-
-func browseApplyTimeRange(query *gorm.DB, timeFrom, timeTo string) *gorm.DB {
-	if t, ok := parseBrowseTime(timeFrom, false); ok {
-		query = query.Where("post_time >= ?", t)
-	}
-	if t, ok := parseBrowseTime(timeTo, true); ok {
-		query = query.Where("post_time <= ?", t)
-	}
-	return query
-}
-
-func browseApplyOrder(query *gorm.DB, orderBy string) *gorm.DB {
-	switch orderBy {
-	case "time_asc":
-		return query.Order("post_time ASC")
-	case "like_desc":
-		return query.Order("like_num DESC, postID DESC")
-	case "like_asc":
-		return query.Order("like_num ASC, postID DESC")
-	case "comment_desc":
-		return query.Order("comment_num DESC, postID DESC")
-	case "comment_asc":
-		return query.Order("comment_num ASC, postID DESC")
-	default:
-		return query.Order("post_time DESC")
-	}
 }
 
 func Browse(c *gin.Context) {
@@ -417,7 +246,6 @@ type UserProfilePostsMsg struct {
 
 // UserProfilePosts 个人主页发帖列表；对方开启「隐藏发帖」且浏览者非本人时返回空。
 func UserProfilePosts(c *gin.Context) {
-	db := freshDB()
 	var req UserProfilePostsMsg
 	_ = c.Bind(&req)
 	if req.TargetUserID <= 0 {
@@ -429,52 +257,21 @@ func UserProfilePosts(c *gin.Context) {
 		c.JSON(http.StatusOK, []PostResponse{})
 		return
 	}
-	var target model.User
-	if err := db.Where("userID = ?", req.TargetUserID).First(&target).Error; err != nil {
-		c.JSON(http.StatusOK, []PostResponse{})
+	items, err := service.Posts.UserProfilePosts(c.Request.Context(), domain.UserProfilePostsFilter{
+		TargetUserID: req.TargetUserID,
+		ViewerUserID: viewer.UserID,
+		Limit:        req.Limit,
+		Offset:       req.Offset,
+	})
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	if target.HideProfilePosts && viewer.UserID != target.UserID {
-		c.JSON(http.StatusOK, []PostResponse{})
-		return
+	responses := make([]PostResponse, 0, len(items))
+	for _, item := range items {
+		responses = append(responses, browseItemToResponse(item))
 	}
-	limit, offset := req.Limit, req.Offset
-	if limit <= 0 || limit > 50 {
-		limit = 15
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	var posts []model.Post
-	query := db.Where("userID = ?", target.UserID)
-	if viewer.UserID != target.UserID {
-		query = query.Where("is_private = ?", false)
-	}
-	query.
-		Order("postID DESC").Offset(offset).Limit(limit).Find(&posts)
-	if len(posts) == 0 {
-		c.JSON(http.StatusOK, []PostResponse{})
-		return
-	}
-	postIDs := make([]int, 0, len(posts))
-	userIDs := make(map[int]struct{})
-	for _, p := range posts {
-		postIDs = append(postIDs, p.PostID)
-		if p.UserID != 0 {
-			userIDs[p.UserID] = struct{}{}
-		}
-	}
-	savedSet := browseBatchSavedSet(db, viewer.UserID, postIDs)
-	likedSet := browseBatchLikedSet(db, viewer.UserID, postIDs)
-	userMap := browseBatchUserMap(db, userIDs)
-	postResponses := make([]PostResponse, 0, len(posts))
-	for _, post := range posts {
-		u := browseGetUserForPost(userMap, post.UserID)
-		_, isSaved := savedSet[post.PostID]
-		_, isLiked := likedSet[post.PostID]
-		postResponses = append(postResponses, buildPostResponse(post, u, isSaved, isLiked))
-	}
-	c.JSON(http.StatusOK, postResponses)
+	c.JSON(http.StatusOK, responses)
 }
 
 type UserProfilePostNumMsg struct {
@@ -484,7 +281,6 @@ type UserProfilePostNumMsg struct {
 
 // UserProfilePostNum 个人主页可展示的发帖总数（不含「打分」）；隐藏时对非本人返回 0。
 func UserProfilePostNum(c *gin.Context) {
-	db := freshDB()
 	var req UserProfilePostNumMsg
 	_ = c.Bind(&req)
 	var count int64
@@ -497,158 +293,12 @@ func UserProfilePostNum(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"Postcount": count})
 		return
 	}
-	var target model.User
-	if err := db.Where("userID = ?", req.TargetUserID).First(&target).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"Postcount": count})
+	count, err := service.Posts.UserProfilePostNum(c.Request.Context(), req.TargetUserID, viewer.UserID)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	if target.HideProfilePosts && viewer.UserID != target.UserID {
-		c.JSON(http.StatusOK, gin.H{"Postcount": 0})
-		return
-	}
-	query := db.Model(&model.Post{}).Where("userID = ?", target.UserID)
-	if viewer.UserID != target.UserID {
-		query = query.Where("is_private = ?", false)
-	}
-	query.Count(&count)
 	c.JSON(http.StatusOK, gin.H{"Postcount": count})
-}
-
-func browseFetchPosts(db *gorm.DB, req *BrowseMeg, temUser *model.User) []model.Post {
-	limit, offset := req.Limit, req.Offset
-	if limit <= 0 {
-		limit = 15
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	partition := req.Partition
-	searchinfo := req.Searchinfo
-	tag := req.Tag
-	searchsort := req.Searchsort
-	if searchsort == "" {
-		searchsort = "home"
-	}
-
-	if searchsort == "save" {
-		var saves []model.Psave
-		db.Model(&model.Psave{}).
-			Where("userID = ?", temUser.UserID).
-			Order("psaveID DESC").
-			Offset(offset).Limit(limit).
-			Find(&saves)
-		if len(saves) == 0 {
-			return nil
-		}
-		postIDs := make([]int, 0, len(saves))
-		for _, s := range saves {
-			postIDs = append(postIDs, s.PtargetID)
-		}
-		var posts []model.Post
-		applyPostVisibilityScope(db.Model(&model.Post{}).Where("postID IN (?)", postIDs), temUser.UserID).Find(&posts)
-		postMap := make(map[int]model.Post, len(posts))
-		for _, p := range posts {
-			postMap[p.PostID] = p
-		}
-		ordered := make([]model.Post, 0, len(saves))
-		for _, s := range saves {
-			if p, ok := postMap[s.PtargetID]; ok && p.PostID != 0 {
-				ordered = append(ordered, p)
-			}
-		}
-		return ordered
-	}
-
-	var posts []model.Post
-	base := db.Model(&model.Post{})
-	base = browseApplyTimeRange(base, req.TimeFrom, req.TimeTo)
-	base = applyPostVisibilityScope(base, temUser.UserID)
-	if searchsort == "home" {
-		base = browseApplyOrder(base, req.OrderBy)
-	} else {
-		base = base.Order("postID DESC")
-	}
-	if searchsort == "history" {
-		base = base.Where("userID = ?", temUser.UserID)
-		base.Offset(offset).Limit(limit).Find(&posts)
-		return posts
-	}
-	if partition == "主页" || len(partition) == 0 {
-		if len(searchinfo) > 0 {
-			if tag == "" {
-				base = base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%")
-			} else {
-				base = base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag)
-			}
-		}
-	} else if partition == "优质贴" {
-		base = base.Where("is_high_quality = ?", 1)
-	} else {
-		base = base.Where("`partition` = ?", partition)
-		if len(searchinfo) > 0 {
-			if tag == "" {
-				base = base.Where("(title LIKE ? OR ptext LIKE ?)", "%"+searchinfo+"%", "%"+searchinfo+"%")
-			} else {
-				base = base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag)
-			}
-		}
-	}
-	base.Offset(offset).Limit(limit).Find(&posts)
-	return posts
-}
-
-func browseBatchSavedSet(db *gorm.DB, userID int, postIDs []int) map[int]struct{} {
-	if len(postIDs) == 0 {
-		return nil
-	}
-	var saves []model.Psave
-	db.Where("userID = ? AND ptargetID IN (?)", userID, postIDs).Find(&saves)
-	set := make(map[int]struct{}, len(saves))
-	for _, s := range saves {
-		set[s.PtargetID] = struct{}{}
-	}
-	return set
-}
-
-func browseBatchLikedSet(db *gorm.DB, userID int, postIDs []int) map[int]struct{} {
-	if len(postIDs) == 0 {
-		return nil
-	}
-	var likes []model.Plike
-	db.Where("userID = ? AND ptargetID IN (?)", userID, postIDs).Find(&likes)
-	set := make(map[int]struct{}, len(likes))
-	for _, l := range likes {
-		set[l.PtargetID] = struct{}{}
-	}
-	return set
-}
-
-func browseBatchUserMap(db *gorm.DB, userIDs map[int]struct{}) map[int]model.User {
-	if len(userIDs) == 0 {
-		return nil
-	}
-	ids := make([]int, 0, len(userIDs))
-	for id := range userIDs {
-		ids = append(ids, id)
-	}
-	var users []model.User
-	db.Where("userID IN (?)", ids).Find(&users)
-	m := make(map[int]model.User, len(users))
-	for _, u := range users {
-		m[u.UserID] = u
-	}
-	return m
-}
-
-// browseGetUserForPost 从 userMap 取发帖用户信息；userID==0 时返回“管理员”占位。
-func browseGetUserForPost(userMap map[int]model.User, userID int) model.User {
-	if userID == 0 {
-		return model.User{Name: "管理员", Phone: "11111111111"}
-	}
-	if u, ok := userMap[userID]; ok {
-		return u
-	}
-	return model.User{}
 }
 
 func GetPostNum(c *gin.Context) {
@@ -695,24 +345,24 @@ func UpdatePostPrivacy(c *gin.Context) {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	db := freshDB()
 	var req PostPrivacyMsg
 	if err := c.Bind(&req); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
 		return
 	}
-	var post model.Post
-	db.Where("postID = ?", req.PostID).First(&post)
-	if post.PostID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
+	err := service.Posts.UpdatePrivacy(c.Request.Context(), int(req.PostID), viewer.UserID, req.IsPrivate)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
+			return
+		}
+		if errors.Is(err, domain.ErrForbidden) {
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+			return
+		}
+		apperr.WriteMsg(c, err, "更新失败")
 		return
 	}
-	if post.UserID != viewer.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
-		return
-	}
-	db.Model(&post).Update("is_private", req.IsPrivate)
-	service.InvalidatePostDetail(int(req.PostID))
 	response.Success(c, gin.H{"isPrivate": req.IsPrivate}, "更新成功")
 }
 
@@ -723,52 +373,27 @@ type SaveMsg struct {
 }
 
 func UpdateSave(c *gin.Context) {
-	db := common.GetDB()
 	var requestSaveMsg SaveMsg
 	c.Bind(&requestSaveMsg)
 	userTelephone := requestSaveMsg.UserTelephone
-	postID := requestSaveMsg.PostID
-	//isSaved := requestSaveMsg.IsSaved
+	postID := int(requestSaveMsg.PostID)
 
-	// Find the user by telephone
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+	tokenUserID := GetTokenUserID(c)
+	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	var post model.Post
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if user.Phone != userTelephone {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	db.Where("postID = ?", postID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
-	if !canViewPost(post, user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
-		return
-	}
-
-	isSaved := false
-	var save model.Psave
-	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&save)
-	if save.PsaveID != 0 {
-		isSaved = true
-	}
-
-	if isSaved {
-		db.Delete(&save)
-	} else {
-		newSave := model.Psave{
-			UserID:    user.UserID,
-			PtargetID: post.PostID,
+	err = service.Posts.ToggleSave(c.Request.Context(), user.ID, postID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
 		}
-		if newSave.UserID != 0 && newSave.PtargetID != 0 {
-			db.Create(&newSave)
-		}
+		apperr.WriteMsg(c, err, "操作失败")
 	}
 }
 
@@ -779,63 +404,28 @@ type LikeMsg struct {
 }
 
 func UpdateLike(c *gin.Context) {
-	db := common.GetDB()
 	var requestLikeMsg LikeMsg
 	c.Bind(&requestLikeMsg)
 	userTelephone := requestLikeMsg.UserTelephone
-	postID := requestLikeMsg.PostID
+	postID := int(requestLikeMsg.PostID)
 
-	// Find the user by telephone
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+	tokenUserID := GetTokenUserID(c)
+	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	var post model.Post
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if user.Phone != userTelephone {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	db.Where("postID = ?", postID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
-	if !canViewPost(post, user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
-		return
-	}
-
-	isLiked := false
-	var like model.Plike
-	db.Where("userID = ? AND ptargetID = ?", user.UserID, post.PostID).First(&like)
-	if like.PlikeID != 0 {
-		isLiked = true
-	}
-
-	if isLiked { //已点赞
-		db.Model(&post).Update("like_num", post.LikeNum-1)
-		db.Delete(&like)
-		service.AdjustUserReceivedLike(db, post.UserID, -1)
-	} else { //未点赞
-		newLike := model.Plike{
-			UserID:    user.UserID,
-			PtargetID: post.PostID,
-			Time:      time.Now(),
+	err = service.Posts.ToggleLike(c.Request.Context(), user.ID, postID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
 		}
-		if newLike.UserID != 0 && newLike.PtargetID != 0 {
-			db.Model(&post).Update("like_num", post.LikeNum+1)
-			// 在这里设置 点赞 的权重
-			weightLike := float64(3)
-			db.Model(&post).Update("heat", post.Heat+weightLike)
-			db.Create(&newLike)
-			service.AdjustUserReceivedLike(db, post.UserID, 1)
-		}
+		apperr.WriteMsg(c, err, "操作失败")
 	}
-
-	cacheKey := util.GetPostDetailKey(int(postID))
-	common.DelMultiLevelCache(cacheKey)
 }
 
 type BrowseMsg struct {
@@ -848,36 +438,16 @@ type BrowseMsg struct {
 // UpdateBrowseNum 仅记录「该用户是否已浏览过该帖」（Pbrowse）并更新 heat。
 // 帖子浏览人次 browse_num 仅由 ShowDetails 中的 HotData.IncrBrowseCount（Redis）及 syncToDB 写入 MySQL，避免双写与随机注水。
 func UpdateBrowseNum(c *gin.Context) {
-	db := common.GetDB()
 	var requestBrowseMsg BrowseMsg
 	c.Bind(&requestBrowseMsg)
 	userTelephone := requestBrowseMsg.UserTelephone
-	postID := requestBrowseMsg.PostID
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+	postID := int(requestBrowseMsg.PostID)
+
+	user, err := service.Users.GetByID(c.Request.Context(), GetTokenUserID(c))
+	if err != nil || user == nil || user.ID == 0 || user.Phone != userTelephone {
 		return
 	}
-	var post model.Post
-	db.Where("postID = ?", postID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
-	if !canViewPost(post, user.UserID) {
-		return
-	}
-	var browsed model.Pbrowse
-	db.Where("userID = ? AND ptargetID = ?", user.UserID, postID).First(&browsed)
-	if browsed.PbrowseID == 0 {
-		weightBrowse := float64(1)
-		db.Model(&post).Update("heat", post.Heat+weightBrowse)
-		newBrowse := model.Pbrowse{
-			UserID:    user.UserID,
-			PtargetID: post.PostID,
-			Time:      time.Now(),
-		}
-		db.Create(&newBrowse)
-	}
+	_ = service.Posts.RecordBrowse(c.Request.Context(), user.ID, postID)
 }
 
 type IDmsg struct {
@@ -886,25 +456,23 @@ type IDmsg struct {
 }
 
 func DeletePost(c *gin.Context) {
-	db := common.GetDB()
 	var ID IDmsg
 	c.Bind(&ID)
-	PostID := ID.PostID
-	var post model.Post
-	db.Where("postID = ?", PostID).First(&post)
-	if post.PostID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "需要删除的帖子不存在")
-		return
-	}
-	// 获取token中的用户标识符
+	postID := int(ID.PostID)
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != post.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+	err := service.Posts.Delete(c.Request.Context(), postID, tokenUserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "需要删除的帖子不存在")
+			return
+		}
+		if errors.Is(err, domain.ErrForbidden) {
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+			return
+		}
+		apperr.WriteMsg(c, err, "删除失败")
 		return
 	}
-	service.OnPostDeleted(db, &post)
-	db.Delete(&post)
-	common.DelMultiLevelCache(util.GetPostDetailKey(int(PostID)))
 	c.JSON(http.StatusOK, gin.H{"message": "帖子删除成功"})
 }
 
@@ -916,45 +484,39 @@ type Reportmsg struct {
 }
 
 func SubmitReport(c *gin.Context) {
-	db := common.GetDB()
 	var reportmsg Reportmsg
 	c.Bind(&reportmsg)
-	TargetID := reportmsg.TargetID
-	Targettype := reportmsg.Targettype
-	userTelephone := reportmsg.UserTelephone
-	Reason := reportmsg.Reason
-	if len(Reason) == 0 {
+	if len(reportmsg.Reason) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "举报内容不能为空")
 		return
 	}
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+	tokenUserID := GetTokenUserID(c)
+	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if user.Phone != reportmsg.UserTelephone {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	if Targettype == "post" {
-		if _, ok := loadViewablePost(db, int(TargetID), user.UserID); !ok {
+	err = service.Posts.SubmitReport(c.Request.Context(), domain.SubmitReportInput{
+		TargetID:   int(reportmsg.TargetID),
+		TargetType: reportmsg.Targettype,
+		UserID:     user.ID,
+		Reason:     reportmsg.Reason,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 			return
 		}
+		if errors.Is(err, domain.ErrBadRequest) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "举报内容不能为空")
+			return
+		}
+		apperr.WriteMsg(c, err, "举报失败")
+		return
 	}
-	newSue := model.Sue{
-		Targettype: Targettype,
-		TargetID:   int(TargetID),
-		UserID:     int(user.UserID),
-		User:       user,
-		Reason:     Reason,
-		Time:       time.Now(),
-		Status:     "wait",
-		Finish:     false,
-	}
-	db.Create(&newSue)
 	response.Response(c, http.StatusOK, 200, nil, "举报发送成功")
 }
 
@@ -1228,55 +790,46 @@ func UploadZip(c *gin.Context) {
 }
 
 func SubmitFeedback(c *gin.Context) {
-	db := common.GetDB()
-
-	// Create a struct to hold the incoming JSON body
 	var feedbackInput struct {
 		Ftext      string `json:"ftext"`
 		Attachment string `json:"attachment"`
 	}
-
-	// Bind the incoming JSON to the struct
 	if err := c.Bind(&feedbackInput); err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Invalid request body")
 		return
 	}
-
-	// Create a new feedback entry
-	feedback := model.Feedback{
-		Ftext:      feedbackInput.Ftext,
-		Attachment: feedbackInput.Attachment,
-		Time:       time.Now(),
-		Status:     "wait",
-	}
-
-	if err := db.Create(&feedback).Error; err != nil || feedback.FeedbackID == 0 {
+	feedback, err := service.Posts.SubmitFeedback(c.Request.Context(), feedbackInput.Ftext, feedbackInput.Attachment)
+	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "Failed to submit feedback")
 		return
 	}
-
-	// Convert to JSON and respond
 	response.Success(c, gin.H{
-		"feedbackID": feedback.FeedbackID,
-		"ftext":      feedback.Ftext,
+		"feedbackID": feedback.ID,
+		"ftext":      feedback.Text,
 		"attachment": feedback.Attachment,
 	}, "Feedback submitted successfully")
 }
 
 func GetAllFeedback(c *gin.Context) {
-	db := common.GetDB()
-
-	var feedbacks []model.Feedback
-	db.Find(&feedbacks)
-
-	if len(feedbacks) == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "No feedback found")
+	list, err := service.Posts.ListAllFeedback(c.Request.Context())
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "No feedback found")
+			return
+		}
+		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	// 对feedbacks按照时间进行排序
-	sort.Slice(feedbacks, func(i, j int) bool {
-		return feedbacks[j].Time.Before(feedbacks[i].Time)
-	})
+	feedbacks := make([]model.Feedback, 0, len(list))
+	for _, f := range list {
+		feedbacks = append(feedbacks, model.Feedback{
+			FeedbackID: f.ID,
+			Ftext:      f.Text,
+			Attachment: f.Attachment,
+			Time:       f.Time,
+			Status:     f.Status,
+		})
+	}
 	response.Success(c, gin.H{"feedbacks": feedbacks}, "Feedback retrieved successfully")
 }
 
@@ -1316,65 +869,48 @@ type PostInfo struct {
 }
 
 func CalculateHeat(c *gin.Context) {
-	db := common.GetDB()
-	// Redis ZSet的key
-	redisKey := "hot_posts_zset"
-	ctx := context.Background()
-
-	// 从Redis中获取热度前10的帖子
-	topPosts, err := core.MyRedis.ZRevRangeWithScores(ctx, redisKey, 0, 19).Result()
+	items, err := service.Posts.CalculateHeat(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取热度前10帖子失败"})
 		return
 	}
-
-	var heatResponsesTop10 []HeatResponse
-
-	// 处理 Redis 返回的数据（跳过私密帖，最多返回 10 条公开帖）
-	for _, post := range topPosts {
-		if len(heatResponsesTop10) >= 10 {
-			break
-		}
-		var postInfo PostInfo
-		err := json.Unmarshal([]byte(post.Member.(string)), &postInfo)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "解析帖子信息失败"})
-			return
-		}
-
-		var dbPost model.Post
-		if err := db.Where("postID = ? AND is_private = ?", postInfo.PostID, false).First(&dbPost).Error; err != nil {
-			continue
-		}
-
-		heatResponse := HeatResponse{
-			PostID: postInfo.PostID,
-			Title:  dbPost.Title,
-			Heat:   postInfo.BrowseNum,
-		}
-		heatResponsesTop10 = append(heatResponsesTop10, heatResponse)
+	heatResponsesTop10 := make([]HeatResponse, 0, len(items))
+	for _, item := range items {
+		heatResponsesTop10 = append(heatResponsesTop10, HeatResponse{
+			PostID: item.PostID,
+			Title:  item.Title,
+			Heat:   item.Heat,
+		})
 	}
-
 	c.JSON(http.StatusOK, heatResponsesTop10)
 }
 
 func GetTags(c *gin.Context) {
-	//从中间件存入的user中获取userID
 	value, exists := c.Get("user")
 	if !exists {
 		response.Response(c, http.StatusBadRequest, 400, nil, "检测不到用户，无法访问")
 		return
 	}
-	var user model.User
-	user = value.(model.User)
+	user := value.(model.User)
 	if user.UserID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户错误")
 		return
 	}
-	db := common.GetDB()
-	// 读取tag表
-	var tags []model.Tag
-	db.Find(&tags)
+	tagList, err := service.Posts.ListTags(c.Request.Context())
+	if err != nil {
+		apperr.WriteMsg(c, err, "获取tag列表失败")
+		return
+	}
+	tags := make([]model.Tag, 0, len(tagList))
+	for _, t := range tagList {
+		tags = append(tags, model.Tag{
+			TagID: t.ID,
+			Name:  t.Name,
+			Value: t.Value,
+			Type:  t.Type,
+			Num:   t.Num,
+		})
+	}
 	response.Success(c, gin.H{"tags": tags}, "获取tag列表成功！")
 }
 func GetTitle(c *gin.Context) {

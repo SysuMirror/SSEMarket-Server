@@ -1,10 +1,14 @@
 package middleware
 
 import (
-	"loginTest/common"
-	"loginTest/model"
+	"errors"
 	"net/http"
 	"strings"
+
+	"loginTest/common"
+	"loginTest/domain"
+	"loginTest/model"
+	"loginTest/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -49,23 +53,32 @@ func OAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 验证用户是否存在
-		db := common.GetDB()
-		user := model.User{}
-		db.Where("userID = ?", userID).First(&user)
-		if user.UserID == 0 {
+		u, err := service.Users.GetByID(ctx.Request.Context(), userID)
+		if err != nil || u == nil || u.ID == 0 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "用户不存在"})
 			ctx.Abort()
 			return
 		}
+		user := service.DomainUserToModel(u)
 
-		// 验证应用是否存在且激活
-		app := model.OAuth2App{}
-		db.Where("app_id = ? AND is_active = ?", appID, true).First(&app)
-		if app.AppID == "" {
-			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "OAuth2应用不存在或未激活"})
+		appDomain, err := service.Users.CheckOAuth2App(ctx.Request.Context(), appID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "OAuth2应用不存在或未激活"})
+			} else {
+				ctx.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "OAuth2应用校验失败"})
+			}
 			ctx.Abort()
 			return
+		}
+		app := model.OAuth2App{
+			AppID:       appDomain.AppID,
+			AppName:     appDomain.AppName,
+			AppSecret:   appDomain.AppSecret,
+			AppIcon:     appDomain.AppIcon,
+			RedirectURI: appDomain.RedirectURI,
+			Description: appDomain.Description,
+			IsActive:    true,
 		}
 
 		// 将用户信息、应用信息和权限范围写入上下文

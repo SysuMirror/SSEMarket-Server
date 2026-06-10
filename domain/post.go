@@ -58,6 +58,65 @@ type AuthTokens struct {
 	User         *User
 }
 
+// PostCreateInput 发帖入参。
+type PostCreateInput struct {
+	UserID    int
+	Title     string
+	Content   string
+	Partition string
+	Photos    string
+	Tags      []string
+	IsPrivate bool
+}
+
+// UserProfilePostsFilter 个人主页发帖列表查询。
+type UserProfilePostsFilter struct {
+	TargetUserID int
+	ViewerUserID int
+	Limit        int
+	Offset       int
+}
+
+// SubmitReportInput 举报入参。
+type SubmitReportInput struct {
+	TargetID   int
+	TargetType string
+	UserID     int
+	Reason     string
+}
+
+// Tag 标签实体。
+type Tag struct {
+	ID    int
+	Name  string
+	Value string
+	Type  string
+	Num   int
+}
+
+// Feedback 反馈实体。
+type Feedback struct {
+	ID         int
+	Text       string
+	Attachment string
+	Time       time.Time
+	Status     string
+}
+
+// HeatItem 热度榜单项。
+type HeatItem struct {
+	PostID uint
+	Title  string
+	Heat   float64
+}
+
+// HotPostZSetMember Redis 热度 ZSet 成员 JSON。
+type HotPostZSetMember struct {
+	PostID    uint    `json:"postID"`
+	Title     string  `json:"title"`
+	BrowseNum float64 `json:"browseNum"`
+}
+
 // RegisterInput 注册入参（密码为明文，Controller 负责解密）。
 type RegisterInput struct {
 	Name     string

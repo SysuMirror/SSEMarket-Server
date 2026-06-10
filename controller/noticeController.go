@@ -1,10 +1,11 @@
 package controller
 
 import (
-	"loginTest/common"
 	"loginTest/config"
+	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/response"
+	"loginTest/service"
 	"net/http"
 	"net/smtp"
 	"strconv"
@@ -40,9 +41,24 @@ type NoticeNumResponse struct {
 	ReadTotalNum   int `json:"readTotalNum"`
 }
 
+func noticeItemToResponse(item domain.NoticeItem) NoticeResponse {
+	return NoticeResponse{
+		NoticeID:     item.NoticeID,
+		ReceiverName: item.ReceiverName,
+		SenderName:   item.SenderName,
+		SenderAvatar: item.SenderAvatar,
+		SenderID:     item.SenderID,
+		Type:         item.Type,
+		Content:      item.Content,
+		Read:         item.Read,
+		PostID:       item.PostID,
+		Target:       item.Target,
+		PcommentID:   item.PcommentID,
+		Time:         item.Time,
+	}
+}
+
 func GetNotice(c *gin.Context) {
-	db := common.GetDB()
-	//从中间件存入的user中获取userID
 	value, exisits := c.Get("user")
 	pageSizeStr := c.Query("pageSize")
 	requireIDStr := c.Query("requireID")
@@ -54,132 +70,58 @@ func GetNotice(c *gin.Context) {
 	if !exisits {
 		response.Response(c, http.StatusBadRequest, 400, nil, "游客无法访问通知")
 		return
-	} else {
-		user = value.(model.User)
 	}
-	//执行操作，分页返回通知
-	var notices []model.Notice
-	var total int64
-	var unreadTotal int64
-	// requireID==0说明是首次查询,返回pagesize条通知,计算totalNum
-	if requireID == 0 {
-		db.Model(&model.Notice{}).Where("receiver =?", user.UserID).Count(&total)
-		db.Model(&model.Notice{}).Where("receiver =? AND `read` =?", user.UserID, read).Count(&unreadTotal)
-		db.Where("receiver =? AND `read` =?", user.UserID, read).Order("noticeID DESC").Limit(pageSize).Find(&notices)
-	} else { //否则查询比requireID小的通知
-		db.Where("receiver =? AND `read` =? AND noticeID < ?", user.UserID, read, requireID).Order("noticeID DESC").Limit(pageSize).Find(&notices)
+	user = value.(model.User)
+
+	page, err := service.Notices.List(c.Request.Context(), user.UserID, read, requireID, pageSize, user.Name)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, err.Error())
+		return
 	}
-	if len(notices) == 0 {
+	if len(page.NoticeList) == 0 {
 		response.Response(c, http.StatusOK, 201, nil, "没有更多通知")
 		return
-	} else if len(notices) < 5 {
-
 	}
-	var noticeGet NoticeGet
-	noticeGet.TotalNum = int(total)
-	noticeGet.LastID = notices[len(notices)-1].NoticeID
-	for _, notice := range notices {
-		var temuser model.User
-		db.Where("userID =?", notice.Sender).First(&temuser)
-		var tempcomment model.Pcomment
-		if notice.Type == "ccomment" {
-			var temccoment model.Ccomment
-			db.Where("ccommentID=?", notice.Target).First(&temccoment)
-			db.Where("pcommentID =?", temccoment.CtargetID).First(&tempcomment)
-			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
-				NoticeID:     notice.NoticeID,
-				ReceiverName: user.Name,
-				SenderName:   temuser.Name,
-				SenderAvatar: temuser.AvatarURL,
-				SenderID:     notice.Sender,
-				Type:         notice.Type,
-				Content:      notice.Ntext,
-				Read:         notice.Read,
-				Target:       notice.Target,
-				PcommentID:   temccoment.CtargetID,
-				PostID:       tempcomment.PtargetID,
-				Time:         temccoment.Time,
-			})
-		} else if notice.Type == "pcomment" {
-			db.Where("pcommentID =?", notice.Target).First(&tempcomment)
-			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
-				NoticeID:     notice.NoticeID,
-				ReceiverName: user.Name,
-				SenderName:   temuser.Name,
-				SenderAvatar: temuser.AvatarURL,
-				SenderID:     notice.Sender,
-				Type:         notice.Type,
-				Content:      notice.Ntext,
-				Read:         notice.Read,
-				Target:       notice.Target,
-				PostID:       tempcomment.PtargetID,
-				Time:         tempcomment.Time,
-			})
-		} else if notice.Type == "post" {
-			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
-				NoticeID:     notice.NoticeID,
-				ReceiverName: user.Name,
-				SenderName:   temuser.Name,
-				SenderAvatar: temuser.AvatarURL,
-				SenderID:     notice.Sender,
-				Type:         notice.Type,
-				Content:      notice.Ntext,
-				Read:         notice.Read,
-				Target:       notice.Target,
-				PostID:       notice.Target,
-				Time:         notice.Time,
-			})
-		} else {
-			noticeGet.NoticeList = append(noticeGet.NoticeList, NoticeResponse{
-				NoticeID:     notice.NoticeID,
-				ReceiverName: user.Name,
-				SenderName:   temuser.Name,
-				SenderAvatar: temuser.AvatarURL,
-				SenderID:     notice.Sender,
-				Type:         notice.Type,
-				Content:      notice.Ntext,
-				Read:         notice.Read,
-				Target:       notice.Target,
-				Time:         notice.Time,
-			})
-		}
 
+	noticeGet := NoticeGet{
+		TotalNum:       page.TotalNum,
+		LastID:         page.LastID,
+		UnreadTotalNum: page.UnreadTotalNum,
+	}
+	for _, item := range page.NoticeList {
+		noticeGet.NoticeList = append(noticeGet.NoticeList, noticeItemToResponse(item))
 	}
 	c.JSON(http.StatusOK, &noticeGet)
 }
 
 func GetNoticeNum(c *gin.Context) {
-	db := common.GetDB()
-	//从中间件存入的user中获取userID
 	value, exisits := c.Get("user")
 	var user model.User
 	if !exisits {
 		response.Response(c, http.StatusBadRequest, 400, nil, "游客无法获得通知数量")
 		return
-	} else {
-		user = value.(model.User)
 	}
-	var noticeNum NoticeNumResponse
-	var readNum int64
-	var unreadNum int64
-	db.Model(&model.Notice{}).Where("receiver =? AND `read` =0", user.UserID).Count(&unreadNum)
-	db.Model(&model.Notice{}).Where("receiver =? AND `read` =1", user.UserID).Count(&readNum)
-	noticeNum.TotalNum = int(readNum + unreadNum)
-	noticeNum.ReadTotalNum = int(readNum)
-	noticeNum.UnreadTotalNum = int(unreadNum)
-	c.JSON(http.StatusOK, &noticeNum)
+	user = value.(model.User)
+
+	counts, err := service.Notices.GetCounts(c.Request.Context(), user.UserID)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, &NoticeNumResponse{
+		TotalNum:       counts.TotalNum,
+		ReadTotalNum:   counts.ReadTotalNum,
+		UnreadTotalNum: counts.UnreadTotalNum,
+	})
 }
 
 func ReadNotice(c *gin.Context) {
-	noticeID := c.Param("noticeID")
-	db := common.GetDB()
-	// Update notice data in database to set 'read' field to true
-	err := db.Model(&model.Notice{}).Where("noticeID = ?", noticeID).Update("read", true).Error
+	noticeID, _ := strconv.Atoi(c.Param("noticeID"))
+	err := service.Notices.MarkRead(c.Request.Context(), noticeID)
 	if err != nil {
 		c.JSON(500, gin.H{"更新已读出现error": err.Error()})
 		return
 	}
-
 	c.JSON(200, gin.H{"status": "success"})
 }
 
@@ -195,7 +137,6 @@ func EmailNotice(c *gin.Context) {
 		response.Fail(c, nil, "管理员不存在")
 	}
 
-	// 检查通知邮件配置是否已初始化
 	if config.NoticeEmailUsername == "" || config.NoticePassword == "" || config.NoticeAddr == "" || config.NoticeHost == "" {
 		response.Fail(c, nil, "通知邮件配置未正确初始化")
 		return

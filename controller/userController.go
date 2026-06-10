@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"log"
 	"loginTest/api"
 	"loginTest/apperr"
 	"loginTest/common"
-	"loginTest/core"
 	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/model"
@@ -24,18 +22,7 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
-
-const (
-	VALIDATESUCCESS = 0
-	EMAILERROR      = 1
-	EMAILNOTEXIST   = 2
-	VALIDATEFAILED  = 3
-)
-
-const MAX_VALIDATE_FAIL = 5
 
 func GetTokenUserID(c *gin.Context) int {
 	tokenString := c.GetHeader("Authorization")
@@ -53,32 +40,6 @@ func GetTokenUserID(c *gin.Context) int {
 	return tokenUserID
 }
 
-func isTelephoneExist(db *gorm.DB, telephone string) bool {
-	var user model.User
-	db.Where("phone = ?", telephone).First(&user)
-	if user.UserID != 0 {
-		return true
-	}
-	return false
-}
-
-func isEmailExist(db *gorm.DB, email string) bool {
-	var user model.User
-	db.Where("email = ?", email).First(&user)
-	if user.UserID != 0 {
-		return true
-	}
-	return false
-}
-
-//	func isNumExist(db *gorm.DB, num int) bool {
-//		var user model.User
-//		db.Where("num = ?", num).First(&user)
-//		if user.UserID != 0 {
-//			return true
-//		}
-//		return false
-//	}
 type UserMsg struct {
 	UserID int `json:"user_id"`
 }
@@ -112,45 +73,26 @@ type requestEmail struct {
 }
 
 func DeleteMe(c *gin.Context) {
-	db := common.GetDB()
-
 	var requestUser = registerUser{}
 	c.Bind(&requestUser)
-	phone := requestUser.Phone
-	email := requestUser.Email
-	valiCode := requestUser.ValiCode
-
-	var checkUser model.User
-	db.Where("phone = ?", phone).First(&checkUser)
-	userID := checkUser.UserID
-	if checkUser.Email != email {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "请用注册时使用的email完成注销")
+	err := service.Users.DeleteMe(c.Request.Context(), domain.DeleteMeInput{
+		Phone:    requestUser.Phone,
+		Email:    requestUser.Email,
+		ValiCode: requestUser.ValiCode,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "请用注册时使用的email完成注销")
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到该用户")
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		default:
+			apperr.WriteMsg(c, err, "注销失败")
+		}
 		return
 	}
-	if userID == 0 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到该用户")
-		return
-	}
-
-	resCode := IdentityValidateService(email, valiCode)
-	if resCode == VALIDATEFAILED {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
-	} else if resCode == EMAILERROR {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-		return
-	} else if resCode == EMAILNOTEXIST {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
-		return
-	}
-
-	checkUser.Name = "用户已注销"
-	checkUser.Phone = "0"
-	checkUser.Email = ""
-	checkUser.AvatarURL = ""
-
-	db.Save(&checkUser)
-
 	response.Response(c, http.StatusOK, 200, nil, "成功删除该用户")
 }
 
@@ -206,74 +148,29 @@ func Register(c *gin.Context) {
 }
 
 func IdentityValidate(c *gin.Context) {
-	//db := common.GetDB()
-	// 从前端获取信息
 	var requestUser = identity{}
 	c.Bind(&requestUser)
-	//获取参数
-
-	email := requestUser.Email
-	valiCode := requestUser.ValiCode
-	resCode := IdentityValidateService(email, valiCode)
-	if resCode == VALIDATEFAILED {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-	} else if resCode == EMAILERROR {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-	} else if resCode == EMAILNOTEXIST {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
-	} else {
-		response.Response(c, http.StatusOK, 200, nil, "身份验证成功")
-	}
-}
-
-// 验证码校验服务
-func IdentityValidateService(email string, valiCode string) int {
-	db := common.GetDB()
-	check := false
-	for i := 0; i < len(email); i++ {
-		if email[i] == '@' {
-			check = true
+	err := service.Users.IdentityValidate(c.Request.Context(), requestUser.Email, requestUser.ValiCode)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
+		default:
+			apperr.WriteMsg(c, err, "身份验证失败")
 		}
+		return
 	}
-
-	if !check {
-		return EMAILERROR
-	}
-	if !isEmailExist(db, email) {
-		return EMAILNOTEXIST
-	}
-	rds := core.MyRedis
-	ctx := context.Background()
-	codeKey := "vcode:" + email
-	failKey := "vcode_fail:" + email
-	correctValiCode, err := rds.Get(ctx, codeKey).Result()
-	if err != nil || correctValiCode != valiCode {
-		failCountStr, _ := rds.Get(ctx, failKey).Result()
-		failCount := 0
-		if failCountStr != "" {
-			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
-				failCount = v
-			}
-		}
-		failCount++
-		rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute)
-		if failCount >= MAX_VALIDATE_FAIL {
-			rds.Del(ctx, codeKey)
-		}
-		return VALIDATEFAILED
-	}
-	//返回结果
-	rds.Del(ctx, codeKey)
-	rds.Del(ctx, failKey)
-	return VALIDATESUCCESS
+	response.Response(c, http.StatusOK, 200, nil, "身份验证成功")
 }
 
 type loginuser struct {
-	gorm.Model
-	Name string `gorm:"type:varchar(20);not null"`
-	//Phone    string `gorm:"type:varchar(11);not null"`
+	Name     string `json:"name"`
 	Email    string `json:"email"`
-	Password string `gorm:"size:255;not null"`
+	Password string `json:"password"`
 }
 
 func Login(c *gin.Context) {
@@ -319,120 +216,54 @@ func RefreshToken(c *gin.Context) {
 		return
 	}
 
-	token, claims, err := common.ParseRefreshToken(req.RefreshToken)
-	if err != nil || !token.Valid {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效")
-		return
-	}
-
-	userID := claims.UserID
-	if userID == 0 {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效")
-		return
-	}
-
-	db := common.GetDB()
-	var user model.User
-	if err := db.Where("userID = ?", userID).First(&user).Error; err != nil || user.UserID == 0 {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "用户不存在")
-		return
-	}
-
-	// 在数据库中检查 refresh token 是否存在且未使用，并未过期
-	var refreshRecord model.RefreshToken
-	if err := db.Where("token = ? AND user_id = ? AND is_used = ?", req.RefreshToken, userID, false).First(&refreshRecord).Error; err != nil || refreshRecord.ID == 0 {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效或已使用")
-		return
-	}
-	if time.Now().After(refreshRecord.ExpiresAt) {
-		// 标记为已使用，避免重复提示
-		refreshRecord.IsUsed = true
-		db.Save(&refreshRecord)
-		response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 已过期")
-		return
-	}
-
-	// 将当前 refresh token 标记为已使用
-	refreshRecord.IsUsed = true
-	db.Save(&refreshRecord)
-
-	// 重新发放新的 access token 和 refresh token
-	newToken, err := common.ReleaseToken(user)
+	tokens, err := service.Users.RefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "生成新的token失败")
+		switch {
+		case errors.Is(err, domain.ErrTokenExpired):
+			response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 已过期")
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusUnauthorized, 401, nil, "refresh token 无效或已使用")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
+		default:
+			apperr.WriteMsg(c, err, "刷新token失败")
+		}
 		return
 	}
-	newRefreshToken, err := common.ReleaseRefreshToken(user)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "生成新的refresh token失败")
-		return
-	}
-	// 将新的 refresh token 记录到数据库
-	newRefreshRecord := model.RefreshToken{
-		UserID:    user.UserID,
-		Token:     newRefreshToken,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour),
-		IsUsed:    false,
-		CreatedAt: time.Now(),
-	}
-	db.Create(&newRefreshRecord)
-
 	response.Success(c, gin.H{
-		"token":         newToken,
-		"refresh_token": newRefreshToken,
+		"token":         tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
 	}, "刷新token成功")
 }
 
 func ModifyPassword(c *gin.Context) {
-	db := common.GetDB()
-	var user model.User
 	var inputUser ModifyUser
 	c.Bind(&inputUser)
-	email := inputUser.Email
-	password := inputUser.Password
-	password = util.Decrypt(password)
-	password2 := inputUser.Password2
-	password2 = util.Decrypt(password2)
-	valiCode := inputUser.ValiCode
+	password := util.Decrypt(inputUser.Password)
+	password2 := util.Decrypt(inputUser.Password2)
 	if password != password2 {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码输入不一致")
 		return
 	}
-	if !isEmailExist(db, email) {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到邮箱")
-		return
-	}
-
-	hasedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	u, err := service.Users.ModifyPassword(c.Request.Context(), domain.ModifyPasswordInput{
+		Email:    inputUser.Email,
+		Password: password,
+		ValiCode: inputUser.ValiCode,
+	})
 	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "密码加密错误")
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到邮箱")
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
+		default:
+			apperr.WriteMsg(c, err, "修改密码失败")
+		}
 		return
 	}
-	db.Where("email = ?", email).First(&user)
-	//fmt.Println(phone)
-	//fmt.Println(password)
-	if user.UserID == 0 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "用户不存在")
-		return
-	}
-
-	//校验验证码是否正确
-	resCode := IdentityValidateService(email, valiCode)
-	if resCode == VALIDATEFAILED {
-		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		return
-	} else if resCode == EMAILERROR {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-		return
-	} else if resCode == EMAILNOTEXIST {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱不存在")
-		return
-	} else {
-		user.Password = string(hasedPassword)
-		db.Save(&user)
-		response.Success(c, gin.H{"data": user}, "修改密码成功")
-		return
-	}
+	response.Success(c, gin.H{"data": service.DomainUserToModel(u)}, "修改密码成功")
 }
 
 type OAuth2Info struct {
@@ -445,205 +276,105 @@ type OAuth2Info struct {
 
 // 检查OAuth2应用信息，前端传入appid，返回对应的app_name、app_icon
 func CheckOAuth2App(c *gin.Context) {
-	db := common.GetDB()
 	var requestInfo OAuth2Info
 	if err := c.Bind(&requestInfo); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数格式错误")
 		return
 	}
-
-	appId := requestInfo.AppId
-
-	// 验证应用是否存在
-	var app model.OAuth2App
-	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
-		response.Response(c, http.StatusNotFound, 404, nil, "OAuth2认证应用不存在或未开通")
+	app, err := service.Users.CheckOAuth2App(c.Request.Context(), requestInfo.AppId)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "OAuth2认证应用不存在或未开通")
+		} else {
+			apperr.WriteMsg(c, err, "获取应用信息失败")
+		}
 		return
 	}
-
-	// 返回应用信息
-	appInfo := gin.H{
+	response.Response(c, http.StatusOK, 200, gin.H{
 		"app_id":      app.AppID,
 		"app_name":    app.AppName,
 		"app_icon":    app.AppIcon,
 		"description": app.Description,
-	}
-
-	response.Response(c, http.StatusOK, 200, appInfo, "应用信息获取成功")
+	}, "应用信息获取成功")
 }
 
 // OAuth2授权接口，传入app_id、redirect_uri、response_type、scope、state
 // 如果app_id跟数据库里的redirect_url对应，则返回带着临时有效的code的redirect_uri
 func AuthorizeOAuth2App(c *gin.Context) {
-	db := common.GetDB()
 	var requestInfo OAuth2Info
 	if err := c.Bind(&requestInfo); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数格式错误")
 		return
 	}
-
-	appId := requestInfo.AppId
-	redirectURI := requestInfo.RedirectURL
-	responseType := requestInfo.ResponseType
-	scope := requestInfo.Scope
-	state := requestInfo.State
-
-	// 验证response_type，response_type目前只允许code(authorization_code)
-	if responseType != "code" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "不支持的response_type")
-		return
-	}
-
-	// 验证scope，scope目前只允许read_basic，用于授权当前用户的头像、用户名、邮箱等基本信息
-	if scope != "read_basic" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "不支持的scope")
-		return
-	}
-
-	// 验证应用是否存在
-	var app model.OAuth2App
-	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
-		response.Response(c, http.StatusNotFound, 404, nil, "应用不存在或未激活")
-		return
-	}
-
-	// 验证redirect_uri是否与app_id对应应用一致
-	if app.RedirectURI != redirectURI {
-		response.Response(c, http.StatusBadRequest, 400, nil, "redirect_uri不匹配")
-		return
-	}
-
-	// 获取当前用户（需要先通过AuthMiddleware验证）
 	userInterface, exists := c.Get("user")
 	if !exists {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
 		return
 	}
 	user := userInterface.(model.User)
-
-	// 生成授权码
-	code := util.GenerateRandomString(32)
-
-	// 保存授权码到数据库
-	authCode := model.OAuth2Code{
-		Code:        code,
-		AppID:       appId,
-		UserID:      user.UserID,
-		Scope:       scope,
-		RedirectURI: redirectURI,
-		State:       state,
-		ExpiresAt:   time.Now().Add(5 * time.Minute), // 5分钟有效期
-		IsUsed:      false,
-		CreatedAt:   time.Now(),
-	}
-
-	if err := db.Create(&authCode).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "生成授权码失败")
-		return
-	}
-
-	// 记录授权信息
-	authRecord := model.OAuth2AuthRecord{
+	redirectURL, err := service.Users.AuthorizeOAuth2App(c.Request.Context(), domain.OAuth2AuthorizeInput{
+		AppID:        requestInfo.AppId,
+		RedirectURI:  requestInfo.RedirectURL,
+		ResponseType: requestInfo.ResponseType,
+		Scope:        requestInfo.Scope,
+		State:        requestInfo.State,
 		UserID:       user.UserID,
-		AppID:        appId,
-		AppName:      app.AppName,
-		Scope:        scope,
 		IPAddress:    c.ClientIP(),
 		UserAgent:    c.GetHeader("User-Agent"),
-		Status:       "authorized",
-		AuthorizedAt: time.Now(),
-		ExpiresAt:    time.Now().Add(5 * time.Minute), // 与访问令牌有效期一致
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrBadRequest):
+			msg := "不支持的response_type"
+			if requestInfo.ResponseType == "code" {
+				if requestInfo.Scope != "read_basic" {
+					msg = "不支持的scope"
+				} else {
+					msg = "redirect_uri不匹配"
+				}
+			}
+			response.Response(c, http.StatusBadRequest, 400, nil, msg)
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "应用不存在或未激活")
+		default:
+			apperr.WriteMsg(c, err, "授权失败")
+		}
+		return
 	}
-
-	if err := db.Create(&authRecord).Error; err != nil {
-		fmt.Printf("记录OAuth2授权信息失败: %v\n", err)
-	}
-
-	// 构建重定向URL
-	redirectURL := fmt.Sprintf("%s?code=%s&state=%s", redirectURI, code, state)
-
 	response.Response(c, http.StatusOK, 200, gin.H{
 		"redirect_url": redirectURL,
-		//"code": code,
-		//"state": state,
 	}, "授权成功")
 }
 
 // 三方APP取得临时code后，其服务端带着code来请求，根据scope返回对应的access_token
 func GetTokenbyOAuth2(c *gin.Context) {
-	db := common.GetDB()
-
-	code := c.PostForm("code")
-	appId := c.PostForm("app_id")
-	appSecret := c.PostForm("app_secret")
-
-	if code == "" || appId == "" || appSecret == "" {
-		response.Response(c, http.StatusBadRequest, 400, nil, "缺少必要参数")
-		return
-	}
-
-	// 验证应用
-	var app model.OAuth2App
-	if err := db.Where("app_id = ? AND is_active = ?", appId, true).First(&app).Error; err != nil {
-		response.Response(c, http.StatusNotFound, 404, nil, "应用不存在或未激活")
-		return
-	}
-
-	// 验证app_secret是否与app_id对应，避免其他应用冒用临时code
-	if app.AppSecret != appSecret {
-		response.Response(c, http.StatusUnauthorized, 401, nil, "应用密钥错误")
-		return
-	}
-
-	// 查找授权码，临时code只允许使用1次
-	var authCode model.OAuth2Code
-	if err := db.Where("code = ? AND app_id = ? AND is_used = ?", code, appId, false).First(&authCode).Error; err != nil {
-		response.Response(c, http.StatusNotFound, 404, nil, "授权码不存在或已使用")
-		return
-	}
-
-	// 检查授权码是否过期
-	if time.Now().After(authCode.ExpiresAt) {
-		response.Response(c, http.StatusBadRequest, 400, nil, "授权码已过期")
-		return
-	}
-
-	// 标记授权码为已使用
-	authCode.IsUsed = true
-	db.Save(&authCode)
-
-	// 生成访问令牌
-	accessToken, err := common.ReleaseOAuth2Token(authCode.UserID, appId, authCode.Scope)
+	result, err := service.Users.GetTokenByOAuth2(c.Request.Context(), domain.OAuth2TokenInput{
+		Code:      c.PostForm("code"),
+		AppID:     c.PostForm("app_id"),
+		AppSecret: c.PostForm("app_secret"),
+	})
 	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "生成访问令牌失败")
+		switch {
+		case errors.Is(err, domain.ErrBadRequest):
+			msg := "缺少必要参数"
+			if c.PostForm("code") != "" && c.PostForm("app_id") != "" && c.PostForm("app_secret") != "" {
+				msg = "授权码已过期"
+			}
+			response.Response(c, http.StatusBadRequest, 400, nil, msg)
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "授权码不存在或已使用")
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusUnauthorized, 401, nil, "应用密钥错误")
+		default:
+			apperr.WriteMsg(c, err, "获取访问令牌失败")
+		}
 		return
 	}
-
-	// 保存令牌到数据库
-	oauth2Token := model.OAuth2Token{
-		AccessToken:  accessToken,
-		RefreshToken: "", // 暂不实现refreshToken
-		AppID:        appId,
-		UserID:       authCode.UserID,
-		Scope:        authCode.Scope,
-		ExpiresAt:    time.Now().Add(5 * time.Minute), // 5分钟有效期
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-
-	if err := db.Create(&oauth2Token).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "保存访问令牌失败")
-		return
-	}
-
 	response.Response(c, http.StatusOK, 200, gin.H{
-		"access_token": accessToken,
+		"access_token": result.AccessToken,
 		"token_type":   "Bearer",
-		"expires_in":   300, // 5分钟
-		"scope":        authCode.Scope,
+		"expires_in":   result.ExpiresIn,
+		"scope":        result.Scope,
 	}, "获取访问令牌成功")
 }
 
@@ -687,17 +418,12 @@ func GetInfobyOAuth2(c *gin.Context) {
 
 // 用户获取OAuth2授权记录
 func GetOAuth2AuthRecords(c *gin.Context) {
-	// 从Auth中间件获取用户信息
 	userInterface, exists := c.Get("user")
 	if !exists {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户未登录")
 		return
 	}
 	user := userInterface.(model.User)
-
-	db := common.GetDB()
-
-	// 获取分页参数
 	page := 1
 	pageSize := 10
 	if p := c.Query("page"); p != "" {
@@ -710,29 +436,13 @@ func GetOAuth2AuthRecords(c *gin.Context) {
 			pageSize = parsedPageSize
 		}
 	}
-
-	// 查询授权记录
-	var records []model.OAuth2AuthRecord
-	var total int64
-
-	offset := (page - 1) * pageSize
-
-	// 获取总数
-	db.Model(&model.OAuth2AuthRecord{}).Where("user_id = ?", user.UserID).Count(&total)
-
-	// 获取记录列表
-	if err := db.Where("user_id = ?", user.UserID).
-		Order("authorized_at DESC").
-		Offset(offset).
-		Limit(pageSize).
-		Find(&records).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "查询授权记录失败")
+	result, err := service.Users.ListOAuth2AuthRecords(c.Request.Context(), user.UserID, page, pageSize)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询授权记录失败")
 		return
 	}
-
-	// 构建返回数据
 	var recordList []gin.H
-	for _, record := range records {
+	for _, record := range result.Records {
 		recordList = append(recordList, gin.H{
 			"record_id":     record.RecordID,
 			"app_id":        record.AppID,
@@ -745,14 +455,12 @@ func GetOAuth2AuthRecords(c *gin.Context) {
 			"expires_at":    record.ExpiresAt.Format("2006-01-02 15:04:05"),
 		})
 	}
-
-	// 返回分页数据
 	response.Response(c, http.StatusOK, 200, gin.H{
 		"records":     recordList,
-		"total":       total,
-		"page":        page,
-		"page_size":   pageSize,
-		"total_pages": (total + int64(pageSize) - 1) / int64(pageSize),
+		"total":       result.Total,
+		"page":        result.Page,
+		"page_size":   result.PageSize,
+		"total_pages": result.TotalPages,
 	}, "获取授权记录成功")
 }
 
@@ -763,26 +471,17 @@ func ValidateEmail(c *gin.Context) {
 	mode := request.Mode
 	fmt.Println("email = ", email)
 	fmt.Println("mode = ", mode)
-
-	//arr := strings.Split(email, "@")
-	//fmt.Println(arr[1])
-	//if arr[1] != "mail2.sysu.edu.cn" && arr[1] != "mail.sysu.edu.cn" {
-	//	response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email, "mode": mode}, "请使用中大邮箱！")
-	//	return
-	//}
-
-	db := common.DB
-	if mode == 1 && !isEmailExist(db, email) {
-		//fmt.Println(1)
-		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email, "mode": mode}, "该邮箱未注册，请先完成注册操作")
-		return
-	}
-	if mode == 0 && isEmailExist(db, email) {
-		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email, "mode": mode}, "邮箱已注册")
-		return
-	}
-	if email == "" {
-		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "邮箱获取错误")
+	if err := service.Users.ValidateEmailExists(c.Request.Context(), email, mode); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email, "mode": mode}, "该邮箱未注册，请先完成注册操作")
+		case errors.Is(err, domain.ErrConflict):
+			response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email, "mode": mode}, "邮箱已注册")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, "邮箱获取错误")
+		default:
+			apperr.WriteMsg(c, err, "邮箱校验失败")
+		}
 		return
 	}
 	err := api.SendEmail(email, 0, "")
@@ -886,17 +585,6 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var user model.User
-
-	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			response.Response(c, http.StatusNotFound, 404, nil, "User not found")
-		} else {
-			response.Response(c, http.StatusInternalServerError, 500, nil, "Database error")
-		}
-		return
-	}
 	timestamp := time.Now().UnixNano()
 	filename := fmt.Sprintf("%d_%s", timestamp, filepath.Base(file.Filename)) // Use base to avoid path traversal
 	filepath := "public/uploads/" + filename
@@ -939,48 +627,41 @@ func UpdateAvatar(c *gin.Context) {
 		return
 	}
 
-	// 更新 User 的 AvatarURL 字段
-	// user.AvatarURL = "https://ssemarket.cn:8080/uploads/" + filename
-	user.AvatarURL = fileURL
-	if err := db.Save(&user).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
+	user, err := service.Users.UpdateAvatarByPhone(c.Request.Context(), phone, fileURL)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "User not found")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusBadRequest, 400, nil, "Invalid phone number")
+		default:
+			response.Response(c, http.StatusInternalServerError, 500, nil, "Database update failed")
+		}
 		return
 	}
-
 	response.Success(c, gin.H{"phone": user.Phone, "avatar_url": user.AvatarURL}, "上传成功")
 }
 
 // GetAvatar 用于处理获取用户头像的请求
 func GetAvatar(c *gin.Context) {
-	// 连接数据库
-	db := common.GetDB()
-
-	// 从前端获取电话号码
 	phone := c.PostForm("phone")
-	// 在数据库中查找用户
-	var user model.User
-	if err := db.Where("phone = ?", phone).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	user, err := service.Users.GetAvatarByPhone(c.Request.Context(), phone)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
 		} else {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
 		}
 		return
 	}
-	// 返回用户的头像URL
 	response.Success(c, gin.H{"phone": user.Phone, "AvatarURL": user.AvatarURL}, "获取成功")
 }
 func GetInfo(c *gin.Context) {
-	db := common.GetDB()
-	// 从前端获取电话号码
 	var requestUser = model.User{}
 	c.Bind(&requestUser)
-	phone := requestUser.Phone
-	userID := requestUser.UserID
-	// 在数据库中查找用户
-	var user model.User
-	if err := db.Where("phone = ? or userID = ?", phone, userID).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	user, err := service.Users.GetInfo(c.Request.Context(), requestUser.Phone, requestUser.UserID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
 		} else {
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
@@ -988,26 +669,22 @@ func GetInfo(c *gin.Context) {
 		return
 	}
 	info := gin.H{
-		"userID":           user.UserID,
+		"userID":           user.ID,
 		"name":             user.Name,
 		"phone":            user.Phone,
 		"intro":            user.Intro,
 		"score":            user.Score,
-		"ban":              user.Banend,
-		"punishnum":        user.Punishnum,
+		"ban":              user.BanEnd,
+		"punishnum":        user.PunishNum,
 		"avatarURL":        user.AvatarURL,
 		"hideProfilePosts": user.HideProfilePosts,
 	}
-
-	// 判断为本人
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != 0 && tokenUserID == user.UserID {
+	if tokenUserID != 0 && tokenUserID == user.ID {
 		info["email"] = user.Email
 		info["emailNotificationBlocked"] = user.ISEmailNotificationBlocked
-		// emailpush 历史字段名易误解为「已开启推送」，实际同为 is_email_notification_blocked
 		info["emailpush"] = user.ISEmailNotificationBlocked
 	}
-
 	c.JSON(http.StatusOK, info)
 }
 
@@ -1024,121 +701,49 @@ type updateUser struct {
 }
 
 func UpdateUserInfo(c *gin.Context) {
-	db := common.GetDB()
-
-	// 解析请求参数
 	var userInfo updateUser
 	if err := c.Bind(&userInfo); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
 		return
 	}
-
-	// 根据用户ID查找用户
-	var user model.User
-	if err := db.Where("userID = ?", userInfo.UserID).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	tokenUserID := GetTokenUserID(c)
+	err := service.Users.UpdateUserInfo(c.Request.Context(), domain.UpdateUserInput{
+		UserID:           userInfo.UserID,
+		Name:             userInfo.Name,
+		Intro:            userInfo.Intro,
+		AvatarURL:        userInfo.AvatarURL,
+		HideProfilePosts: userInfo.HideProfilePosts,
+	}, tokenUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
 			response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
-		} else {
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		default:
 			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
 		}
 		return
 	}
-	// 获取token中的用户标识符
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
-		return
-	}
-
-	// 更新用户信息
-	user.Name = userInfo.Name
-	//user.Num = userInfo.Num
-	user.Intro = userInfo.Intro
-	user.AvatarURL = userInfo.AvatarURL
-	if userInfo.HideProfilePosts != nil {
-		user.HideProfilePosts = *userInfo.HideProfilePosts
-	}
-
-	if err := db.Save(&user).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
-		return
-	}
-	service.InvalidateUserSession(c.Request.Context(), user.UserID)
 	response.Response(c, http.StatusOK, 200, nil, "用户信息更新成功")
 }
 
 func CalculateAndSaveScores() {
-	log.Println("CalculateAndSaveScores")
-	db := common.GetDB()
-	var users []model.User
-	db.Find(&users)
-	for _, user := range users { //对每个用户进行积分统计
-		if user.UserID == 0 {
-			continue
-		}
-		// 查询用户的post ID
-		var postIDs []int
-		db.Model(&model.Post{}).Where("userID = ?", user.UserID).Pluck("postID", &postIDs)
-		// 统计post被点赞个数
-		totalLikeNum := 0
-		for _, postID := range postIDs {
-			var likeNum int
-			db.Model(&model.Post{}).Where("postID = ?", postID).Select("like_num").Row().Scan(&likeNum)
-			totalLikeNum += likeNum
-		}
-		// 查询用户的 pcomment ID
-		var pcommentIDs []int
-		db.Model(&model.Pcomment{}).Where("userID = ?", user.UserID).Pluck("pcommentID", &pcommentIDs)
-		// 统计pcomment被点赞个数
-		for _, pcommentID := range pcommentIDs {
-			var likeNum int
-			db.Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).Select("like_num").Row().Scan(&likeNum)
-			totalLikeNum += likeNum
-		}
-		// 统计被收藏个数
-		var psaveCount int64
-		db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&psaveCount)
-		// 统计帖子被评论个数
-		var commentedCount int64
-		db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
-		// 统计评论被回复个数
-		var repliedCount int64
-		db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
-		// 查询用户的 ccomment ID
-		var ccommentIDs []int
-		db.Model(&model.Ccomment{}).Where("userID = ?", user.UserID).Pluck("ccommentID", &ccommentIDs)
-		// 统计ccomment被点赞个数
-		for _, ccommentID := range ccommentIDs {
-			var likeNum int
-			db.Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).Select("like_num").Row().Scan(&likeNum)
-			totalLikeNum += likeNum
-		}
-		// 统计成功举报个数
-		var sueCount int64
-		db.Model(&model.Sue{}).Where("status = ? AND finish = ? AND userID = ?", " ok", 1, user.UserID).
-			Select("DISTINCT targettype, targetID").
-			Count(&sueCount)
-		// 计算总积分并保存
-		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum + int(psaveCount)*3 +
-			int(commentedCount+repliedCount)*2 + int(sueCount)*20 - (user.Punishnum)*20
-		db.Model(&user).Update("Score", totalScore)
-	}
-	log.Println("Score updated")
+	service.Users.CalculateAndSaveScores(context.Background())
 }
 
 func ChangeEmailPushStatus(c *gin.Context) {
-	db := common.GetDB()
 	var user_id UserMsg
-	var user model.User
 	if err := c.Bind(&user_id); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	db.Where("userID = ?", user_id.UserID).First(&user)
-	if user.ISEmailNotificationBlocked {
-		db.Model(&user).Update("is_email_notification_blocked", false)
-	} else {
-		db.Model(&user).Update("is_email_notification_blocked", true)
+	if err := service.Users.ToggleEmailNotification(c.Request.Context(), user_id.UserID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 	}
 }
 
@@ -1152,180 +757,54 @@ type ChatUser struct {
 }
 
 func GetStatistics(c *gin.Context) {
-	db := common.GetDB()
 	userId := GetTokenUserID(c)
-
-	user := model.User{}
-	db.Where("userID = ?", userId).First(&user)
-
-	curTime := time.Now()
-	durationTime := curTime.Sub(user.Banend)
-
-	lastYear := curTime.Year() - 1
-	statisticsStartTime := time.Date(lastYear, 1, 1, 0, 0, 0, 0, curTime.Location())
-	statisticsEndTime := time.Date(curTime.Year(), 1, 1, 0, 0, 0, 0, curTime.Location())
-
-	var posts []model.Post
-	var postIDs []int
-	db.Model(&model.Post{}).Where("userID = ?", userId).Find(&posts)
-
-	totalPostCnt := len(posts)
-
-	totalPostLikeNum := 0
-	thisYearPostCnt := 0
-	thisYearLikeNum := 0
-
-	maxPostLikeNum := 0
-	maxPostBrowseNum := 0
-	maxPostCommentNum := 0
-	for _, post := range posts {
-		postIDs = append(postIDs, post.PostID)
-		totalPostLikeNum += post.LikeNum
-		if post.PostTime.After(statisticsStartTime) && post.PostTime.Before(statisticsEndTime) {
-			thisYearPostCnt++
-			thisYearLikeNum += post.LikeNum
-
-			if post.LikeNum > maxPostLikeNum {
-				maxPostLikeNum = post.LikeNum
-			}
-			if post.BrowseNum > maxPostBrowseNum {
-				maxPostBrowseNum = post.BrowseNum
-			}
-			if post.CommentNum > maxPostCommentNum {
-				maxPostCommentNum = post.CommentNum
-			}
-		}
-	}
-
-	// 查询用户的 pcomment ID
-	var pcommentIDs []int
-	db.Model(&model.Pcomment{}).Where("userID = ?", user.UserID).Pluck("pcommentID", &pcommentIDs)
-	pCommentCnt := len(pcommentIDs)
-	pCommentLikeNum := 0
-
-	// 统计pcomment被点赞个数
-	for _, pcommentID := range pcommentIDs {
-		var likeNum int
-		db.Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).Select("like_num").Row().Scan(&likeNum)
-		pCommentLikeNum += likeNum
-	}
-	// 统计被收藏个数
-	var besavedCount int64
-	db.Model(&model.Psave{}).Where("ptargetID IN (?)", postIDs).Count(&besavedCount)
-	// 统计帖子被评论个数
-	var commentedCount int64
-	db.Model(&model.Pcomment{}).Where("ptargetID IN (?)", postIDs).Not("userID = ?", user.UserID).Count(&commentedCount)
-	// 统计评论被回复个数
-	var repliedCount int64
-	db.Model(&model.Ccomment{}).Where("ctargetID IN (?)", pcommentIDs).Not("userID = ?", user.UserID).Count(&repliedCount)
-	// 查询用户的 ccomment ID
-	var ccommentIDs []int
-	db.Model(&model.Ccomment{}).Where("userID = ?", user.UserID).Pluck("ccommentID", &ccommentIDs)
-	ccommentCnt := len(ccommentIDs)
-	ccommentLikeNum := 0
-	// 统计ccomment被点赞个数
-	for _, ccommentID := range ccommentIDs {
-		var likeNum int
-		db.Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).Select("like_num").Row().Scan(&likeNum)
-		ccommentLikeNum += likeNum
-	}
-
-	var savedCount int64
-	db.Model(&model.Psave{}).Where("userID = ?", user.UserID).Count(&savedCount)
-
-	chatMsgs := []model.ChatMsg{}
-	err := db.Where("senderUserID = ? OR targetUserID = ?", userId, userId).
-		Preload("TargetUser").
-		Preload("SenderUser").
-		Find(&chatMsgs).Error
+	stats, err := service.Users.GetStatistics(c.Request.Context(), userId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	chatCount := len(chatMsgs)
-
-	relevantRespUsers := []ChatUser{}
-	existsUserIDs := make(map[int]bool) // 去重：key=用户ID，value=是否已存在
-	chatUserCnt := make(map[int]int)    // 统计每个用户的聊天句子数量：key=用户ID，value=聊天句子数量
-	for _, chatMsg := range chatMsgs {
-		if userId != chatMsg.TargetUserID {
-			if _, ok := existsUserIDs[chatMsg.TargetUserID]; !ok {
-				existsUserIDs[chatMsg.TargetUserID] = true
-				relevantRespUsers = append(relevantRespUsers, ChatUser{
-					UserID: chatMsg.TargetUserID,
-					// Email:     chatMsg.TargetUser.Email,
-					Name:      chatMsg.TargetUser.Name,
-					AvatarURL: chatMsg.TargetUser.AvatarURL,
-					Identity:  chatMsg.TargetUser.Identity,
-					Score:     chatMsg.TargetUser.Score,
-				})
-			}
-			chatUserCnt[chatMsg.TargetUserID]++
-		}
-
-		if userId != chatMsg.SenderUserID {
-			if _, ok := existsUserIDs[chatMsg.SenderUserID]; !ok {
-				existsUserIDs[chatMsg.SenderUserID] = true
-				relevantRespUsers = append(relevantRespUsers, ChatUser{
-					UserID: chatMsg.SenderUserID,
-					// Email:     chatMsg.SenderUser.Email,
-					Name:      chatMsg.SenderUser.Name,
-					AvatarURL: chatMsg.SenderUser.AvatarURL,
-					Identity:  chatMsg.SenderUser.Identity,
-					Score:     chatMsg.SenderUser.Score,
-				})
-			}
-			chatUserCnt[chatMsg.SenderUserID]++
-		}
+	relevantRespUsers := make([]ChatUser, 0, len(stats.RelevantUsers))
+	for _, u := range stats.RelevantUsers {
+		relevantRespUsers = append(relevantRespUsers, ChatUser{
+			UserID:    u.UserID,
+			Name:      u.Name,
+			AvatarURL: u.AvatarURL,
+			Identity:  u.Identity,
+			Score:     u.Score,
+		})
 	}
-
-	maxSayUserID := 0
-	maxSayUserCnt := 0
-	for userID, cnt := range chatUserCnt {
-		if cnt > maxSayUserCnt {
-			maxSayUserID = userID
-			maxSayUserCnt = cnt
-		}
+	maxSayUser := ChatUser{
+		UserID:    stats.MaxSayUser.UserID,
+		Name:      stats.MaxSayUser.Name,
+		AvatarURL: stats.MaxSayUser.AvatarURL,
+		Identity:  stats.MaxSayUser.Identity,
+		Score:     stats.MaxSayUser.Score,
 	}
-
-	var maxSayUser ChatUser
-	for _, user := range relevantRespUsers {
-		if user.UserID == maxSayUserID {
-			maxSayUser = user
-			break
-		}
-	}
-
 	statistics := gin.H{
-		"name":         user.Name,      // 用户名
-		"intro":        user.Intro,     // 用户介绍
-		"score":        user.Score,     // 用户积分
-		"avatarUrl":    user.AvatarURL, // 用户头像URL
-		"durationTime": durationTime,   // 注册时间
-
-		"totalPostCnt":     totalPostCnt,      // 总帖子数量
-		"totalPostLikeNum": totalPostLikeNum,  // 总点赞数量
-		"thisYearPostCnt":  thisYearPostCnt,   // 这一年发布的帖子数量
-		"thisYearLikeNum":  thisYearLikeNum,   // 这一年收到的点赞数量
-		"maxLikeNum":       maxPostLikeNum,    // 这一年发布的帖子中点赞数量最多的帖子的点赞数量
-		"maxBrowseNum":     maxPostBrowseNum,  // 这一年发布的帖子中浏览数量最多的帖子的浏览数量
-		"maxCommentNum":    maxPostCommentNum, // 这一年发布的帖子中评论数量最多的帖子的评论数量
-
-		"pCommentCnt":     pCommentCnt,     // 总评论数量
-		"pCommentLikeNum": pCommentLikeNum, // 总评论点赞数量
-		"ccommentCnt":     ccommentCnt,     // 总回复数量
-		"ccommentLikeNum": ccommentLikeNum, // 总回复点赞数量\
-
-		"beSavedCount":     besavedCount,   // 总被收藏数量
-		"beCommentedCount": commentedCount, // 总被评论数量
-		"repliedCount":     repliedCount,   // 总被回复数量
-
-		"savedCount":        savedCount,        // 总收藏数量
-		"chatCount":         chatCount,         // 总聊天句子数量
-		"relevantRespUsers": relevantRespUsers, // 相关聊天用户列表
-		"maxSayUser":        maxSayUser,        // 最常联系用户
-		"maxSayUserCnt":     maxSayUserCnt,     // 最常联系用户的聊天句子数量
+		"name":             stats.Name,
+		"intro":            stats.Intro,
+		"score":            stats.Score,
+		"avatarUrl":        stats.AvatarURL,
+		"durationTime":     stats.DurationTime,
+		"totalPostCnt":     stats.TotalPostCnt,
+		"totalPostLikeNum": stats.TotalPostLikeNum,
+		"thisYearPostCnt":  stats.ThisYearPostCnt,
+		"thisYearLikeNum":  stats.ThisYearLikeNum,
+		"maxLikeNum":       stats.MaxLikeNum,
+		"maxBrowseNum":     stats.MaxBrowseNum,
+		"maxCommentNum":    stats.MaxCommentNum,
+		"pCommentCnt":      stats.PCommentCnt,
+		"pCommentLikeNum":  stats.PCommentLikeNum,
+		"ccommentCnt":      stats.CcommentCnt,
+		"ccommentLikeNum":  stats.CcommentLikeNum,
+		"beSavedCount":     stats.BeSavedCount,
+		"beCommentedCount": stats.BeCommentedCount,
+		"repliedCount":     stats.RepliedCount,
+		"savedCount":       stats.SavedCount,
+		"chatCount":        stats.ChatCount,
+		"relevantRespUsers": relevantRespUsers,
+		"maxSayUser":        maxSayUser,
+		"maxSayUserCnt":     stats.MaxSayUserCnt,
 	}
 	response.Response(c, http.StatusOK, 200, statistics, "获取用户统计信息成功")
 }

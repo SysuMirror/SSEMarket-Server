@@ -327,6 +327,185 @@ func applyTimeRange(q *gorm.DB, timeFrom, timeTo string) *gorm.DB {
 	return q
 }
 
+func (r *postRepository) Create(ctx context.Context, post *domain.Post) error {
+	m := postToModel(post)
+	if err := r.session(ctx).Create(&m).Error; err != nil {
+		return err
+	}
+	post.ID = m.PostID
+	return nil
+}
+
+func (r *postRepository) Delete(ctx context.Context, postID int) error {
+	return r.session(ctx).Where("postID = ?", postID).Delete(&model.Post{}).Error
+}
+
+func (r *postRepository) UpdatePrivacy(ctx context.Context, postID int, isPrivate bool) error {
+	return r.session(ctx).Model(&model.Post{}).Where("postID = ?", postID).
+		Update("is_private", isPrivate).Error
+}
+
+func (r *postRepository) UpdateLikeNum(ctx context.Context, postID int, delta int) error {
+	return r.session(ctx).Model(&model.Post{}).Where("postID = ?", postID).
+		UpdateColumn("like_num", gorm.Expr("like_num + ?", delta)).Error
+}
+
+func (r *postRepository) UpdateHeat(ctx context.Context, postID int, delta float64) error {
+	return r.session(ctx).Model(&model.Post{}).Where("postID = ?", postID).
+		UpdateColumn("heat", gorm.Expr("heat + ?", delta)).Error
+}
+
+func (r *postRepository) HasBrowsed(ctx context.Context, userID, postID int) (bool, error) {
+	var browsed model.Pbrowse
+	err := r.session(ctx).Where("userID = ? AND ptargetID = ?", userID, postID).First(&browsed).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return browsed.PbrowseID != 0, err
+}
+
+func (r *postRepository) CreateBrowse(ctx context.Context, userID, postID int) error {
+	b := model.Pbrowse{
+		UserID:    userID,
+		PtargetID: postID,
+		Time:      time.Now(),
+	}
+	return r.session(ctx).Create(&b).Error
+}
+
+func (r *postRepository) DeleteSave(ctx context.Context, userID, postID int) error {
+	return r.session(ctx).Where("userID = ? AND ptargetID = ?", userID, postID).Delete(&model.Psave{}).Error
+}
+
+func (r *postRepository) CreateSave(ctx context.Context, userID, postID int) error {
+	s := model.Psave{
+		UserID:    userID,
+		PtargetID: postID,
+	}
+	return r.session(ctx).Create(&s).Error
+}
+
+func (r *postRepository) DeleteLike(ctx context.Context, userID, postID int) error {
+	return r.session(ctx).Where("userID = ? AND ptargetID = ?", userID, postID).Delete(&model.Plike{}).Error
+}
+
+func (r *postRepository) CreateLike(ctx context.Context, userID, postID int) error {
+	like := model.Plike{
+		UserID:    userID,
+		PtargetID: postID,
+		Time:      time.Now(),
+	}
+	return r.session(ctx).Create(&like).Error
+}
+
+func (r *postRepository) ListUserProfile(ctx context.Context, targetUserID, viewerUserID, limit, offset int) ([]*domain.Post, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 15
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	query := r.session(ctx).Where("userID = ?", targetUserID)
+	if viewerUserID != targetUserID {
+		query = query.Where("is_private = ?", false)
+	}
+	var posts []model.Post
+	err := query.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts).Error
+	if err != nil {
+		return nil, err
+	}
+	return modelsToDomain(posts), nil
+}
+
+func (r *postRepository) CountUserProfile(ctx context.Context, targetUserID, viewerUserID int) (int64, error) {
+	query := r.session(ctx).Model(&model.Post{}).Where("userID = ?", targetUserID)
+	if viewerUserID != targetUserID {
+		query = query.Where("is_private = ?", false)
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *postRepository) FindPublicByID(ctx context.Context, postID int) (*domain.Post, error) {
+	var post model.Post
+	err := r.session(ctx).Where("postID = ? AND is_private = ?", postID, false).First(&post).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return postToDomain(&post), nil
+}
+
+func (r *postRepository) ListAllTags(ctx context.Context) ([]*domain.Tag, error) {
+	var tags []model.Tag
+	if err := r.session(ctx).Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Tag, 0, len(tags))
+	for i := range tags {
+		out = append(out, tagToDomain(&tags[i]))
+	}
+	return out, nil
+}
+
+func (r *postRepository) FindTagByName(ctx context.Context, name string) (*domain.Tag, error) {
+	var tag model.Tag
+	err := r.session(ctx).Where("name = ?", name).First(&tag).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return tagToDomain(&tag), nil
+}
+
+func (r *postRepository) CreatePostNotice(ctx context.Context, receiver, sender int, noticeType, text string, target int) error {
+	n := model.Notice{
+		Receiver: receiver,
+		Sender:   sender,
+		Type:     noticeType,
+		Ntext:    text,
+		Time:     time.Now(),
+		Read:     false,
+		Target:   target,
+	}
+	return r.session(ctx).Create(&n).Error
+}
+
+func (r *postRepository) CreateFeedback(ctx context.Context, text, attachment string) (*domain.Feedback, error) {
+	f := model.Feedback{
+		Ftext:      text,
+		Attachment: attachment,
+		Time:       time.Now(),
+		Status:     "wait",
+	}
+	if err := r.session(ctx).Create(&f).Error; err != nil {
+		return nil, err
+	}
+	if f.FeedbackID == 0 {
+		return nil, domain.ErrInternal
+	}
+	return feedbackToDomain(&f), nil
+}
+
+func (r *postRepository) ListAllFeedback(ctx context.Context) ([]*domain.Feedback, error) {
+	var list []model.Feedback
+	if err := r.session(ctx).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Feedback, 0, len(list))
+	for i := range list {
+		out = append(out, feedbackToDomain(&list[i]))
+	}
+	return out, nil
+}
+
 func parseBrowseTime(s string, endOfDay bool) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {

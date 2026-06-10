@@ -5,22 +5,9 @@ import (
 
 	"loginTest/domain"
 	"loginTest/model"
-	"loginTest/repository"
 
 	"gorm.io/gorm"
 )
-
-type commentService struct {
-	comments repository.CommentRepository
-}
-
-func NewCommentService(comments repository.CommentRepository) CommentService {
-	return &commentService{comments: comments}
-}
-
-func (s *commentService) ListByPost(ctx context.Context, postID int, postType string, limit, offset int) ([]*domain.Comment, int64, error) {
-	return s.comments.ListByPostID(ctx, postID, postType, limit, offset)
-}
 
 type rankService struct {
 	db *gorm.DB
@@ -55,16 +42,4 @@ func (s *rankService) OnPostDeleted(_ context.Context, post *domain.Post) {
 
 func (s *rankService) RebuildRankStats(_ context.Context) {
 	RebuildRankStats(s.db)
-}
-
-type chatService struct {
-	chats repository.ChatRepository
-}
-
-func NewChatService(chats repository.ChatRepository) ChatService {
-	return &chatService{chats: chats}
-}
-
-func (s *chatService) GetHistory(ctx context.Context, userID, peerID, limit, offset int) ([]*repository.ChatMessage, error) {
-	return s.chats.ListHistory(ctx, userID, peerID, limit, offset)
 }
