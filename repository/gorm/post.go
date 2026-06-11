@@ -77,7 +77,7 @@ func (r *postRepository) UpdateBrowseNum(ctx context.Context, id int, browseNum 
 
 func (r *postRepository) LoadDetailDTO(ctx context.Context, postID int) (*dto.PostDetailCacheDTO, error) {
 	var dbPost model.Post
-	err := r.session(ctx).Preload("User").Where("postID = ?", postID).First(&dbPost).Error
+	err := r.session(ctx).Where("postID = ?", postID).First(&dbPost).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
@@ -87,8 +87,12 @@ func (r *postRepository) LoadDetailDTO(ctx context.Context, postID int) (*dto.Po
 	var cacheUser model.User
 	if dbPost.UserID == 0 {
 		cacheUser = model.User{Name: "管理员", Phone: "11111111111"}
-	} else {
-		cacheUser = dbPost.User
+	} else if err := r.session(ctx).Where("userID = ?", dbPost.UserID).First(&cacheUser).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			cacheUser = model.User{UserID: dbPost.UserID}
+		} else {
+			return nil, err
+		}
 	}
 	var out dto.PostDetailCacheDTO
 	out.ConvertFromModel(dbPost, cacheUser)

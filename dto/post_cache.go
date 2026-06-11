@@ -20,8 +20,9 @@ type PostCacheItem struct {
 	Ptext      string `json:"ptext"`
 	LikeNum    int    `json:"like_num"`
 	CommentNum int    `json:"comment_num"`
-	BrowseNum  int    `json:"browse_num"`
-	Photos     string `json:"photos"`
+	BrowseNum  int     `json:"browse_num"`
+	Heat       float64 `json:"heat"`
+	Photos     string  `json:"photos"`
 	Tag        string `json:"tag"`
 	IsPrivate  bool   `json:"is_private"`
 	PostTime   string `json:"post_time"`
@@ -52,6 +53,7 @@ func (d *PostDetailCacheDTO) ConvertFromModel(post model.Post, user model.User) 
 		LikeNum:    post.LikeNum,
 		CommentNum: post.CommentNum,
 		BrowseNum:  post.BrowseNum,
+		Heat:       post.Heat,
 		Photos:     post.Photos,
 		Tag:        post.Tag,
 		IsPrivate:  post.IsPrivate,
@@ -88,6 +90,7 @@ func (d *PostDetailCacheDTO) ConvertToModel() (model.Post, model.User) {
 		LikeNum:    d.Post.LikeNum,
 		CommentNum: d.Post.CommentNum,
 		BrowseNum:  d.Post.BrowseNum,
+		Heat:       d.Post.Heat,
 		Photos:     d.Post.Photos,
 		Tag:        d.Post.Tag,
 		IsPrivate:  d.Post.IsPrivate,
