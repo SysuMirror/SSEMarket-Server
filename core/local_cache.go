@@ -7,23 +7,18 @@ import (
 	"github.com/allegro/bigcache/v3"
 )
 
-// 全局单例：L1本地缓存（全项目共用）
+// LocalCache L1 本地缓存（全项目共用）。
 var LocalCache *bigcache.BigCache
 
-// InitLocalCache 初始化本地缓存
+// InitLocalCache 初始化本地缓存（生产级：5min 窗口、1024 分片、512MB 上限）。
 func InitLocalCache() {
-
-	// 生产级配置
 	config := bigcache.Config{
-		Shards: 2,
-		// 缓存过期时间：5分钟（热点数据）
-		LifeWindow: 500 * time.Minute,
-		// 后台清理过期数据间隔
-		CleanWindow: 1 * time.Minute,
-		// 最大缓存数量，避免OOM
+		Shards:             1024,
+		LifeWindow:         5 * time.Minute,
+		CleanWindow:        1 * time.Minute,
 		MaxEntriesInWindow: 1000 * 1000,
-		// 关闭日志
-		Verbose: false,
+		HardMaxCacheSize:   512,
+		Verbose:            false,
 	}
 
 	cache, err := bigcache.NewBigCache(config)

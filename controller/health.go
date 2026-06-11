@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"loginTest/cache"
 	"loginTest/common"
 	"loginTest/core"
 
@@ -42,6 +43,11 @@ func Ready(c *gin.Context) {
 	}
 	if err := core.MyRedis.Ping(ctx).Err(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "redis": err.Error()})
+		return
+	}
+
+	if !cache.IsReady() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not ready", "warmup": "in progress"})
 		return
 	}
 

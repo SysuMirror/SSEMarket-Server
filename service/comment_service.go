@@ -8,8 +8,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"loginTest/cache"
 	"loginTest/domain"
+	"loginTest/dto"
 	"loginTest/repository"
+	"loginTest/util"
 )
 
 const commentWeight = float64(6)
@@ -34,19 +37,44 @@ func (s *commentService) ListForPost(ctx context.Context, postID int, postType s
 		return nil, domain.ErrNotFound
 	}
 
+	cacheKey := util.GetCommentListKey(postID, postType)
+	tree, err := MultiLevelGet(ctx, cacheKey, func() (*dto.CommentTreeCacheDTO, error) {
+		return s.loadCommentTree(ctx, postID)
+	}, cache.ProfileCommentList)
+	if err != nil {
+		return nil, err
+	}
+	if tree == nil || len(tree.Pcomments) == 0 {
+		return nil, nil
+	}
+	return s.buildCommentResponse(ctx, tree, viewerUserID)
+}
+
+func (s *commentService) loadCommentTree(ctx context.Context, postID int) (*dto.CommentTreeCacheDTO, error) {
 	pcomments, err := s.comments.ListPcommentsByPostID(ctx, postID)
 	if err != nil {
 		return nil, err
 	}
-	if len(pcomments) == 0 {
-		return nil, nil
-	}
-
-	commentIDs := make([]int, 0, len(pcomments))
-	userIDSet := make(map[int]struct{}, len(pcomments))
+	subs := make(map[int][]*domain.Ccomment, len(pcomments))
 	for _, pc := range pcomments {
+		ccomments, err := s.comments.ListCcommentsByPcommentID(ctx, pc.ID)
+		if err != nil {
+			return nil, err
+		}
+		subs[pc.ID] = ccomments
+	}
+	return &dto.CommentTreeCacheDTO{Pcomments: pcomments, Subs: subs}, nil
+}
+
+func (s *commentService) buildCommentResponse(ctx context.Context, tree *dto.CommentTreeCacheDTO, viewerUserID int) ([]*domain.PcommentWithMeta, error) {
+	commentIDs := make([]int, 0, len(tree.Pcomments))
+	userIDSet := make(map[int]struct{}, len(tree.Pcomments))
+	for _, pc := range tree.Pcomments {
 		commentIDs = append(commentIDs, pc.ID)
 		userIDSet[pc.UserID] = struct{}{}
+		for _, cc := range tree.Subs[pc.ID] {
+			userIDSet[cc.UserID] = struct{}{}
+		}
 	}
 
 	userMap, err := s.comments.UsersByIDs(ctx, intSetToSlice(userIDSet))
@@ -62,9 +90,9 @@ func (s *commentService) ListForPost(ctx context.Context, postID int, postType s
 		return nil, err
 	}
 
-	out := make([]*domain.PcommentWithMeta, 0, len(pcomments))
-	for _, pc := range pcomments {
-		subs, err := s.buildSubcomments(ctx, pc.ID, viewerUserID, userMap)
+	out := make([]*domain.PcommentWithMeta, 0, len(tree.Pcomments))
+	for _, pc := range tree.Pcomments {
+		subs, err := s.buildSubcommentsFromCache(ctx, tree.Subs[pc.ID], viewerUserID, userMap)
 		if err != nil {
 			return nil, err
 		}
@@ -74,6 +102,26 @@ func (s *commentService) ListForPost(ctx context.Context, postID int, postType s
 			Subcomments: subs,
 			IsLiked:     likeMap[pc.ID],
 			IsDenied:    denyMap[pc.ID],
+		})
+	}
+	return out, nil
+}
+
+func (s *commentService) buildSubcommentsFromCache(ctx context.Context, ccomments []*domain.Ccomment, viewerUserID int, userMap map[int]*domain.User) ([]*domain.CcommentWithMeta, error) {
+	if len(ccomments) == 0 {
+		return []*domain.CcommentWithMeta{}, nil
+	}
+	out := make([]*domain.CcommentWithMeta, 0, len(ccomments))
+	for _, cc := range ccomments {
+		liked, denied, err := s.comments.CcommentReaction(ctx, viewerUserID, cc.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, &domain.CcommentWithMeta{
+			Ccomment: cc,
+			Author:   authorForComment(userMap, cc.UserID),
+			IsLiked:  liked,
+			IsDenied: denied,
 		})
 	}
 	return out, nil
@@ -145,6 +193,7 @@ func (s *commentService) DeletePcomment(ctx context.Context, pcommentID int) err
 		return err
 	}
 	InvalidatePostDetail(post.ID)
+	InvalidateCommentList(post.ID, "post")
 	return s.comments.DeletePcomment(ctx, pcommentID)
 }
 
@@ -169,6 +218,7 @@ func (s *commentService) DeleteCcomment(ctx context.Context, ccommentID int) err
 		return err
 	}
 	InvalidatePostDetail(post.ID)
+	InvalidateCommentList(post.ID, "post")
 	return s.comments.DeleteCcomment(ctx, ccommentID)
 }
 
@@ -218,6 +268,7 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		return nil, err
 	}
 	InvalidatePostDetail(post.ID)
+	InvalidateCommentList(post.ID, "post")
 
 	subs, err := s.buildSubcomments(ctx, pc.ID, in.UserID, map[int]*domain.User{in.UserID: author})
 	if err != nil {
@@ -297,6 +348,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		return nil, err
 	}
 	InvalidatePostDetail(post.ID)
+	InvalidateCommentList(post.ID, "post")
 	return notifies, nil
 }
 

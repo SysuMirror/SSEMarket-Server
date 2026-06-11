@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"loginTest/cache"
 	"loginTest/common"
 	"loginTest/core"
 	"loginTest/domain"
@@ -46,7 +46,16 @@ func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilte
 }
 
 func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error) {
-	posts, err := s.posts.ListBrowse(ctx, filter)
+	var posts []*domain.Post
+	var err error
+
+	if isHomePage1(filter) {
+		posts, err = MultiLevelGet(ctx, util.GetHomeBrowsePage1Key(), func() ([]*domain.Post, error) {
+			return s.posts.ListBrowse(ctx, filter)
+		}, cache.ProfileHomeBrowse)
+	} else {
+		posts, err = s.posts.ListBrowse(ctx, filter)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +113,10 @@ func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (
 		return nil, domain.ErrBadRequest
 	}
 	cacheKey := util.GetPostDetailKey(postID)
-	baseExpire := 30 * time.Minute
 
 	dtoObj, err := MultiLevelGet(ctx, cacheKey, func() (*dto.PostDetailCacheDTO, error) {
 		return s.posts.LoadDetailDTO(ctx, postID)
-	}, baseExpire)
+	}, cache.ProfilePostDetail)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, domain.ErrNotFound
@@ -188,7 +196,8 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) err
 	if err := s.posts.Create(ctx, post); err != nil {
 		return err
 	}
-	common.BloomFilter.Add([]byte(strconv.Itoa(post.ID)))
+	common.AddPostID(post.ID)
+	InvalidateHomeBrowse()
 
 	if len(in.Tags) > 0 {
 		tag, err := s.posts.FindTagByName(ctx, in.Tags[0])
@@ -334,6 +343,7 @@ func (s *postService) Delete(ctx context.Context, postID, userID int) error {
 		return err
 	}
 	InvalidatePostDetail(postID)
+	InvalidateHomeBrowse()
 	return nil
 }
 
@@ -454,6 +464,19 @@ func canViewPost(post *domain.Post, viewerUserID int) bool {
 		return false
 	}
 	return !post.IsPrivate || post.UserID == viewerUserID
+}
+
+func isHomePage1(filter domain.BrowseFilter) bool {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 15
+	}
+	return filter.Searchsort == "home" &&
+		filter.Offset == 0 &&
+		limit <= 15 &&
+		filter.Partition == "" &&
+		filter.Searchinfo == "" &&
+		filter.Tag == ""
 }
 
 func authorForPost(m map[int]*domain.User, userID int) *domain.User {

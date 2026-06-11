@@ -70,6 +70,11 @@ func GetProductListKey(userID int, searchsort, searchinfo string) string {
 	return PrefixProductList + fmt.Sprintf("%d:%s:%s", userID, searchsort, searchinfo)
 }
 
+// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（与用户无关的公共列表）。
+func GetHomeBrowsePage1Key() string {
+	return PrefixPostBrowse + "home:page1"
+}
+
 // GetRandomExpire 随机过期时间（防缓存雪崩）
 func GetRandomExpire(base time.Duration) time.Duration {
 	rand.Seed(time.Now().UnixNano())

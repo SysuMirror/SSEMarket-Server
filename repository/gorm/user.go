@@ -483,3 +483,22 @@ func (r *userRepository) ListChatMessagesForUser(ctx context.Context, userID int
 	}
 	return out, nil
 }
+
+func (r *userRepository) ListTopActive(ctx context.Context, limit int) ([]*domain.User, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows []model.User
+	err := r.session(ctx).
+		Order("(received_like_num + received_vote_num) DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.User, 0, len(rows))
+	for i := range rows {
+		out = append(out, userToDomain(&rows[i]))
+	}
+	return out, nil
+}

@@ -30,3 +30,25 @@ func (r *hotDataRepository) UpdateBrowseNum(_ context.Context, postID int, brows
 		Where("postID = ?", postID).
 		Update("browse_num", browseNum).Error
 }
+
+func (r *hotDataRepository) ListBrowseNumsForWarmup(_ context.Context, limit int) ([]repository.PostBrowseNum, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var rows []model.Post
+	err := r.db.Select("postID", "browse_num").
+		Order("post_time DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]repository.PostBrowseNum, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, repository.PostBrowseNum{
+			PostID:    p.PostID,
+			BrowseNum: int64(p.BrowseNum),
+		})
+	}
+	return out, nil
+}

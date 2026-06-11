@@ -52,4 +52,7 @@ type UserRepository interface {
 	ListPostSummariesByUserID(ctx context.Context, userID int) ([]domain.PostSummary, error)
 	CountPsavesByUserID(ctx context.Context, userID int) (int64, error)
 	ListChatMessagesForUser(ctx context.Context, userID int) ([]domain.ChatMessagePeer, error)
+
+	// ListTopActive 按活跃度（获赞+获票）取 Top N，供缓存预热。
+	ListTopActive(ctx context.Context, limit int) ([]*domain.User, error)
 }

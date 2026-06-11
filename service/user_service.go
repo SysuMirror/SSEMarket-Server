@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"loginTest/cache"
 	"loginTest/common"
 	"loginTest/core"
 	"loginTest/domain"
@@ -30,7 +31,13 @@ func NewUserService(users repository.UserRepository) UserService {
 }
 
 func (s *userService) GetByID(ctx context.Context, id int) (*domain.User, error) {
-	return s.users.FindByID(ctx, id)
+	if id <= 0 {
+		return nil, domain.ErrBadRequest
+	}
+	key := util.GetUserInfoKey(id)
+	return MultiLevelGet(ctx, key, func() (*domain.User, error) {
+		return s.users.FindByID(ctx, id)
+	}, cache.ProfileUserInfo)
 }
 
 func (s *userService) Login(ctx context.Context, in domain.LoginInput) (*domain.AuthTokens, error) {
@@ -444,6 +451,7 @@ func (s *userService) UpdateUserInfo(ctx context.Context, in domain.UpdateUserIn
 		return err
 	}
 	InvalidateUserSession(ctx, u.ID)
+	InvalidateUserInfo(u.ID)
 	return nil
 }
 

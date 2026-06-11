@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"loginTest/cache"
 	"loginTest/common"
 	"loginTest/config"
 	"loginTest/controller"
@@ -120,11 +121,36 @@ func main() {
 	db := common.InitDB()
 	service.InitServices(db)
 	service.Ranks.RebuildRankStats(context.Background())
+
 	rds := core.RedisInit()
 	common.InitJWTkey()
 	core.InitLocalCache()
-	common.InitBloomFilter()
+	cache.InitManager()
 	service.InitHotDataService(gormrepo.NewHotDataRepository(db))
+
+	// 缓存预热：完成后再标记 ready 并注册路由接流量
+	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	postRepo := gormrepo.NewPostRepository(db)
+	userRepo := gormrepo.NewUserRepository(db)
+	hotRepo := gormrepo.NewHotDataRepository(db)
+	cache.RunWarmup(warmupCtx, cache.BuildWarmupTasks(cache.WarmupDeps{
+		Posts:   postRepo,
+		Users:   userRepo,
+		HotData: hotRepo,
+		LoadBloom: func(ctx context.Context) error {
+			_ = ctx
+			common.InitBloomFilter()
+			return nil
+		},
+		LoadHotZSet: func(ctx context.Context) error {
+			_ = ctx
+			heat.RefreshHeat()
+			return nil
+		},
+	}))
+	cache.WarmupPostDetailBatch(warmupCtx, postRepo, cache.ExtractTopPostIDsFromZSet(warmupCtx, 100))
+	warmupCancel()
+	cache.MarkReady()
 
 	r = gin.Default()
 	r.Use(middleware.LoggerToFile())
