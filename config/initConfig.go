@@ -22,6 +22,8 @@ func InitConfig() {
 	_ = viper.BindEnv("cos.secretId", "COS_SECRET_ID")
 	_ = viper.BindEnv("cos.secretKey", "COS_SECRET_KEY")
 	_ = viper.BindEnv("cos.appid", "COS_APPID")
+	_ = viper.BindEnv("observability.tracing.enabled", "OBSERVABILITY_TRACING_ENABLED")
+	_ = viper.BindEnv("observability.tracing.jaeger_endpoint", "OBSERVABILITY_JAEGER_ENDPOINT")
 
 	if err := viper.ReadInConfig(); err != nil {
 		panic(err)

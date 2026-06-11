@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"loginTest/core"
+	"loginTest/observability"
 	"loginTest/repository"
 	"loginTest/util"
 	"sync"
@@ -22,7 +23,7 @@ var ctx = context.Background()
 type HotDataService struct {
 	repo            repository.HotDataRepository
 	dbSyncInterval  time.Duration
-	browseDirty     sync.Map // postID -> struct{}，该帖 Redis 计数有变更、待落库
+	browseDirty     sync.Map // postID -> time.Time，该帖 Redis 计数有变更、待落库的时间
 	redisHealthy    bool
 	stopChan        chan struct{}
 	shutdownOnce    sync.Once
@@ -93,7 +94,7 @@ func (s *HotDataService) IncrBrowseCount(postID int) int64 {
 		log.Printf("[hot_data] IncrBrowseCount redis Incr failed postID=%d: %v", postID, err)
 		return s.browseNumFromDB(postID)
 	}
-	s.browseDirty.Store(postID, struct{}{})
+	s.browseDirty.Store(postID, time.Now())
 	return n
 }
 
@@ -109,7 +110,7 @@ func (s *HotDataService) SyncBrowseRedisFloor(postID int, minVal int64) {
 	}
 	if errors.Is(err, redis.Nil) || minVal > cur {
 		if err := core.MyRedis.Set(ctx, key, minVal, 0).Err(); err == nil {
-			s.browseDirty.Store(postID, struct{}{})
+			s.browseDirty.Store(postID, time.Now())
 		}
 	}
 }
@@ -141,17 +142,39 @@ func (s *HotDataService) startHealthCheck() {
 // startDBSyncTask 启动数据库同步任务
 func (s *HotDataService) startDBSyncTask() {
 	ticker := time.NewTicker(s.dbSyncInterval)
+	lagTicker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	defer lagTicker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			s.syncToDB()
+		case <-lagTicker.C:
+			s.updateBrowseSyncLag()
 		case <-s.stopChan:
 			s.syncToDB()
+			s.updateBrowseSyncLag()
 			return
 		}
 	}
+}
+
+// updateBrowseSyncLag 计算最久未同步的 dirty 浏览数延迟。
+func (s *HotDataService) updateBrowseSyncLag() {
+	var maxLag time.Duration
+	now := time.Now()
+	s.browseDirty.Range(func(k, v interface{}) bool {
+		dirtyAt, ok := v.(time.Time)
+		if !ok {
+			return true
+		}
+		if lag := now.Sub(dirtyAt); lag > maxLag {
+			maxLag = lag
+		}
+		return true
+	})
+	observability.BrowseSyncLag.Set(maxLag.Seconds())
 }
 
 // syncToDB 将 Redis 中的浏览数同步到数据库

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"loginTest/model"
+	"loginTest/observability"
 	"time"
 
 	"github.com/spf13/viper"
@@ -62,6 +63,10 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Resume{})
 	RunRatingMigration(db)
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
+
+	if err := observability.RegisterGORMMetrics(db); err != nil {
+		log.Printf("[observability] register gorm metrics: %v", err)
+	}
 
 	DB = db
 	return db

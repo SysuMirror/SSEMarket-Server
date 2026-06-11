@@ -11,6 +11,7 @@ import (
 	"loginTest/core"
 	"loginTest/heat"
 	"loginTest/middleware"
+	"loginTest/observability"
 	"loginTest/route"
 	gormrepo "loginTest/repository/gorm"
 	"loginTest/service"
@@ -26,8 +27,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // 核心变量
@@ -117,6 +120,13 @@ func registerPprofRoutes(r *gin.Engine) {
 func main() {
 	config.InitConfig()
 	config.InitEmailConfig()
+
+	obsCtx := context.Background()
+	shutdownTracing, err := observability.InitTracing(obsCtx)
+	if err != nil {
+		log.Fatalf("[observability] init tracing: %v", err)
+	}
+
 	go Copy()
 	db := common.InitDB()
 	service.InitServices(db)
@@ -127,6 +137,9 @@ func main() {
 	core.InitLocalCache()
 	cache.InitManager()
 	service.InitHotDataService(gormrepo.NewHotDataRepository(db))
+
+	collectorCtx, collectorCancel := context.WithCancel(context.Background())
+	observability.StartCollectors(collectorCtx, rds)
 
 	// 缓存预热：完成后再标记 ready 并注册路由接流量
 	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -153,7 +166,18 @@ func main() {
 	cache.MarkReady()
 
 	r = gin.Default()
+	r.Use(middleware.RequestID())
+	if viper.GetBool("observability.tracing.enabled") {
+		serviceName := viper.GetString("observability.tracing.service_name")
+		if serviceName == "" {
+			serviceName = "sse_market_server"
+		}
+		r.Use(otelgin.Middleware(serviceName))
+		r.Use(middleware.AttachRequestIDToSpan())
+	}
+	r.Use(middleware.PrometheusMetrics())
 	r.Use(middleware.LoggerToFile())
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
 	registerPprofRoutes(r)
@@ -180,6 +204,12 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	collectorCancel()
+
+	if err := shutdownTracing(shutdownCtx); err != nil {
+		log.Printf("[observability] shutdown tracing: %v", err)
+	}
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP 服务关闭: %v", err)

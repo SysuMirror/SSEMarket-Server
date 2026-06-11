@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"loginTest/core"
+	"loginTest/observability"
 	"loginTest/util"
 
 	"golang.org/x/sync/singleflight"
@@ -44,28 +45,34 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 	if data, err := core.LocalCache.Get(key); err == nil {
 		if cv, ok := decodeValue[T](data); ok {
 			if isLogicValid(cv) {
+				observability.RecordCacheAccess("l1", profile.Name, true)
 				return cv.Data, nil
 			}
 			if profile.LogicalExpire {
+				observability.RecordCacheAccess("l1", profile.Name, true)
 				refreshAsync(m, ctx, key, loader, profile)
 				return cv.Data, nil
 			}
 		}
 	}
+	observability.RecordCacheAccess("l1", profile.Name, false)
 
 	if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
 		if cv, ok := decodeValue[T](redisData); ok {
 			if isLogicValid(cv) {
+				observability.RecordCacheAccess("l2", profile.Name, true)
 				_ = core.LocalCache.Set(key, redisData)
 				return cv.Data, nil
 			}
 			if profile.LogicalExpire {
+				observability.RecordCacheAccess("l2", profile.Name, true)
 				_ = core.LocalCache.Set(key, redisData)
 				refreshAsync(m, ctx, key, loader, profile)
 				return cv.Data, nil
 			}
 		}
 	}
+	observability.RecordCacheAccess("l2", profile.Name, false)
 
 	lock := util.NewLock("lock:" + key)
 	acquired := lock.TryLock()

@@ -57,8 +57,9 @@ services:
       - redis
       - mysql
     build: .
-    ports:
-      - 8080:8080
+    # 仅内网访问，对外统一走 nginx HTTPS
+    expose:
+      - "8080"
     environment:
       - TZ=Asia/Shanghai
       - GIN_MODE=release
@@ -68,23 +69,65 @@ services:
       - COS_APPID=1320172928
       - COS_SECRET_ID=AKID0yDPbghgaRG3lMF9zoP1gKtMrNq561qi
       - COS_SECRET_KEY=6GTZYODxYG3wlbo1KezDKH6ulSxJi3GR
+      - OBSERVABILITY_TRACING_ENABLED=true
+      - OBSERVABILITY_JAEGER_ENDPOINT=jaeger:4317
     volumes:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log
       - /root/SSE_Market/database:/app/database
-  sse_market_test:
-    image: sse_market_test:latest
-    container_name: test
-    restart: on-failure:3
-    build: ../qiu/GIN
+  # sse_market_test:
+  #   image: sse_market_test:latest
+  #   container_name: test
+  #   restart: on-failure:3
+  #   build: ../qiu/GIN
+  #   ports:
+  #     - 9090:9090
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #   volumes:
+  #     - /root/SSE_Market/qiu/GIN:/app/public
+  #     - /root/SSE_Market/log/server:/app/log
+  #     - /root/SSE_Market/database:/app/database
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ../monitor/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    depends_on:
+      - sse_market_server
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    restart: unless-stopped
     ports:
-      - 9090:9090
+      - 9090:3000
     environment:
       - TZ=Asia/Shanghai
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=SSE_Matket
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://ssemarket.cn/monitor
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
-      - /root/SSE_Market/qiu/GIN:/app/public
-      - /root/SSE_Market/log/server:/app/log
-      - /root/SSE_Market/database:/app/database
+      - grafana-data:/var/lib/grafana
+      - ../monitor/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+  jaeger:
+    image: jaegertracing/all-in-one:1.64.0
+    container_name: jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - QUERY_BASE_PATH=/jaeger
+    depends_on:
+      - sse_market_server
   # - /root/SSE_Market/Nginx:/app/ssl
   # sse_market_server_public:
   #   image: sse_market_server_public:latest
@@ -166,6 +209,8 @@ services:
 
 volumes:
   my-vol:
+  prometheus-data:
+  grafana-data:
     # blog_db_data:
     #   external: true
     # wordpress_data:
