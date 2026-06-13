@@ -170,3 +170,15 @@ type VoteService interface {
 	GetPostRanking(ctx context.Context) ([]domain.PostRankItem, error)
 	GetUserRanking(ctx context.Context) ([]domain.UserRankItem, error)
 }
+
+// LotteryService 抽奖帖领域服务。
+type LotteryService interface {
+	Create(ctx context.Context, in domain.LotteryCreateInput) (int, error)
+	GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.LotteryPost, error)
+	ParticipateButton(ctx context.Context, userID, postID int) error
+	ParticipateByComment(ctx context.Context, in domain.LotteryParticipateInput) error
+	HasParticipated(ctx context.Context, userID, postID int) (bool, error)
+	Draw(ctx context.Context, postID int) error
+	AutoDrawDue(ctx context.Context)
+	IsLotteryPost(ctx context.Context, postID int) (bool, error)
+}

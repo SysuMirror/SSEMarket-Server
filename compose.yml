@@ -51,7 +51,7 @@ services:
   sse_market_server:
     image: sse_market_server:latest
     container_name: server
-    restart: on-failure:3
+    restart: unless-stopped
     # build: ../SSE_market_server_old
     depends_on:
       - redis
@@ -75,20 +75,89 @@ services:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log
       - /root/SSE_Market/database:/app/database
-  # sse_market_test:
-  #   image: sse_market_test:latest
-  #   container_name: test
-  #   restart: on-failure:3
-  #   build: ../qiu/GIN
-  #   ports:
-  #     - 9090:9090
-  #   environment:
-  #     - TZ=Asia/Shanghai
-  #   volumes:
-  #     - /root/SSE_Market/qiu/GIN:/app/public
-  #     - /root/SSE_Market/log/server:/app/log
-  #     - /root/SSE_Market/database:/app/database
+  # 压测栈（SSE_market_server_test）：独立 MySQL/Redis/Go，不影响生产
+  # 默认不启动；需要压测时: docker compose --profile loadtest up -d
+  mysql_loadtest:
+    profiles:
+      - loadtest
+    image: mysql:8.1
+    container_name: sse_market_db_loadtest
+    restart: unless-stopped
+    command: --max_connections=500 --default-authentication-plugin=mysql_native_password --innodb_lock_wait_timeout=500
+    ports:
+      - "3507:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+      TZ: Asia/Shanghai
+      MYSQL_DATABASE: ssemarket_loadtest
+    volumes:
+      - loadtest-mysql-vol:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-padmin"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis_loadtest:
+    profiles:
+      - loadtest
+    image: redis:latest
+    container_name: sse_market_redis_loadtest
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sse_market_server_loadtest:
+    profiles:
+      - loadtest
+    image: sse_market_server_loadtest:latest
+    container_name: server_loadtest
+    restart: unless-stopped
+    build: .
+    depends_on:
+      mysql_loadtest:
+        condition: service_healthy
+      redis_loadtest:
+        condition: service_healthy
+    ports:
+      - "8888:8080"
+    expose:
+      - "8080"
+    environment:
+      TZ: Asia/Shanghai
+      GIN_MODE: release
+      LOADTEST_MODE: "true"
+      DATASOURCE_HOST: mysql_loadtest
+      DATASOURCE_DATABASE: ssemarket_loadtest
+      DATASOURCE_PASSWORD: admin
+      DATASOURCE_POOL_MAX_OPEN: "250"
+      DATASOURCE_POOL_MAX_IDLE: "50"
+      REDIS_HOST: redis_loadtest
+      REDIS_PASSWORD: ""
+      REDIS_POOL_SIZE: "200"
+      REDIS_POOL_MIN_IDLE: "20"
+      JWT_KEY: qeYc&*s18lP+3Ga%w^I59Paq3jx3&o!X
+      OBSERVABILITY_TRACING_ENABLED: "false"
+      OBSERVABILITY_TRACING_SERVICE_NAME: sse_market_server_loadtest
+      PPROF_ENABLED: "true"
+      # 远程抓 profile 时填入压测机公网 IP，例: 112.193.214.228
+      # PPROF_IP_WHITELIST: ""
+    volumes:
+      - /root/SSE_Market/log/server_loadtest:/app/log
+      - /root/SSE_Market/log/server_loadtest/pprof:/app/pprof
+
   prometheus:
+    profiles:
+      - loadtest
     image: prom/prometheus:v2.55.1
     container_name: prometheus
     restart: unless-stopped
@@ -98,10 +167,14 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --query.timeout=2m
       - --web.enable-lifecycle
     depends_on:
-      - sse_market_server
+      - sse_market_server_loadtest
   grafana:
+    profiles:
+      - loadtest
     image: grafana/grafana:11.4.0
     container_name: grafana
     restart: unless-stopped
@@ -145,8 +218,10 @@ services:
   #     # - /root/SSE_Market/Nginx:/app/ssl
   nginx_proxy:
     image: nginx_proxy
-    restart: on-failure:3
+    restart: unless-stopped
     build: ../nginx_proxy
+    depends_on:
+      - sse_market_server
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -209,6 +284,7 @@ services:
 
 volumes:
   my-vol:
+  loadtest-mysql-vol:
   prometheus-data:
   grafana-data:
     # blog_db_data:

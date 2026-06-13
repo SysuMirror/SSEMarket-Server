@@ -9,15 +9,46 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// PprofGuard 仅 GIN_MODE=debug 或内网 IP 白名单可访问 pprof。
+func isWhitelisted(ipStr string) bool {
+	if ipStr == "" {
+		return false
+	}
+	extra := os.Getenv("PPROF_IP_WHITELIST")
+	if extra == "" {
+		return false
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, item := range strings.Split(extra, ",") {
+		item = strings.TrimSpace(item)
+		if item == ipStr {
+			return true
+		}
+		if _, cidr, err := net.ParseCIDR(item); err == nil && cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// PprofGuard 仅 GIN_MODE=debug、PPROF_ENABLED 内网/白名单、或内网 IP 可访问 pprof。
 func PprofGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if os.Getenv("GIN_MODE") == "debug" {
 			c.Next()
 			return
 		}
-		if isInternalIP(c.ClientIP()) {
+		clientIP := c.ClientIP()
+		if isInternalIP(clientIP) || isWhitelisted(clientIP) {
 			c.Next()
+			return
+		}
+		if os.Getenv("PPROF_ENABLED") == "true" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"msg": "pprof forbidden: set PPROF_IP_WHITELIST or access from server localhost / private network",
+			})
 			return
 		}
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"msg": "forbidden"})
@@ -35,16 +66,8 @@ func isInternalIP(ipStr string) bool {
 	if ip.IsLoopback() {
 		return true
 	}
-	if extra := os.Getenv("PPROF_IP_WHITELIST"); extra != "" {
-		for _, item := range strings.Split(extra, ",") {
-			item = strings.TrimSpace(item)
-			if item == ipStr {
-				return true
-			}
-			if _, cidr, err := net.ParseCIDR(item); err == nil && cidr.Contains(ip) {
-				return true
-			}
-		}
+	if isWhitelisted(ipStr) {
+		return true
 	}
 	privateBlocks := []string{
 		"10.0.0.0/8",

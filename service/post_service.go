@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"loginTest/cache"
 	"loginTest/common"
 	"loginTest/core"
@@ -46,66 +48,11 @@ func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilte
 }
 
 func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error) {
-	var posts []*domain.Post
-	var err error
-
-	if isHomePage1(filter) {
-		posts, err = MultiLevelGet(ctx, util.GetHomeBrowsePage1Key(), func() ([]*domain.Post, error) {
-			return s.posts.ListBrowse(ctx, filter)
-		}, cache.ProfileHomeBrowse)
-	} else {
-		posts, err = s.posts.ListBrowse(ctx, filter)
-	}
+	posts, err := s.fetchPublicFeed(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
-	if len(posts) == 0 {
-		return nil, nil
-	}
-
-	viewerID := filter.ViewerUserID
-	postIDs := make([]int, 0, len(posts))
-	userIDSet := make(map[int]struct{})
-	visible := make([]*domain.Post, 0, len(posts))
-	for _, p := range posts {
-		if !canViewPost(p, viewerID) {
-			continue
-		}
-		visible = append(visible, p)
-		postIDs = append(postIDs, p.ID)
-		if p.UserID != 0 {
-			userIDSet[p.UserID] = struct{}{}
-		}
-	}
-	if len(visible) == 0 {
-		return nil, nil
-	}
-
-	savedSet, _ := s.posts.SavedSet(ctx, viewerID, postIDs)
-	likedSet, _ := s.posts.LikedSet(ctx, viewerID, postIDs)
-	userIDs := make([]int, 0, len(userIDSet))
-	for id := range userIDSet {
-		userIDs = append(userIDs, id)
-	}
-	authorMap, _ := s.posts.AuthorsByIDs(ctx, userIDs)
-
-	isSaveMode := filter.Searchsort == "save"
-	items := make([]domain.BrowseItem, 0, len(visible))
-	for _, p := range visible {
-		author := authorForPost(authorMap, p.UserID)
-		_, liked := likedSet[p.ID]
-		_, saved := savedSet[p.ID]
-		if isSaveMode {
-			saved = true
-		}
-		items = append(items, domain.BrowseItem{
-			Post:    p,
-			Author:  author,
-			IsSaved: saved,
-			IsLiked: liked,
-		})
-	}
-	return items, nil
+	return s.attachPersonalBrowseState(ctx, filter, posts)
 }
 
 func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error) {
@@ -252,6 +199,7 @@ func (s *postService) UpdatePrivacy(ctx context.Context, postID, userID int, isP
 		return err
 	}
 	InvalidatePostDetail(postID)
+	InvalidateHomeBrowse()
 	return nil
 }
 
@@ -424,6 +372,36 @@ func (s *postService) ListTags(ctx context.Context) ([]*domain.Tag, error) {
 	return s.posts.ListAllTags(ctx)
 }
 
+// fetchBrowseInteractionSets 并行查询收藏/点赞/作者，缩短 browse 串行 DB 等待。
+func (s *postService) fetchBrowseInteractionSets(ctx context.Context, viewerID int, postIDs, userIDs []int) (
+	savedSet map[int]struct{}, likedSet map[int]struct{}, authorMap map[int]*domain.User,
+) {
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		savedSet, _ = s.posts.SavedSet(ctx, viewerID, postIDs)
+		return nil
+	})
+	g.Go(func() error {
+		likedSet, _ = s.posts.LikedSet(ctx, viewerID, postIDs)
+		return nil
+	})
+	g.Go(func() error {
+		authorMap, _ = s.posts.AuthorsByIDs(ctx, userIDs)
+		return nil
+	})
+	_ = g.Wait()
+	if savedSet == nil {
+		savedSet = map[int]struct{}{}
+	}
+	if likedSet == nil {
+		likedSet = map[int]struct{}{}
+	}
+	if authorMap == nil {
+		authorMap = map[int]*domain.User{}
+	}
+	return savedSet, likedSet, authorMap
+}
+
 func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts []*domain.Post, isSaveMode bool) ([]domain.BrowseItem, error) {
 	postIDs := make([]int, 0, len(posts))
 	userIDSet := make(map[int]struct{})
@@ -433,13 +411,11 @@ func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts 
 			userIDSet[p.UserID] = struct{}{}
 		}
 	}
-	savedSet, _ := s.posts.SavedSet(ctx, viewerID, postIDs)
-	likedSet, _ := s.posts.LikedSet(ctx, viewerID, postIDs)
 	userIDs := make([]int, 0, len(userIDSet))
 	for id := range userIDSet {
 		userIDs = append(userIDs, id)
 	}
-	authorMap, _ := s.posts.AuthorsByIDs(ctx, userIDs)
+	savedSet, likedSet, authorMap := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
 
 	items := make([]domain.BrowseItem, 0, len(posts))
 	for _, p := range posts {
@@ -464,19 +440,6 @@ func canViewPost(post *domain.Post, viewerUserID int) bool {
 		return false
 	}
 	return !post.IsPrivate || post.UserID == viewerUserID
-}
-
-func isHomePage1(filter domain.BrowseFilter) bool {
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 15
-	}
-	return filter.Searchsort == "home" &&
-		filter.Offset == 0 &&
-		limit <= 15 &&
-		filter.Partition == "" &&
-		filter.Searchinfo == "" &&
-		filter.Tag == ""
 }
 
 func authorForPost(m map[int]*domain.User, userID int) *domain.User {

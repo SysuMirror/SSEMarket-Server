@@ -90,9 +90,24 @@ func (s *commentService) buildCommentResponse(ctx context.Context, tree *dto.Com
 		return nil, err
 	}
 
+	ccommentIDs := make([]int, 0)
+	for _, pc := range tree.Pcomments {
+		for _, cc := range tree.Subs[pc.ID] {
+			ccommentIDs = append(ccommentIDs, cc.ID)
+		}
+	}
+	ccLikeMap, err := s.comments.CcommentLikedSet(ctx, viewerUserID, ccommentIDs)
+	if err != nil {
+		return nil, err
+	}
+	ccDenyMap, err := s.comments.CcommentDeniedSet(ctx, viewerUserID, ccommentIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]*domain.PcommentWithMeta, 0, len(tree.Pcomments))
 	for _, pc := range tree.Pcomments {
-		subs, err := s.buildSubcommentsFromCache(ctx, tree.Subs[pc.ID], viewerUserID, userMap)
+		subs, err := s.buildSubcommentsFromCache(tree.Subs[pc.ID], userMap, ccLikeMap, ccDenyMap)
 		if err != nil {
 			return nil, err
 		}
@@ -107,21 +122,17 @@ func (s *commentService) buildCommentResponse(ctx context.Context, tree *dto.Com
 	return out, nil
 }
 
-func (s *commentService) buildSubcommentsFromCache(ctx context.Context, ccomments []*domain.Ccomment, viewerUserID int, userMap map[int]*domain.User) ([]*domain.CcommentWithMeta, error) {
+func (s *commentService) buildSubcommentsFromCache(ccomments []*domain.Ccomment, userMap map[int]*domain.User, ccLikeMap, ccDenyMap map[int]bool) ([]*domain.CcommentWithMeta, error) {
 	if len(ccomments) == 0 {
 		return []*domain.CcommentWithMeta{}, nil
 	}
 	out := make([]*domain.CcommentWithMeta, 0, len(ccomments))
 	for _, cc := range ccomments {
-		liked, denied, err := s.comments.CcommentReaction(ctx, viewerUserID, cc.ID)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, &domain.CcommentWithMeta{
 			Ccomment: cc,
 			Author:   authorForComment(userMap, cc.UserID),
-			IsLiked:  liked,
-			IsDenied: denied,
+			IsLiked:  ccLikeMap[cc.ID],
+			IsDenied: ccDenyMap[cc.ID],
 		})
 	}
 	return out, nil
@@ -156,17 +167,26 @@ func (s *commentService) buildSubcomments(ctx context.Context, pcommentID, viewe
 		}
 	}
 
+	ccommentIDs := make([]int, 0, len(ccomments))
+	for _, cc := range ccomments {
+		ccommentIDs = append(ccommentIDs, cc.ID)
+	}
+	ccLikeMap, err := s.comments.CcommentLikedSet(ctx, viewerUserID, ccommentIDs)
+	if err != nil {
+		return nil, err
+	}
+	ccDenyMap, err := s.comments.CcommentDeniedSet(ctx, viewerUserID, ccommentIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]*domain.CcommentWithMeta, 0, len(ccomments))
 	for _, cc := range ccomments {
-		liked, denied, err := s.comments.CcommentReaction(ctx, viewerUserID, cc.ID)
-		if err != nil {
-			return nil, err
-		}
 		out = append(out, &domain.CcommentWithMeta{
 			Ccomment: cc,
 			Author:   authorForComment(userMap, cc.UserID),
-			IsLiked:  liked,
-			IsDenied: denied,
+			IsLiked:  ccLikeMap[cc.ID],
+			IsDenied: ccDenyMap[cc.ID],
 		})
 	}
 	return out, nil

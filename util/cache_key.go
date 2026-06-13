@@ -70,9 +70,43 @@ func GetProductListKey(userID int, searchsort, searchinfo string) string {
 	return PrefixProductList + fmt.Sprintf("%d:%s:%s", userID, searchsort, searchinfo)
 }
 
-// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（与用户无关的公共列表）。
+// PublicFeedGenKey 公共 Feed 缓存世代；INCR 后旧 key 自动失效。
+const PublicFeedGenKey = PrefixPostBrowse + "public:gen"
+
+// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（与用户无关的公共列表，已废弃，保留兼容失效）。
 func GetHomeBrowsePage1Key() string {
 	return PrefixPostBrowse + "home:page1"
+}
+
+// GetPublicFeedCacheKey 公共 Feed 列表缓存 Key（不含用户态；含 sort/partition/order/分页）。
+func GetPublicFeedCacheKey(filter BrowseFeedKeyInput, generation int64) string {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 15
+	}
+	sort := filter.Searchsort
+	if sort == "" {
+		sort = "home"
+	}
+	partition := filter.Partition
+	if partition == "" {
+		partition = "default"
+	}
+	orderBy := filter.OrderBy
+	if orderBy == "" {
+		orderBy = "default"
+	}
+	return fmt.Sprintf("%spublic:g%d:%s:part:%s:ord:%s:off:%d:lim:%d",
+		PrefixPostBrowse, generation, sort, partition, orderBy, filter.Offset, limit)
+}
+
+// BrowseFeedKeyInput 公共 Feed 缓存 key 维度（不含 userID）。
+type BrowseFeedKeyInput struct {
+	Searchsort string
+	Partition  string
+	OrderBy    string
+	Offset     int
+	Limit      int
 }
 
 // GetRandomExpire 随机过期时间（防缓存雪崩）

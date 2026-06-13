@@ -20,6 +20,10 @@ var (
 	ProfileHomeBrowse = Profile{
 		Name: "home_browse", L1TTL: 1 * time.Minute, L2TTL: 5 * time.Minute,
 	}
+	// ProfilePublicFeed 公共帖子列表（与用户无关，browse 公共段）。
+	ProfilePublicFeed = Profile{
+		Name: "public_feed", L1TTL: 1 * time.Minute, L2TTL: 5 * time.Minute, LogicalExpire: true,
+	}
 	ProfileUserInfo = Profile{
 		Name: "user_info", L1TTL: 10 * time.Minute, L2TTL: time.Hour,
 	}

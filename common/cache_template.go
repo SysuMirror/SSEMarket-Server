@@ -40,9 +40,9 @@ func InvalidateCommentListCache(postID int, postType string) {
 	cache.Invalidate(util.GetCommentListKey(postID, postType))
 }
 
-// InvalidateHomeBrowseCache 首页列表变更时失效缓存。
+// InvalidateHomeBrowseCache 公共 Feed 列表变更时失效缓存。
 func InvalidateHomeBrowseCache() {
-	cache.Invalidate(util.GetHomeBrowsePage1Key())
+	cache.InvalidatePublicFeed(ctx)
 }
 
 // InvalidateUserInfoCache 用户信息变更时失效缓存。

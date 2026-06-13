@@ -19,7 +19,8 @@ var (
 	Notices  NoticeService
 	Admins   AdminService
 	Sues     SueService
-	Votes    VoteService
+	Votes     VoteService
+	Lotteries LotteryService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -35,6 +36,7 @@ func InitServices(db *gorm.DB) {
 	adminRepo := gormrepo.NewAdminRepository(db)
 	sueRepo := gormrepo.NewSueRepository(db)
 	voteRepo := gormrepo.NewVoteRepository(db)
+	lotteryRepo := gormrepo.NewLotteryRepository(db)
 	rankRepo := gormrepo.NewRankRepository(db)
 
 	Users = NewUserService(userRepo)
@@ -49,4 +51,5 @@ func InitServices(db *gorm.DB) {
 	Admins = NewAdminService(adminRepo)
 	Sues = NewSueService(sueRepo)
 	Votes = NewVoteService(voteRepo, postRepo, Ranks)
+	Lotteries = NewLotteryService(lotteryRepo, postRepo)
 }

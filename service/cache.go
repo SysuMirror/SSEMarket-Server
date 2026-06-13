@@ -30,7 +30,7 @@ func InvalidateCommentList(postID int, postType string) {
 	common.InvalidateCommentListCache(postID, postType)
 }
 
-// InvalidateHomeBrowse 首页列表变更时失效缓存。
+// InvalidateHomeBrowse 公共 Feed 列表变更时失效缓存（世代号 +1）。
 func InvalidateHomeBrowse() {
 	common.InvalidateHomeBrowseCache()
 }

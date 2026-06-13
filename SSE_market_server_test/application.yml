@@ -1,0 +1,46 @@
+# 非敏感默认值；密码/密钥等通过环境变量覆盖（见 config/initConfig.go）
+server:
+  port: 8080
+
+datasource:
+  driverName: mysql
+  host: mysql
+  port: 3306
+  database: ssemarket
+  username: root
+  password: ""
+  charset: utf8mb4
+  pool:
+    max_open: 150
+    max_idle: 30
+    conn_max_lifetime: 30m
+
+redis:
+  host: redis
+  port: 6379
+  password: ""
+  pool:
+    size: 100
+    min_idle: 10
+  timeout:
+    dial: 500ms
+    read: 300ms
+    write: 300ms
+
+cos:
+  bucketName: sse-market-source
+  appid: ""
+  secretId: ""
+  secretKey: ""
+
+crypto:
+  jwtKey: ""
+
+hot_data:
+  db_sync_interval: 5s
+
+observability:
+  tracing:
+    enabled: false
+    jaeger_endpoint: jaeger:4317
+    service_name: sse_market_server

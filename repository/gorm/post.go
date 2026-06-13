@@ -6,13 +6,25 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
+
 	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/repository"
+	"loginTest/util"
 
 	"gorm.io/gorm"
 )
+
+// browseListSelect 列表只读摘要字段，避免拉取 varchar(10000) 全文。
+func browseListSelect(q *gorm.DB) *gorm.DB {
+	preview := util.BrowseContentPreviewRunes
+	return q.Select(fmt.Sprintf(
+		"postID, userID, `partition`, title, LEFT(ptext, %d) AS ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private",
+		preview,
+	))
+}
 
 type postRepository struct {
 	db *gorm.DB
@@ -128,7 +140,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 			postIDs = append(postIDs, s.PtargetID)
 		}
 		var posts []model.Post
-		applyVisibility(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs), viewerID).Find(&posts)
+		browseListSelect(applyVisibility(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs), viewerID)).Find(&posts)
 		postMap := make(map[int]model.Post, len(posts))
 		for _, p := range posts {
 			postMap[p.PostID] = p
@@ -153,7 +165,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 	}
 	if searchsort == "history" {
 		var posts []model.Post
-		base.Where("userID = ?", viewerID).Offset(offset).Limit(limit).Find(&posts)
+		browseListSelect(base.Where("userID = ?", viewerID)).Offset(offset).Limit(limit).Find(&posts)
 		return modelsToDomain(posts), nil
 	}
 
@@ -181,7 +193,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 		}
 	}
 	var posts []model.Post
-	base.Offset(offset).Limit(limit).Find(&posts)
+	browseListSelect(base).Offset(offset).Limit(limit).Find(&posts)
 	return modelsToDomain(posts), nil
 }
 
@@ -342,6 +354,21 @@ func (r *postRepository) Create(ctx context.Context, post *domain.Post) error {
 
 func (r *postRepository) Delete(ctx context.Context, postID int) error {
 	return r.session(ctx).Where("postID = ?", postID).Delete(&model.Post{}).Error
+}
+
+func (r *postRepository) ListViewerPrivatePostsRecent(ctx context.Context, userID, limit int) ([]*domain.Post, error) {
+	if userID <= 0 || limit <= 0 {
+		return nil, nil
+	}
+	var posts []model.Post
+	err := browseListSelect(r.session(ctx).Model(&model.Post{}).
+		Where("userID = ? AND is_private = ?", userID, true).
+		Order("post_time DESC").
+		Limit(limit)).Find(&posts).Error
+	if err != nil {
+		return nil, err
+	}
+	return modelsToDomain(posts), nil
 }
 
 func (r *postRepository) UpdatePrivacy(ctx context.Context, postID int, isPrivate bool) error {

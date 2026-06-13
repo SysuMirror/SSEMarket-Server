@@ -244,6 +244,13 @@ func PostPcomment(c *gin.Context) {
 		EmailAlerter(result.NotifyReceiver.Email, 1, msg.Content)
 	}
 
+	_ = service.Lotteries.ParticipateByComment(c.Request.Context(), domain.LotteryParticipateInput{
+		UserID:    user.ID,
+		PostID:    msg.PostID,
+		CommentID: result.Pcomment.ID,
+		Content:   msg.Content,
+	})
+
 	subs := make([]Subcomment, 0, len(result.Subcomments))
 	for _, sc := range result.Subcomments {
 		subs = append(subs, ccommentWithMetaToSubcomment(sc))

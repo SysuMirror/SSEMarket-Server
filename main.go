@@ -10,6 +10,7 @@ import (
 	"loginTest/controller"
 	"loginTest/core"
 	"loginTest/heat"
+	"loginTest/lottery"
 	"loginTest/middleware"
 	"loginTest/observability"
 	"loginTest/route"
@@ -109,10 +110,17 @@ func registerPprofRoutes(r *gin.Engine) {
 	debug := r.Group("/debug/pprof", guard)
 	{
 		debug.GET("/", gin.WrapF(pprof.Index))
+		debug.GET("/cmdline", gin.WrapF(pprof.Cmdline))
 		debug.GET("/profile", gin.WrapF(pprof.Profile))
-		debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))
-		debug.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		debug.GET("/symbol", gin.WrapF(pprof.Symbol))
+		debug.POST("/symbol", gin.WrapF(pprof.Symbol))
 		debug.GET("/trace", gin.WrapF(pprof.Trace))
+		debug.GET("/heap", gin.WrapH(pprof.Handler("heap")))
+		debug.GET("/allocs", gin.WrapH(pprof.Handler("allocs")))
+		debug.GET("/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+		debug.GET("/block", gin.WrapH(pprof.Handler("block")))
+		debug.GET("/mutex", gin.WrapH(pprof.Handler("mutex")))
+		debug.GET("/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
 	}
 	r.GET("/debug/pprof/start", guard, startPprof)
 }
@@ -120,6 +128,7 @@ func registerPprofRoutes(r *gin.Engine) {
 func main() {
 	config.InitConfig()
 	config.InitEmailConfig()
+	config.InitPprof()
 
 	obsCtx := context.Background()
 	shutdownTracing, err := observability.InitTracing(obsCtx)
@@ -183,6 +192,7 @@ func main() {
 	registerPprofRoutes(r)
 	route.CollectRoute(r)
 	go heat.StartHeat()
+	go lottery.StartAutoDraw()
 
 	port := viper.GetString("server.port")
 	if port == "" {

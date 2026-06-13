@@ -39,4 +39,6 @@ type PostRepository interface {
 	CreatePostNotice(ctx context.Context, receiver, sender int, noticeType, text string, target int) error
 	CreateFeedback(ctx context.Context, text, attachment string) (*domain.Feedback, error)
 	ListAllFeedback(ctx context.Context) ([]*domain.Feedback, error)
+	// ListViewerPrivatePostsRecent 当前用户最近私密帖（首页合并用）。
+	ListViewerPrivatePostsRecent(ctx context.Context, userID, limit int) ([]*domain.Post, error)
 }

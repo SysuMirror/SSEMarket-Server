@@ -21,6 +21,8 @@ type CommentRepository interface {
 
 	PcommentLikedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error)
 	PcommentDeniedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error)
+	CcommentLikedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error)
+	CcommentDeniedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error)
 	CcommentReaction(ctx context.Context, userID, ccommentID int) (liked, denied bool, err error)
 
 	FindPcommentLike(ctx context.Context, userID, pcommentID int) (bool, error)

@@ -153,24 +153,48 @@ func (r *commentRepository) PcommentDeniedSet(ctx context.Context, userID int, p
 	return out, nil
 }
 
+func (r *commentRepository) CcommentLikedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error) {
+	out := make(map[int]bool)
+	if len(ccommentIDs) == 0 {
+		return out, nil
+	}
+	var likes []model.Cclike
+	err := r.session(ctx).Where("userID = ? AND cctargetID IN ?", userID, ccommentIDs).Find(&likes).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, like := range likes {
+		out[like.CctargetID] = true
+	}
+	return out, nil
+}
+
+func (r *commentRepository) CcommentDeniedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error) {
+	out := make(map[int]bool)
+	if len(ccommentIDs) == 0 {
+		return out, nil
+	}
+	var denies []model.Ccdeny
+	err := r.session(ctx).Where("userID = ? AND cctargetID IN ?", userID, ccommentIDs).Find(&denies).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, deny := range denies {
+		out[deny.CctargetID] = true
+	}
+	return out, nil
+}
+
 func (r *commentRepository) CcommentReaction(ctx context.Context, userID, ccommentID int) (liked, denied bool, err error) {
-	var deny model.Ccdeny
-	err = r.session(ctx).Where("cctargetID = ? AND userID = ?", ccommentID, userID).First(&deny).Error
-	if err == nil && deny.CcdenyID != 0 {
-		return false, true, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	likeMap, err := r.CcommentLikedSet(ctx, userID, []int{ccommentID})
+	if err != nil {
 		return false, false, err
 	}
-	var like model.Cclike
-	err = r.session(ctx).Where("cctargetID = ? AND userID = ?", ccommentID, userID).First(&like).Error
-	if err == nil && like.CclikeID != 0 {
-		return true, false, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	denyMap, err := r.CcommentDeniedSet(ctx, userID, []int{ccommentID})
+	if err != nil {
 		return false, false, err
 	}
-	return false, false, nil
+	return likeMap[ccommentID], denyMap[ccommentID], nil
 }
 
 func (r *commentRepository) FindPcommentLike(ctx context.Context, userID, pcommentID int) (bool, error) {

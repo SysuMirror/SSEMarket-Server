@@ -13,6 +13,7 @@ import (
 	"loginTest/domain"
 	"loginTest/response"
 	"loginTest/service"
+	"loginTest/util"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -222,7 +223,7 @@ func browseItemToResponse(item domain.BrowseItem) PostResponse {
 		UserAvatar:    avatar,
 		UserIdentity:  identity,
 		Title:         p.Title,
-		Content:       p.Content,
+		Content:       util.TruncateRunes(p.Content, util.BrowseContentPreviewRunes),
 		Like:          p.LikeNum,
 		Comment:       p.CommentNum,
 		Browse:        p.BrowseNum,
@@ -539,6 +540,7 @@ type PostDetailsResponse struct {
 	Photos        string
 	Tag           string
 	IsPrivate     bool
+	IsLottery     bool
 }
 
 type PostDetailsMsg struct {
@@ -632,6 +634,9 @@ func ShowDetails(c *gin.Context) {
 	timing.step("check_visibility")
 
 	resp := postDetailToResponse(detail)
+	if isLottery, err := service.Lotteries.IsLotteryPost(c.Request.Context(), int(postID)); err == nil {
+		resp.IsLottery = isLottery
+	}
 	c.JSON(http.StatusOK, resp)
 	timing.step("write_json")
 }

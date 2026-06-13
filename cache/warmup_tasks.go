@@ -28,7 +28,7 @@ type WarmupDeps struct {
 func BuildWarmupTasks(deps WarmupDeps) []WarmupTask {
 	tasks := []WarmupTask{
 		{Name: "hot_posts_top100_cache", Priority: 0, Load: taskHotPostsTop100Cache},
-		{Name: "home_browse_page1", Priority: 0, Load: taskHomeBrowsePage1(deps.Posts)},
+		{Name: "public_feed_pages", Priority: 0, Load: taskPublicFeedPages(deps.Posts)},
 		{Name: "browse_count_batch", Priority: 0, Load: taskBrowseCountBatch(deps.HotData)},
 		{Name: "active_users_top50", Priority: 1, Load: taskActiveUsersTop50(deps.Users)},
 	}
@@ -68,18 +68,34 @@ func taskHotPostsTop100Cache(ctx context.Context) error {
 	return Set(ctx, util.GetHotPostKey(), out, ProfileHotPostList)
 }
 
-func taskHomeBrowsePage1(posts repository.PostRepository) func(ctx context.Context) error {
+func taskPublicFeedPages(posts repository.PostRepository) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		filter := domain.BrowseFilter{
-			Searchsort: "home",
-			Limit:      15,
-			Offset:     0,
+		gen := PublicFeedGeneration(ctx)
+		limit := 15
+		for page := 0; page < 3; page++ {
+			filter := domain.BrowseFilter{
+				Searchsort: "home",
+				Limit:      limit,
+				Offset:     page * limit,
+			}
+			pubFilter := filter
+			pubFilter.ViewerUserID = 0
+			list, err := posts.ListBrowse(ctx, pubFilter)
+			if err != nil {
+				return err
+			}
+			key := util.GetPublicFeedCacheKey(util.BrowseFeedKeyInput{
+				Searchsort: filter.Searchsort,
+				Partition:  filter.Partition,
+				OrderBy:    filter.OrderBy,
+				Offset:     filter.Offset,
+				Limit:      limit,
+			}, gen)
+			if err := Set(ctx, key, list, ProfilePublicFeed); err != nil {
+				return err
+			}
 		}
-		list, err := posts.ListBrowse(ctx, filter)
-		if err != nil {
-			return err
-		}
-		return Set(ctx, util.GetHomeBrowsePage1Key(), list, ProfileHomeBrowse)
+		return nil
 	}
 }
 

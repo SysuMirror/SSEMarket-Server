@@ -87,6 +87,11 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)
 	auth.POST("/api/auth/searchPostsByTitle", controller.SearchPostsByTitle)
+	auth.POST("/api/auth/lottery/create", controller.LotteryCreate)
+	auth.POST("/api/auth/lottery/detail", controller.LotteryDetail)
+	auth.POST("/api/auth/lottery/participate", controller.LotteryParticipate)
+	auth.POST("/api/auth/lottery/checkParticipated", controller.LotteryCheckParticipated)
+
 	auth.POST("/api/auth/submitVote", controller.SubmitVote)
 	auth.GET("/api/auth/voteRanking", controller.GetVoteRanking)
 	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
