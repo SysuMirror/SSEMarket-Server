@@ -46,6 +46,7 @@ type CommentRepository interface {
 	UsersByIDs(ctx context.Context, ids []int) (map[int]*domain.User, error)
 	FindUserByPhone(ctx context.Context, phone string) (*domain.User, error)
 	FindUserByID(ctx context.Context, id int) (*domain.User, error)
+	FindUsersByExactNames(ctx context.Context, names []string) ([]*domain.User, error)
 
 	FindPostByID(ctx context.Context, id int) (*domain.Post, error)
 	IncrPostCommentNum(ctx context.Context, postID, delta int) error

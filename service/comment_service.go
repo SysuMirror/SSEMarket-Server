@@ -280,6 +280,11 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		_ = s.comments.CreateNotice(ctx, post.UserID, in.UserID, "pcomment", content, pc.ID)
 		notifyReceiver, _ = s.comments.FindUserByID(ctx, post.UserID)
 	}
+	skipNotify := map[int]struct{}{in.UserID: {}}
+	if post.UserID != in.UserID {
+		skipNotify[post.UserID] = struct{}{}
+	}
+	s.notifyMentions(ctx, in.UserID, content, "pcomment", pc.ID, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -348,11 +353,13 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 			notifies = append(notifies, &domain.CcommentNotifyInfo{Receiver: receiver})
 		}
 	}
+	skipNotify := map[int]struct{}{in.UserID: {}, pc.UserID: {}}
 	if in.UserTargetName != "" && in.ReplyCcommentID > 0 {
 		replyCC, err := s.comments.FindCcommentByID(ctx, in.ReplyCcommentID)
 		if err != nil {
 			return nil, err
 		}
+		skipNotify[replyCC.UserID] = struct{}{}
 		if replyCC.UserID != in.UserID && pc.UserID != replyCC.UserID {
 			_ = s.comments.CreateNotice(ctx, replyCC.UserID, in.UserID, "ccomment", content, cc.ID)
 			if receiver, err := s.comments.FindUserByID(ctx, replyCC.UserID); err == nil {
@@ -360,6 +367,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 			}
 		}
 	}
+	s.notifyMentions(ctx, in.UserID, content, "ccomment", cc.ID, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -598,6 +606,30 @@ func deleteHeatDelta(commentTime time.Time, subCount int64, isPcomment bool) flo
 		return math.Pow(commentWeight, power)
 	}
 	return commentWeight
+}
+
+// notifyMentions 解析正文 @昵称 并向匹配用户发通知（昵称须与 name 全量相等，后接空格或行末）。
+func (s *commentService) notifyMentions(ctx context.Context, authorID int, content, noticeType string, targetID int, skip map[int]struct{}) {
+	tokens := util.ParseMentionTokens(content)
+	if len(tokens) == 0 {
+		return
+	}
+	users, err := s.comments.FindUsersByExactNames(ctx, tokens)
+	if err != nil {
+		return
+	}
+	for _, u := range users {
+		if u == nil || u.ID == 0 {
+			continue
+		}
+		if u.ID == authorID {
+			continue
+		}
+		if _, ok := skip[u.ID]; ok {
+			continue
+		}
+		_ = s.comments.CreateNotice(ctx, u.ID, authorID, noticeType, content, targetID)
+	}
 }
 
 func authorForComment(m map[int]*domain.User, userID int) *domain.User {

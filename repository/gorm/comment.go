@@ -336,6 +336,21 @@ func (r *commentRepository) FindUserByID(ctx context.Context, id int) (*domain.U
 	return userToDomain(&u), nil
 }
 
+func (r *commentRepository) FindUsersByExactNames(ctx context.Context, names []string) ([]*domain.User, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	var users []model.User
+	if err := r.session(ctx).Where("name IN ?", names).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*domain.User, 0, len(users))
+	for i := range users {
+		out = append(out, userToDomain(&users[i]))
+	}
+	return out, nil
+}
+
 func (r *commentRepository) FindPostByID(ctx context.Context, id int) (*domain.Post, error) {
 	var post model.Post
 	err := r.session(ctx).Where("postID = ?", id).First(&post).Error
