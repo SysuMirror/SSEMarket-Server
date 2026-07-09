@@ -592,6 +592,76 @@ func ModifyPassword(c *gin.Context) {
 	}
 }
 
+func ModifyEmail(c *gin.Context) {
+	db := common.GetDB()
+
+	var requestUser struct {
+		Email    string `json:"email"`
+		NewEmail string `json:"newEmail"`
+		ValiCode string `json:"valiCode"`
+	}
+	if err := c.Bind(&requestUser); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
+		return
+	}
+
+	tokenUserID := GetTokenUserID(c)
+	if tokenUserID == 0 {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "请先登陆")
+		return
+	}
+
+	if requestUser.Email == requestUser.NewEmail {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "新旧邮箱不能相同")
+		return
+	}
+	if isEmailExist(db, requestUser.NewEmail) {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱已存在")
+		return
+	}
+
+	var user model.User
+	db.Where("email = ?", requestUser.Email).First(&user)
+	if user.UserID == 0 {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到该用户")
+		return
+	}
+	if user.UserID != tokenUserID {
+		response.Response(c, http.StatusForbidden, 403, nil, "无权修改")
+		return
+	}
+
+	rds := core.MyRedis
+	ctx := context.Background()
+	codeKey := "vcode:" + requestUser.NewEmail
+	failKey := "vcode_fail:" + requestUser.NewEmail
+	correctValiCode, err := rds.Get(ctx, codeKey).Result()
+	if err != nil || correctValiCode != requestUser.ValiCode {
+		failCountStr, _ := rds.Get(ctx, failKey).Result()
+		failCount := 0
+		if failCountStr != "" {
+			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
+				failCount = v
+			}
+		}
+		failCount++
+		rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute)
+		if failCount >= MAX_VALIDATE_FAIL {
+			rds.Del(ctx, codeKey)
+		}
+		response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		return
+	}
+
+	user.Email = requestUser.NewEmail
+	db.Save(&user)
+
+	rds.Del(ctx, codeKey)
+	rds.Del(ctx, failKey)
+
+	response.Response(c, http.StatusOK, 200, nil, "成功修改邮箱")
+}
+
 type OAuth2Info struct {
 	AppId        string `json:"app_id"`
 	RedirectURL  string `json:"redirect_uri"`

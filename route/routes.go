@@ -94,6 +94,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.PATCH("api/auth/readNotice/:noticeID", controller.ReadNotice)
 	noauth.POST("/api/auth/modifyPassword", controller.ModifyPassword)
 	noauth.POST("/api/auth/validateEmail", controller.ValidateEmail)
+	auth.POST("/api/auth/modifyEmail", controller.ModifyEmail)
 	auth.POST("/api/auth/identityValidate", controller.IdentityValidate)
 	auth.POST("/api/auth/getFileList", controller.GetFileList)
 	auth.POST("/api/auth/fileDelete", controller.DeleteFile)
