@@ -23,7 +23,8 @@ func postToDomain(p *model.Post) *domain.Post {
 		Heat:       p.Heat,
 		Photos:     p.Photos,
 		Tag:        p.Tag,
-		IsPrivate:  p.IsPrivate,
+		IsPrivate:   p.IsPrivate,
+		IsAnonymous: p.IsAnonymous,
 	}
 }
 
@@ -211,6 +212,7 @@ func postToModel(p *domain.Post) model.Post {
 		Photos:     p.Photos,
 		Tag:        p.Tag,
 		IsPrivate:  p.IsPrivate,
+		IsAnonymous: p.IsAnonymous,
 	}
 }
 
@@ -250,11 +252,14 @@ func chatMsgToDomain(m *model.ChatMsg) *domain.ChatHistoryItem {
 		return nil
 	}
 	return &domain.ChatHistoryItem{
-		ChatMsgID:    m.ChatMsgID,
-		TargetUserID: m.TargetUserID,
-		SenderUserID: m.SenderUserID,
-		Content:      m.Content,
-		CreatedAt:    m.CreatedAt,
+		ChatMsgID:       m.ChatMsgID,
+		TargetUserID:    m.TargetUserID,
+		SenderUserID:    m.SenderUserID,
+		Content:         m.Content,
+		IsAnonymous:     m.IsAnonymous,
+		ThreadAnonymous: m.ThreadAnonymous,
+		IsRecalled:      m.IsRecalled,
+		CreatedAt:       m.CreatedAt,
 	}
 }
 

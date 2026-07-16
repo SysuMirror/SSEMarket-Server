@@ -23,6 +23,8 @@ func StatusOf(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, domain.ErrConflict):
 		return http.StatusConflict
+	case errors.Is(err, domain.ErrTooManyRequests):
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}

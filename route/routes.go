@@ -35,6 +35,13 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	//OAuth2授权记录管理
 	auth.GET("/api/auth/connect/records", controller.GetOAuth2AuthRecords)
 
+	// 用户个人访问令牌（PAT，用于 MCP 等对外调用）
+	auth.GET("/api/auth/token/scopes", controller.ListAPITokenScopes)
+	auth.POST("/api/auth/token/create", controller.CreateAPIToken)
+	auth.GET("/api/auth/token/list", controller.ListAPITokens)
+	auth.POST("/api/auth/token/revoke", controller.RevokeAPIToken)
+	auth.POST("/api/auth/token/delete", controller.DeleteAPIToken)
+
 	// 打分专区（独立数据与接口）
 	auth.POST("/api/auth/rating/category/list", controller.RatingCategoryList)
 	auth.POST("/api/auth/rating/category/create", controller.RatingCategoryCreate)
@@ -69,6 +76,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/updateCcommentDeny", controller.UpdateCcommentDeny)
 	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
+	auth.POST("/api/auth/toggleWatch", controller.ToggleWatch)
+	auth.POST("/api/auth/resolveMentions", controller.ResolveMentions)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
 	auth.POST("/api/auth/updatePostPrivacy", controller.UpdatePostPrivacy)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
@@ -114,14 +123,11 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	auth.POST("api/auth/statistics", controller.GetStatistics)
 
-	//获得所有聊天用户列表，并且建立ws链接
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
-	//点击与某人聊天主页的接口，需要监听用户是否在聊天页面
-	//auth.GET("/api/auth/intoChatView", controller.IntoChatView)
-	//退出与某人聊天主页的接口，需要监听用户是否在聊天页面
-	//auth.POST("/api/auth/leaveChatView", controller.LeaveChatView)
+	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)
 	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
 	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
+	auth.POST("/api/auth/recallChatMessage", controller.RecallChatMessage)
 	//商城板块
 	auth.POST("/api/auth/postProduct", controller.PostProduct)
 	auth.POST("/api/auth/getProducts", controller.GetProducts)

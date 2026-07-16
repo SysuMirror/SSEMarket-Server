@@ -47,6 +47,11 @@ func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilte
 	return s.posts.Count(ctx, filter)
 }
 
+// Browse 帖子浏览列表（首页/分区/搜索/收藏/历史等）。
+//
+// 两阶段流水线（详见 browse_feed.go）：
+//   1. fetchPublicFeed — 直查 MySQL 列表（当前不走公共 Feed 缓存）
+//   2. attachPersonalBrowseState — 按当前用户补全点赞/收藏/作者
 func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error) {
 	posts, err := s.fetchPublicFeed(ctx, filter)
 	if err != nil {
@@ -86,12 +91,14 @@ func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (
 	browseNum := int(s.IncrBrowse(ctx, postID))
 	isLiked, _ := s.posts.IsLiked(ctx, viewerUserID, postID)
 	isSaved, _ := s.posts.IsSaved(ctx, viewerUserID, postID)
+	isWatched, _ := s.posts.IsWatched(ctx, viewerUserID, postID)
 
 	return &domain.PostDetail{
 		Post:      post,
 		Author:    userToDomainFromModel(userModel),
 		IsSaved:   isSaved,
 		IsLiked:   isLiked,
+		IsWatched: isWatched,
 		BrowseNum: browseNum,
 	}, nil
 }
@@ -138,7 +145,8 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) err
 		PostTime:   time.Now(),
 		Photos:     in.Photos,
 		Tag:        tagString,
-		IsPrivate:  in.IsPrivate,
+		IsPrivate:   in.IsPrivate,
+		IsAnonymous: in.IsAnonymous,
 	}
 	if err := s.posts.Create(ctx, post); err != nil {
 		return err
@@ -203,22 +211,46 @@ func (s *postService) UpdatePrivacy(ctx context.Context, postID, userID int, isP
 	return nil
 }
 
-func (s *postService) ToggleSave(ctx context.Context, userID, postID int) error {
+func (s *postService) ToggleSave(ctx context.Context, userID, postID int) (bool, error) {
 	post, err := s.posts.FindByID(ctx, postID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !canViewPost(post, userID) {
-		return domain.ErrNotFound
+		return false, domain.ErrNotFound
 	}
 	isSaved, err := s.posts.IsSaved(ctx, userID, postID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if isSaved {
-		return s.posts.DeleteSave(ctx, userID, postID)
+		if err := s.posts.DeleteSave(ctx, userID, postID); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
-	return s.posts.CreateSave(ctx, userID, postID)
+	if err := s.posts.CreateSave(ctx, userID, postID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *postService) ToggleWatch(ctx context.Context, userID, postID int) (bool, error) {
+	post, err := s.posts.FindByID(ctx, postID)
+	if err != nil {
+		return false, err
+	}
+	if !canViewPost(post, userID) {
+		return false, domain.ErrNotFound
+	}
+	isWatched, err := s.posts.IsWatched(ctx, userID, postID)
+	if err != nil {
+		return false, err
+	}
+	if isWatched {
+		return false, s.posts.DeleteWatch(ctx, userID, postID)
+	}
+	return true, s.posts.CreateWatch(ctx, userID, postID)
 }
 
 func (s *postService) ToggleLike(ctx context.Context, userID, postID int) error {
@@ -372,7 +404,10 @@ func (s *postService) ListTags(ctx context.Context) ([]*domain.Tag, error) {
 	return s.posts.ListAllTags(ctx)
 }
 
-// fetchBrowseInteractionSets 并行查询收藏/点赞/作者，缩短 browse 串行 DB 等待。
+// fetchBrowseInteractionSets 并行批量查询 browse 所需的个人态数据。
+//
+// 使用 errgroup 同时发起 3 路 SQL，将原本串行的 SavedSet + LikedSet + AuthorsByIDs
+// 合并为一次等待，缩短 attachPersonalBrowseState 的尾延迟。
 func (s *postService) fetchBrowseInteractionSets(ctx context.Context, viewerID int, postIDs, userIDs []int) (
 	savedSet map[int]struct{}, likedSet map[int]struct{}, authorMap map[int]*domain.User,
 ) {
@@ -454,20 +489,21 @@ func authorForPost(m map[int]*domain.User, userID int) *domain.User {
 
 func postToDomainFromModel(p model.Post) *domain.Post {
 	return &domain.Post{
-		ID:         p.PostID,
-		UserID:     p.UserID,
-		Partition:  p.Partition,
-		Title:      p.Title,
-		Content:    p.Ptext,
-		CommentNum: p.CommentNum,
-		LikeNum:    p.LikeNum,
-		VoteNum:    p.VoteNum,
-		BrowseNum:  p.BrowseNum,
-		PostTime:   p.PostTime,
-		Heat:       p.Heat,
-		Photos:     p.Photos,
-		Tag:        p.Tag,
-		IsPrivate:  p.IsPrivate,
+		ID:          p.PostID,
+		UserID:      p.UserID,
+		Partition:   p.Partition,
+		Title:       p.Title,
+		Content:     p.Ptext,
+		CommentNum:  p.CommentNum,
+		LikeNum:     p.LikeNum,
+		VoteNum:     p.VoteNum,
+		BrowseNum:   p.BrowseNum,
+		PostTime:    p.PostTime,
+		Heat:        p.Heat,
+		Photos:      p.Photos,
+		Tag:         p.Tag,
+		IsPrivate:   p.IsPrivate,
+		IsAnonymous: p.IsAnonymous,
 	}
 }
 

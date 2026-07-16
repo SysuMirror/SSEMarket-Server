@@ -51,10 +51,11 @@ type PcommentCreateInput struct {
 
 // PcommentCreateResult 发表一级评论结果。
 type PcommentCreateResult struct {
-	Pcomment       *Pcomment
-	Author         *User
-	Subcomments    []*CcommentWithMeta
-	NotifyReceiver *User
+	Pcomment                *Pcomment
+	Author                  *User
+	Subcomments             []*CcommentWithMeta
+	NotifyReceiver          *User
+	PostWatchEmailReceivers []*User
 }
 
 // CcommentCreateInput 发表二级评论入参。
@@ -70,4 +71,10 @@ type CcommentCreateInput struct {
 // CcommentNotifyInfo 二级评论通知（供 controller 发邮件）。
 type CcommentNotifyInfo struct {
 	Receiver *User
+}
+
+// CcommentCreateResult 发表二级评论结果。
+type CcommentCreateResult struct {
+	Notifies                []*CcommentNotifyInfo
+	PostWatchEmailReceivers []*User
 }

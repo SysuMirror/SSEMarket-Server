@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"loginTest/api"
+	"loginTest/apperr"
 	"loginTest/domain"
 	"loginTest/response"
 	"loginTest/service"
@@ -243,6 +244,9 @@ func PostPcomment(c *gin.Context) {
 	if result.NotifyReceiver != nil && result.NotifyReceiver.ID != 0 && !result.NotifyReceiver.ISEmailNotificationBlocked {
 		EmailAlerter(result.NotifyReceiver.Email, 1, msg.Content)
 	}
+	for _, u := range result.PostWatchEmailReceivers {
+		emailNotifyIfEnabled(u, 1, msg.Content)
+	}
 
 	_ = service.Lotteries.ParticipateByComment(c.Request.Context(), domain.LotteryParticipateInput{
 		UserID:    user.ID,
@@ -313,7 +317,7 @@ func PostCcomment(c *gin.Context) {
 		return
 	}
 
-	notifies, err := service.Comments.CreateCcomment(c.Request.Context(), domain.CcommentCreateInput{
+	result, err := service.Comments.CreateCcomment(c.Request.Context(), domain.CcommentCreateInput{
 		UserID:          user.ID,
 		PostID:          msg.PostID,
 		PcommentID:      msg.PcommentID,
@@ -328,10 +332,13 @@ func PostCcomment(c *gin.Context) {
 		}
 		return
 	}
-	for _, n := range notifies {
+	for _, n := range result.Notifies {
 		if n.Receiver != nil && n.Receiver.ID != 0 && !n.Receiver.ISEmailNotificationBlocked {
 			EmailAlerter(n.Receiver.Email, 3, content)
 		}
+	}
+	for _, u := range result.PostWatchEmailReceivers {
+		emailNotifyIfEnabled(u, 1, content)
 	}
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
@@ -482,6 +489,36 @@ func UpdateCcommentDeny(c *gin.Context) {
 	_ = service.Comments.ToggleCcommentDeny(c.Request.Context(), user.ID, int(ccommentID))
 }
 
+type ResolveMentionsMsg struct {
+	Names []string `json:"names"`
+}
+
+type MentionUserResp struct {
+	Name   string `json:"name"`
+	UserID uint   `json:"userID"`
+}
+
+func ResolveMentions(c *gin.Context) {
+	var req ResolveMentionsMsg
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Names) == 0 {
+		response.Success(c, gin.H{"users": []MentionUserResp{}}, "ok")
+		return
+	}
+	users, err := service.Comments.ResolveMentionUsers(c.Request.Context(), req.Names)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
+		return
+	}
+	out := make([]MentionUserResp, 0, len(users))
+	for _, u := range users {
+		if u == nil || u.ID == 0 {
+			continue
+		}
+		out = append(out, MentionUserResp{Name: u.Name, UserID: uint(u.ID)})
+	}
+	response.Success(c, gin.H{"users": out}, "ok")
+}
+
 // EmailAlerter 异步发信，避免 SMTP 握手阻塞 HTTP 响应（评论/回复通知）。
 func EmailAlerter(receiver string, status int, msg string) {
 	if receiver == "" {
@@ -493,4 +530,11 @@ func EmailAlerter(receiver string, status int, msg string) {
 			fmt.Println("async notify email:", err)
 		}
 	}()
+}
+
+func emailNotifyIfEnabled(receiver *domain.User, status int, msg string) {
+	if receiver == nil || receiver.ID == 0 || receiver.ISEmailNotificationBlocked || receiver.Email == "" {
+		return
+	}
+	EmailAlerter(receiver.Email, status, msg)
 }

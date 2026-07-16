@@ -1,127 +1,30 @@
+// browse_feed.go Browse 列表查询。
+//
+// 当前策略（线上稳定优先）：
+//   - 列表段 fetchPublicFeed：直查 MySQL ListBrowse，不走公共 Feed L1/L2 缓存。
+//     SQL 含 applyVisibility(viewerID)，公开帖 + 本人私密帖一次查齐，分页正确。
+//   - 个人段 attachPersonalBrowseState：实时查 IsLiked / IsSaved / 作者并组装 BrowseItem。
+//
+// 公共 Feed 缓存相关代码已暂时停用，待失效策略与分页验证完善后再启用。
 package service
 
 import (
 	"context"
-	"sort"
 
-	"loginTest/cache"
 	"loginTest/domain"
-	"loginTest/util"
 )
 
-const publicFeedMaxOffset = 150 // 最多缓存 offset 0~150（约 10 页 ×15）
-
-// isPublicFeedCacheable 是否可走公共 Feed 缓存（与用户无关的列表段）。
-func isPublicFeedCacheable(filter domain.BrowseFilter) bool {
-	switch filter.Searchsort {
-	case "save", "history":
-		return false
-	}
-	if filter.Searchinfo != "" || filter.Tag != "" || filter.TimeFrom != "" || filter.TimeTo != "" {
-		return false
-	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 15
-	}
-	if limit > 15 || filter.Offset < 0 || filter.Offset > publicFeedMaxOffset {
-		return false
-	}
-	return true
-}
-
-func feedKeyInput(filter domain.BrowseFilter) util.BrowseFeedKeyInput {
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 15
-	}
-	return util.BrowseFeedKeyInput{
-		Searchsort: filter.Searchsort,
-		Partition:  filter.Partition,
-		OrderBy:    filter.OrderBy,
-		Offset:     filter.Offset,
-		Limit:      limit,
-	}
-}
-
-// fetchPublicFeed 公共帖子列表：命中 L1/L2 则不打 MySQL；仅含公开帖（is_private=0）。
+// fetchPublicFeed 帖子列表段（Browse 第一阶段）：直查 DB，不使用缓存。
 func (s *postService) fetchPublicFeed(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, error) {
-	if filter.Searchsort == "save" || filter.Searchsort == "history" {
-		return s.posts.ListBrowse(ctx, filter)
-	}
-	if !isPublicFeedCacheable(filter) {
-		return s.posts.ListBrowse(ctx, filter)
-	}
-
-	pubFilter := filter
-	pubFilter.ViewerUserID = 0
-	gen := cache.PublicFeedGeneration(ctx)
-	key := util.GetPublicFeedCacheKey(feedKeyInput(filter), gen)
-
-	posts, err := MultiLevelGet(ctx, key, func() ([]*domain.Post, error) {
-		return s.posts.ListBrowse(ctx, pubFilter)
-	}, cache.ProfilePublicFeed)
-	if err != nil {
-		return nil, err
-	}
-	return s.mergeViewerPrivatePosts(ctx, filter, posts)
+	return s.posts.ListBrowse(ctx, filter)
 }
 
-// mergeViewerPrivatePosts 首页第一屏合并当前用户私密帖（公共缓存不含 viewer 私密帖）。
-func (s *postService) mergeViewerPrivatePosts(ctx context.Context, filter domain.BrowseFilter, public []*domain.Post) ([]*domain.Post, error) {
-	if filter.ViewerUserID <= 0 || filter.Offset != 0 {
-		return public, nil
-	}
-	sortMode := filter.Searchsort
-	if sortMode == "" {
-		sortMode = "home"
-	}
-	if sortMode != "home" {
-		return public, nil
-	}
-	if filter.Searchinfo != "" {
-		return public, nil
-	}
-	if filter.Partition != "" && filter.Partition != "主页" {
-		return public, nil
-	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 15
-	}
-	private, err := s.posts.ListViewerPrivatePostsRecent(ctx, filter.ViewerUserID, limit)
-	if err != nil || len(private) == 0 {
-		return public, err
-	}
-	return mergePostsByRecency(public, private, limit), nil
-}
-
-func mergePostsByRecency(public, extra []*domain.Post, limit int) []*domain.Post {
-	merged := make([]*domain.Post, 0, len(public)+len(extra))
-	merged = append(merged, public...)
-	merged = append(merged, extra...)
-	sort.Slice(merged, func(i, j int) bool {
-		return merged[i].PostTime.After(merged[j].PostTime)
-	})
-	seen := make(map[int]struct{}, len(merged))
-	out := make([]*domain.Post, 0, limit)
-	for _, p := range merged {
-		if p == nil {
-			continue
-		}
-		if _, dup := seen[p.ID]; dup {
-			continue
-		}
-		seen[p.ID] = struct{}{}
-		out = append(out, p)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
-// attachPersonalBrowseState 个人段：点赞/收藏/作者（不可公共缓存），组装 BrowseItem。
+// attachPersonalBrowseState 个人态段（Browse 第二阶段）。
+//
+// 对列表结果：
+//   - canViewPost 二次过滤（私密帖仅作者可见）；
+//   - fetchBrowseInteractionSets 并行查 SavedSet / LikedSet / AuthorsByIDs；
+//   - 组装 BrowseItem{Post, Author, IsSaved, IsLiked} 供 controller 序列化。
 func (s *postService) attachPersonalBrowseState(ctx context.Context, filter domain.BrowseFilter, posts []*domain.Post) ([]domain.BrowseItem, error) {
 	if len(posts) == 0 {
 		return nil, nil

@@ -70,15 +70,19 @@ func GetProductListKey(userID int, searchsort, searchinfo string) string {
 	return PrefixProductList + fmt.Sprintf("%d:%s:%s", userID, searchsort, searchinfo)
 }
 
-// PublicFeedGenKey 公共 Feed 缓存世代；INCR 后旧 key 自动失效。
+// PublicFeedGenKey 公共 Feed 缓存世代号 Redis Key。
+// 失效时 INCR 此 key，所有带 g{gen} 的旧列表 key 自动作废（无需 scan DEL）。
 const PublicFeedGenKey = PrefixPostBrowse + "public:gen"
 
-// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（与用户无关的公共列表，已废弃，保留兼容失效）。
+// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（旧方案，已由 PublicFeed 取代，保留兼容清理）。
 func GetHomeBrowsePage1Key() string {
 	return PrefixPostBrowse + "home:page1"
 }
 
-// GetPublicFeedCacheKey 公共 Feed 列表缓存 Key（不含用户态；含 sort/partition/order/分页）。
+// GetPublicFeedCacheKey 生成公共 Feed 列表缓存 Key（不含 userID）。
+//
+// 示例：post:browse:public:g3:home:part:default:ord:default:off:0:lim:15
+// 维度：世代 gen + searchsort + partition + orderBy + offset + limit。
 func GetPublicFeedCacheKey(filter BrowseFeedKeyInput, generation int64) string {
 	limit := filter.Limit
 	if limit <= 0 {
@@ -100,7 +104,7 @@ func GetPublicFeedCacheKey(filter BrowseFeedKeyInput, generation int64) string {
 		PrefixPostBrowse, generation, sort, partition, orderBy, filter.Offset, limit)
 }
 
-// BrowseFeedKeyInput 公共 Feed 缓存 key 维度（不含 userID）。
+// BrowseFeedKeyInput 公共 Feed 缓存 key 的筛选维度（刻意不含 ViewerUserID）。
 type BrowseFeedKeyInput struct {
 	Searchsort string
 	Partition  string

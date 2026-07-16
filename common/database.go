@@ -55,16 +55,21 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Admin{})
 	db.AutoMigrate(&model.Feedback{})
 	db.AutoMigrate(&model.Notice{})
-	db.Exec("ALTER TABLE notices MODIFY COLUMN type ENUM('pcomment','ccomment','punish','feedback','sue','post','lottery_win','rating_comment')")
+	db.Exec("ALTER TABLE notices MODIFY COLUMN type ENUM('pcomment','ccomment','punish','feedback','sue','post','lottery_win','rating_comment','post_watch')")
 	db.AutoMigrate(&model.Sue{})
 	db.AutoMigrate(&model.CDKey{})
 	db.AutoMigrate(&model.Tag{})
 	db.AutoMigrate(&model.ChatMsg{})
+	ensureChatMsgAnonymousColumn(db)
+	ensureChatMsgThreadAnonymousColumn(db)
+	ensureChatMsgRecalledColumn(db)
 	db.AutoMigrate(&model.OAuth2App{})
 	db.AutoMigrate(&model.OAuth2Code{})
 	db.AutoMigrate(&model.OAuth2Token{})
 	db.AutoMigrate(&model.OAuth2AuthRecord{})
+	db.AutoMigrate(&model.UserAPIToken{})
 	db.AutoMigrate(&model.Pvote{})
+	db.AutoMigrate(&model.PostWatch{})
 	db.AutoMigrate(&model.LotteryPost{})
 	db.AutoMigrate(&model.LotteryPrize{})
 	db.AutoMigrate(&model.LotteryParticipant{})
@@ -80,6 +85,67 @@ func InitDB() *gorm.DB {
 
 	DB = db
 	return db
+}
+
+func ensureChatMsgAnonymousColumn(db *gorm.DB) {
+	var count int64
+	db.Raw(`
+		SELECT COUNT(1) FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'chat_msgs'
+		  AND column_name = 'isAnonymous'
+	`).Scan(&count)
+	if count > 0 {
+		return
+	}
+	if err := db.Exec(`
+		ALTER TABLE chat_msgs
+		ADD COLUMN isAnonymous tinyint(1) NOT NULL DEFAULT 0 AFTER content
+	`).Error; err != nil {
+		log.Printf("[chat] ensure isAnonymous column: %v", err)
+	}
+}
+
+func ensureChatMsgThreadAnonymousColumn(db *gorm.DB) {
+	var count int64
+	db.Raw(`
+		SELECT COUNT(1) FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'chat_msgs'
+		  AND column_name = 'threadAnonymous'
+	`).Scan(&count)
+	if count == 0 {
+		if err := db.Exec(`
+			ALTER TABLE chat_msgs
+			ADD COLUMN threadAnonymous tinyint(1) NOT NULL DEFAULT 0 AFTER isAnonymous
+		`).Error; err != nil {
+			log.Printf("[chat] ensure threadAnonymous column: %v", err)
+		}
+	}
+	if err := db.Exec(`
+		UPDATE chat_msgs SET threadAnonymous = isAnonymous
+		WHERE isAnonymous = 1 AND threadAnonymous = 0
+	`).Error; err != nil {
+		log.Printf("[chat] backfill threadAnonymous: %v", err)
+	}
+}
+
+func ensureChatMsgRecalledColumn(db *gorm.DB) {
+	var count int64
+	db.Raw(`
+		SELECT COUNT(1) FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'chat_msgs'
+		  AND column_name = 'isRecalled'
+	`).Scan(&count)
+	if count == 0 {
+		if err := db.Exec(`
+			ALTER TABLE chat_msgs
+			ADD COLUMN isRecalled tinyint(1) NOT NULL DEFAULT 0 AFTER threadAnonymous
+		`).Error; err != nil {
+			log.Printf("[chat] ensure isRecalled column: %v", err)
+		}
+	}
 }
 
 func ensureLotteryParticipantUniqueIndex(db *gorm.DB) {

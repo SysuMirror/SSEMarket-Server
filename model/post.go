@@ -21,4 +21,5 @@ type Post struct {
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
 	Tag        string    `gorm:"column:tag;type:varchar(100)"`
 	IsPrivate  bool      `gorm:"column:is_private;type:tinyint(1);default:0"`
+	IsAnonymous bool     `gorm:"column:is_anonymous;type:tinyint(1);default:0"`
 }

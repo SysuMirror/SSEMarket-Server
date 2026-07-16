@@ -17,7 +17,8 @@ type Post struct {
 	Heat       float64
 	Photos     string
 	Tag        string
-	IsPrivate  bool
+	IsPrivate   bool
+	IsAnonymous bool
 }
 
 // BrowseFilter 帖子列表查询条件。
@@ -48,6 +49,7 @@ type PostDetail struct {
 	Author    *User
 	IsSaved   bool
 	IsLiked   bool
+	IsWatched bool
 	BrowseNum int
 }
 
@@ -60,13 +62,14 @@ type AuthTokens struct {
 
 // PostCreateInput 发帖入参。
 type PostCreateInput struct {
-	UserID    int
-	Title     string
-	Content   string
-	Partition string
-	Photos    string
-	Tags      []string
-	IsPrivate bool
+	UserID      int
+	Title       string
+	Content     string
+	Partition   string
+	Photos      string
+	Tags        []string
+	IsPrivate   bool
+	IsAnonymous bool
 }
 
 // UserProfilePostsFilter 个人主页发帖列表查询。

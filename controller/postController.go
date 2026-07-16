@@ -39,6 +39,7 @@ type PostMsg struct {
 	Photos        string
 	TagList       string
 	IsPrivate     bool `json:"isPrivate"`
+	IsAnonymous   bool `json:"isAnonymous"`
 }
 
 func Post(c *gin.Context) {
@@ -97,13 +98,14 @@ func Post(c *gin.Context) {
 	}
 
 	err = service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
-		UserID:    user.ID,
-		Title:     title,
-		Content:   content,
-		Partition: partition,
-		Photos:    photos,
-		Tags:      tags,
-		IsPrivate: requestPostMsg.IsPrivate,
+		UserID:      user.ID,
+		Title:       title,
+		Content:     content,
+		Partition:   partition,
+		Photos:      photos,
+		Tags:        tags,
+		IsPrivate:   requestPostMsg.IsPrivate,
+		IsAnonymous: requestPostMsg.IsAnonymous,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
@@ -134,9 +136,22 @@ type PostResponse struct {
 	PostTime      time.Time
 	IsSaved       bool
 	IsLiked       bool
+	IsWatched     bool
 	Photos        string
 	Tag           string
 	IsPrivate     bool
+	IsAnonymous   bool `json:"isAnonymous"`
+	IsOwner       bool `json:"isOwner"`
+}
+
+// anonymizeAuthor 对匿名帖的作者信息脱敏：匿名帖对所有查看者（含作者本人）脱敏作者信息，
+// 但返回 isOwner 标志让前端能管理自己的帖子。
+func anonymizeAuthor(isAnonymous bool, viewerUserID, authorUserID int, name, phone, avatar, identity string, score int) (string, string, string, string, int, int, bool) {
+	isOwner := viewerUserID == authorUserID
+	if !isAnonymous {
+		return name, phone, avatar, identity, score, authorUserID, isOwner
+	}
+	return "匿名用户", "", "", "", 0, 0, isOwner
 }
 
 type BrowseMeg struct {
@@ -144,12 +159,12 @@ type BrowseMeg struct {
 	Partition     string `json:"partition"`
 	Searchinfo    string `json:"searchinfo"`
 	Tag           string `json:"tag"`
-	Searchsort    string `json:"searchsort"` // home | history | save
+	Searchsort    string `json:"searchsort"` // home | history | save | rating
 	OrderBy       string `json:"orderBy"`    // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc
 	TimeFrom      string `json:"timeFrom"`
 	TimeTo        string `json:"timeTo"`
-	Limit         int    `json:"limit"`
-	Offset        int    `json:"offset"`
+	Limit         int    `json:"limit"`  // 默认 15；>15 时不走公共 Feed 缓存
+	Offset        int    `json:"offset"` // 0~150 且 limit≤15 时可命中公共 Feed 缓存
 	PostType      string `json:"postType"`
 }
 
@@ -166,6 +181,11 @@ func viewerFromAuth(c *gin.Context) (*domain.User, bool) {
 	return user, true
 }
 
+// Browse 帖子列表接口（POST /api/browse 或 /loadtest/browse）。
+//
+// 请求体 BrowseMeg 携带 partition/searchinfo/tag/searchsort/orderBy/分页等筛选；
+// 登录用户 ID 从 JWT 注入，不参与前端传参。
+// 服务层 Browse 当前直查 DB 列表 + 个人态实时组装，见 service/browse_feed.go。
 func Browse(c *gin.Context) {
 	viewer, ok := viewerFromAuth(c)
 	if !ok {
@@ -199,24 +219,29 @@ func Browse(c *gin.Context) {
 	}
 	responses := make([]PostResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, browseItemToResponse(item))
+		responses = append(responses, browseItemToResponse(item, viewer.ID))
 	}
 	c.JSON(http.StatusOK, responses)
 }
 
-func browseItemToResponse(item domain.BrowseItem) PostResponse {
+func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse {
 	p, a := item.Post, item.Author
 	if p == nil {
 		return PostResponse{}
 	}
 	name, phone, avatar, identity, score := "", "", "", "", 0
+	authorID := 0
+	var isOwner bool
 	if a != nil {
 		name, phone, avatar, identity, score = a.Name, a.Phone, a.AvatarURL, a.Identity, a.Score
+		authorID = a.ID
 	}
+	// 匿名帖对所有查看者脱敏作者信息，但返回 isOwner 标志
+	name, phone, avatar, identity, score, authorID, isOwner = anonymizeAuthor(p.IsAnonymous, viewerUserID, authorID, name, phone, avatar, identity, score)
 	return PostResponse{
 		PostID:        uint(p.ID),
 		Partition:     p.Partition,
-		UserID:        p.UserID,
+		UserID:        authorID,
 		UserName:      name,
 		UserScore:     score,
 		UserTelephone: phone,
@@ -234,6 +259,8 @@ func browseItemToResponse(item domain.BrowseItem) PostResponse {
 		Photos:        p.Photos,
 		Tag:           p.Tag,
 		IsPrivate:     p.IsPrivate,
+		IsAnonymous:   p.IsAnonymous,
+		IsOwner:       isOwner,
 	}
 }
 
@@ -269,7 +296,7 @@ func UserProfilePosts(c *gin.Context) {
 	}
 	responses := make([]PostResponse, 0, len(items))
 	for _, item := range items {
-		responses = append(responses, browseItemToResponse(item))
+		responses = append(responses, browseItemToResponse(item, viewer.ID))
 	}
 	c.JSON(http.StatusOK, responses)
 }
@@ -367,34 +394,74 @@ func UpdatePostPrivacy(c *gin.Context) {
 }
 
 type SaveMsg struct {
-	UserTelephone string
-	PostID        uint
-	//IsSaved       bool
+	UserTelephone string `json:"userTelephone"`
+	PostID        uint   `json:"postID"`
 }
 
 func UpdateSave(c *gin.Context) {
-	var requestSaveMsg SaveMsg
-	c.Bind(&requestSaveMsg)
-	userTelephone := requestSaveMsg.UserTelephone
-	postID := int(requestSaveMsg.PostID)
-
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	if user.Phone != userTelephone {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	err = service.Posts.ToggleSave(c.Request.Context(), user.ID, postID)
+	var requestSaveMsg SaveMsg
+	if err := c.ShouldBindJSON(&requestSaveMsg); err != nil {
+		_ = c.ShouldBind(&requestSaveMsg)
+	}
+	postID := int(requestSaveMsg.PostID)
+	if postID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
+		return
+	}
+	isSaved, err := service.Posts.ToggleSave(c.Request.Context(), viewer.ID, postID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 			return
 		}
 		apperr.WriteMsg(c, err, "操作失败")
+		return
 	}
+	msg := "收藏成功"
+	if !isSaved {
+		msg = "已取消收藏"
+	}
+	response.Success(c, gin.H{"isSaved": isSaved}, msg)
+}
+
+type WatchMsg struct {
+	UserTelephone string
+	PostID        uint
+}
+
+func ToggleWatch(c *gin.Context) {
+	var req WatchMsg
+	c.Bind(&req)
+	postID := int(req.PostID)
+
+	tokenUserID := GetTokenUserID(c)
+	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
+	if err != nil || user == nil || user.ID == 0 {
+		return
+	}
+	if user.Phone != req.UserTelephone {
+		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
+		return
+	}
+	watched, err := service.Posts.ToggleWatch(c.Request.Context(), user.ID, postID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
+		apperr.WriteMsg(c, err, "操作失败")
+		return
+	}
+	msg := "已码住，有新回复会通知你"
+	if !watched {
+		msg = "已取消码住"
+	}
+	response.Success(c, gin.H{"watched": watched}, msg)
 }
 
 type LikeMsg struct {
@@ -537,9 +604,12 @@ type PostDetailsResponse struct {
 	PostTime      time.Time
 	IsSaved       bool
 	IsLiked       bool
+	IsWatched     bool
 	Photos        string
 	Tag           string
 	IsPrivate     bool
+	IsAnonymous   bool `json:"isAnonymous"`
+	IsOwner       bool `json:"isOwner"`
 	IsLottery     bool
 }
 
@@ -633,7 +703,7 @@ func ShowDetails(c *gin.Context) {
 	}
 	timing.step("check_visibility")
 
-	resp := postDetailToResponse(detail)
+	resp := postDetailToResponse(detail, viewer.ID)
 	if isLottery, err := service.Lotteries.IsLotteryPost(c.Request.Context(), int(postID)); err == nil {
 		resp.IsLottery = isLottery
 	}
@@ -641,7 +711,7 @@ func ShowDetails(c *gin.Context) {
 	timing.step("write_json")
 }
 
-func postDetailToResponse(d *domain.PostDetail) PostDetailsResponse {
+func postDetailToResponse(d *domain.PostDetail, viewerUserID int) PostDetailsResponse {
 	p, u := d.Post, d.Author
 	name, phone, avatar, identity, score := "", "", "", "", 0
 	userID := 0
@@ -649,6 +719,8 @@ func postDetailToResponse(d *domain.PostDetail) PostDetailsResponse {
 		name, phone, avatar, identity, score = u.Name, u.Phone, u.AvatarURL, u.Identity, u.Score
 		userID = u.ID
 	}
+	// 匿名帖对所有查看者脱敏作者信息，但返回 isOwner 标志
+	name, phone, avatar, identity, score, userID, isOwner := anonymizeAuthor(p.IsAnonymous, viewerUserID, userID, name, phone, avatar, identity, score)
 	return PostDetailsResponse{
 		PostID:        uint(p.ID),
 		UserID:        uint(userID),
@@ -664,11 +736,14 @@ func postDetailToResponse(d *domain.PostDetail) PostDetailsResponse {
 		PostTime:      p.PostTime,
 		IsSaved:       d.IsSaved,
 		IsLiked:       d.IsLiked,
+		IsWatched:     d.IsWatched,
 		Browse:        d.BrowseNum,
 		Heat:          p.Heat,
 		Photos:        p.Photos,
 		Tag:           p.Tag,
 		IsPrivate:     p.IsPrivate,
+		IsAnonymous:   p.IsAnonymous,
+		IsOwner:       isOwner,
 	}
 }
 

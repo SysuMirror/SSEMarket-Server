@@ -20,6 +20,10 @@ type PostRepository interface {
 	AuthorsByIDs(ctx context.Context, userIDs []int) (map[int]*domain.User, error)
 	IsLiked(ctx context.Context, userID, postID int) (bool, error)
 	IsSaved(ctx context.Context, userID, postID int) (bool, error)
+	IsWatched(ctx context.Context, userID, postID int) (bool, error)
+	CreateWatch(ctx context.Context, userID, postID int) error
+	DeleteWatch(ctx context.Context, userID, postID int) error
+	ListWatcherUserIDsByPostID(ctx context.Context, postID int) ([]int, error)
 	Create(ctx context.Context, post *domain.Post) error
 	Delete(ctx context.Context, postID int) error
 	UpdatePrivacy(ctx context.Context, postID int, isPrivate bool) error

@@ -50,7 +50,8 @@ func Copy() {
 	backupDir := "/app/database"
 
 	c := cron.New()
-	_, _ = c.AddFunc("@every 12h", func() {
+	// 每日 04:00 备份一次（原 @every 12h 一天两次，易占满磁盘）
+	_, _ = c.AddFunc("0 4 * * *", func() {
 		backupFile := fmt.Sprintf("%s/backup_%s.sql", backupDir, time.Now().Format("2006-01-02 15:04:05"))
 		cmd := exec.Command("mysqldump", fmt.Sprintf("-h%s", dbHost), fmt.Sprintf("-P%d", dbPort), fmt.Sprintf("-u%s", dbUser), fmt.Sprintf("-p%s", dbPassword), dbName, "--skip-ssl", "--result-file="+backupFile)
 		if err := cmd.Run(); err != nil {

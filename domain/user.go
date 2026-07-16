@@ -113,6 +113,59 @@ type OAuth2AuthRecordPage struct {
 	TotalPages int64
 }
 
+// UserAPITokenScope 单个 scope 定义。
+type UserAPITokenScope struct {
+	Name        string `json:"name"`        // 如 "agent:chat"
+	Description string `json:"description"` // 中文描述
+}
+
+// UserAPITokenCreateInput 创建 PAT 入参。
+type UserAPITokenCreateInput struct {
+	Name   string
+	Scopes []string
+	UserID int
+}
+
+// UserAPITokenCreateResult 创建 PAT 结果。PlainText 仅在此返回一次。
+type UserAPITokenCreateResult struct {
+	TokenID    int
+	PlainText  string // 完整明文 token，仅创建时返回
+	Prefix     string
+	Name       string
+	Scopes     string
+	IsActive   bool
+	CreatedAt  time.Time
+}
+
+// UserAPITokenItem PAT 列表项（不含明文）。
+type UserAPITokenItem struct {
+	TokenID    int        `json:"token_id"`
+	Prefix     string     `json:"prefix"`
+	Name       string     `json:"name"`
+	Scopes     string     `json:"scopes"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	IsActive   bool       `json:"is_active"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// UserAPITokenPage PAT 分页结果。
+type UserAPITokenPage struct {
+	Records    []UserAPITokenItem `json:"records"`
+	Total      int64              `json:"total"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"page_size"`
+	TotalPages int64              `json:"total_pages"`
+}
+
+// UserAPITokenVerify PAT 验证结果，供智能体侧使用。
+type UserAPITokenVerify struct {
+	TokenID   int
+	UserID    int
+	Scopes    []string
+	IsActive  bool
+}
+
+
 // RefreshTokenRecord 刷新令牌记录。
 type RefreshTokenRecord struct {
 	ID        int

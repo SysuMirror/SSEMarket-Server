@@ -17,7 +17,10 @@ else
   return 0
 end`
 
-// Lock 分布式锁：SET key UUID NX EX ttl，释放时 Lua 校验 value 防误删。
+// Lock 基于 Redis 的互斥锁（SET NX EX + Lua 安全释放）。
+//
+// 用途：cache/manager 在缓存 miss 回源 DB 前，避免多进程同时加载同一 key。
+// 当前 compose 为单实例部署，防击穿主靠 singleflight；本锁为多实例水平扩展预留。
 type Lock struct {
 	key    string
 	value  string

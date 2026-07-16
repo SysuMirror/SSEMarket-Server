@@ -8,6 +8,9 @@ type ChatMsg struct {
 	TargetUser   User      `gorm:"foreignkey:TargetUserID;references:UserID" json:"targetUser"`
 	SenderUserID int       `gorm:"column:senderUserID;type:int;not null;index:idx_target_sender" json:"senderUserID"`
 	SenderUser   User      `gorm:"foreignkey:SenderUserID;references:UserID" json:"senderUser"`
-	Content      string    `gorm:"column:content;type:varchar(5000)" json:"content"`
-	CreatedAt    time.Time `gorm:"column:createdAt;type:datetime" json:"createdAt"`
+	Content         string    `gorm:"column:content;type:varchar(5000)" json:"content"`
+	IsAnonymous     bool      `gorm:"column:isAnonymous;type:bool;default:false" json:"isAnonymous"`
+	ThreadAnonymous bool      `gorm:"column:threadAnonymous;type:bool;default:false" json:"threadAnonymous"`
+	IsRecalled      bool      `gorm:"column:isRecalled;type:bool;default:false" json:"isRecalled"`
+	CreatedAt       time.Time `gorm:"column:createdAt;type:datetime" json:"createdAt"`
 }

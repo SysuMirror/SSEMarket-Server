@@ -74,6 +74,7 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 	}
 	observability.RecordCacheAccess("l2", profile.Name, false)
 
+	// 防击穿：singleflight 合并进程内并发回源；Redis 互斥锁供多实例部署时跨进程互斥。
 	lock := util.NewLock("lock:" + key)
 	acquired := lock.TryLock()
 	if !acquired {
@@ -116,7 +117,9 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 		return zero, nil
 	}
 
-	setBothLevels(ctx, key, dbData, profile)
+	if !(profile.NoCacheEmpty && isEmptySlice(dbData)) {
+		setBothLevels(ctx, key, dbData, profile)
+	}
 	return dbData, nil
 }
 
@@ -130,7 +133,9 @@ func refreshAsync[T any](m *Manager, ctx context.Context, key string, loader fun
 				log.Printf("[cache] async refresh failed key=%s profile=%s err=%v", key, profile.Name, err)
 				return nil, err
 			}
-			setBothLevels(bg, key, data, profile)
+			if !(profile.NoCacheEmpty && isEmptySlice(data)) {
+				setBothLevels(bg, key, data, profile)
+			}
 			return nil, nil
 		})
 	}()

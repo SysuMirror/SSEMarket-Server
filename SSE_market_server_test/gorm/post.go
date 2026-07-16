@@ -128,8 +128,10 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 	if searchsort == "save" {
 		var saves []model.Psave
 		r.session(ctx).Model(&model.Psave{}).
-			Where("userID = ?", viewerID).
-			Order("psaveID DESC").
+			Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
+			Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)",
+				viewerID, 0, false, viewerID).
+			Order("psaves.psaveID DESC").
 			Offset(offset).Limit(limit).
 			Find(&saves)
 		if len(saves) == 0 {
@@ -140,7 +142,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 			postIDs = append(postIDs, s.PtargetID)
 		}
 		var posts []model.Post
-		browseListSelect(applyVisibility(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs), viewerID)).Find(&posts)
+		browseListSelect(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs)).Find(&posts)
 		postMap := make(map[int]model.Post, len(posts))
 		for _, p := range posts {
 			postMap[p.PostID] = p
@@ -409,6 +411,13 @@ func (r *postRepository) DeleteSave(ctx context.Context, userID, postID int) err
 }
 
 func (r *postRepository) CreateSave(ctx context.Context, userID, postID int) error {
+	exists, err := r.IsSaved(ctx, userID, postID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
 	s := model.Psave{
 		UserID:    userID,
 		PtargetID: postID,

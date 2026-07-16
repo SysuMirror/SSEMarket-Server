@@ -17,7 +17,7 @@ type PostService interface {
 	UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error)
 	UserProfilePostNum(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	UpdatePrivacy(ctx context.Context, postID, userID int, isPrivate bool) error
-	ToggleSave(ctx context.Context, userID, postID int) error
+	ToggleSave(ctx context.Context, userID, postID int) (isSaved bool, err error)
 	ToggleLike(ctx context.Context, userID, postID int) error
 	RecordBrowse(ctx context.Context, userID, postID int) error
 	Delete(ctx context.Context, postID, userID int) error

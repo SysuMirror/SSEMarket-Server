@@ -73,6 +73,17 @@ func (r *voteRepository) SubmitVote(ctx context.Context, userID, postID int) err
 	return r.session(ctx).Create(&newVote).Error
 }
 
+func (r *voteRepository) CancelVote(ctx context.Context, userID, postID int) error {
+	res := r.session(ctx).Where("userID = ? AND postID = ?", userID, postID).Delete(&model.Pvote{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 func (r *voteRepository) HasVoted(ctx context.Context, userID, postID int) (bool, error) {
 	var existing model.Pvote
 	err := r.session(ctx).Where("userID = ? AND postID = ?", userID, postID).First(&existing).Error

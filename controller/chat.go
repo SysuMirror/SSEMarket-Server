@@ -33,12 +33,11 @@ type ChatRespUser struct {
 	UnRead             int    `json:"unRead"`
 	LastMessageAt      string `json:"lastMessageAt"`
 	LastMessagePreview string `json:"lastMessagePreview"`
-}
-
-// 定义心跳结构体
-type HeartBeat struct {
-	UserID int `json:"userID"`
-	Beat   int `json:"beat"`
+	PeerMasked         bool   `json:"peerMasked"`
+	DisplayName        string `json:"displayName"`
+	DisplayAvatar      string `json:"displayAvatar"`
+	ThreadAnonymous    bool   `json:"threadAnonymous"`
+	ConversationKey    string `json:"conversationKey"`
 }
 
 // ws连接节点
@@ -53,8 +52,16 @@ var clientMap sync.Map
 // 获得聊天记录
 
 type ChatHistoryQuery struct {
-	SenderUserID int `form:"senderUserID" binding:"required"` // 绑定 query 参数 senderUserID
-	TargetUserID int `form:"targetUserID" binding:"required"` // 绑定 query 参数 targetUserID
+	SenderUserID    int  `form:"senderUserID" binding:"required"`
+	TargetUserID    int  `form:"targetUserID" binding:"required"`
+	ThreadAnonymous bool `form:"threadAnonymous"`
+}
+
+func chatConversationKey(peerID int, threadAnonymous bool) string {
+	if threadAnonymous {
+		return fmt.Sprintf("%d_anon", peerID)
+	}
+	return fmt.Sprintf("%d_direct", peerID)
 }
 
 func GetChatHistory(c *gin.Context) {
@@ -73,22 +80,30 @@ func GetChatHistory(c *gin.Context) {
 		response.Fail(c, gin.H{}, "没有权利查看他人聊天记录")
 		return
 	}
-	_ = removeChatViewInRedis(chatQuery.SenderUserID)
 
 	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
 	defer cancel()
-	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	threadAnonymous := chatQuery.ThreadAnonymous
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID, threadAnonymous)
 	if err := core.MyRedis.Set(redisCtx, chatViewKey, 1, 24*time.Hour).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
 	}
-	_ = core.MyRedis.SAdd(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
-	unreadKey := util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	if err := core.MyRedis.SAdd(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
+	}
+	unreadKey := util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID, threadAnonymous)
 	if err := core.MyRedis.Del(redisCtx, unreadKey).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
 	}
-	_ = core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(chatQuery.SenderUserID), unreadKey).Err()
+	if err := core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(chatQuery.SenderUserID), unreadKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
+	}
 
-	chatList, err := service.Chats.GetHistory(c.Request.Context(), chatQuery.SenderUserID, chatQuery.TargetUserID)
+	chatList, err := service.Chats.GetHistory(c.Request.Context(), chatQuery.SenderUserID, chatQuery.TargetUserID, threadAnonymous)
 	if err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 		return
@@ -96,22 +111,101 @@ func GetChatHistory(c *gin.Context) {
 	history := make([]chatHistoryResp, 0, len(chatList))
 	for _, item := range chatList {
 		history = append(history, chatHistoryResp{
-			ChatMsgID:    item.ChatMsgID,
-			TargetUserID: item.TargetUserID,
-			SenderUserID: item.SenderUserID,
-			Content:      item.Content,
-			CreatedAt:    item.CreatedAt,
+			ChatMsgID:       item.ChatMsgID,
+			TargetUserID:    item.TargetUserID,
+			SenderUserID:    item.SenderUserID,
+			Content:         item.Content,
+			IsAnonymous:     item.IsAnonymous,
+			ThreadAnonymous: item.ThreadAnonymous,
+			IsRecalled:      item.IsRecalled,
+			CreatedAt:       item.CreatedAt,
 		})
 	}
 	response.Success(c, gin.H{"chatHistoryList": history}, "获得聊天记录成功")
 }
 
 type chatHistoryResp struct {
-	ChatMsgID    int       `gorm:"column:chatMsgID" json:"chatMsgID"`
-	TargetUserID int       `gorm:"column:targetUserID" json:"targetUserID"`
-	SenderUserID int       `gorm:"column:senderUserID" json:"senderUserID"`
-	Content      string    `gorm:"column:content" json:"content"`
-	CreatedAt    time.Time `gorm:"column:createdAt" json:"createdAt"`
+	ChatMsgID       int       `gorm:"column:chatMsgID" json:"chatMsgID"`
+	TargetUserID    int       `gorm:"column:targetUserID" json:"targetUserID"`
+	SenderUserID    int       `gorm:"column:senderUserID" json:"senderUserID"`
+	Content         string    `gorm:"column:content" json:"content"`
+	IsAnonymous     bool      `json:"isAnonymous"`
+	ThreadAnonymous bool      `json:"threadAnonymous"`
+	IsRecalled      bool      `json:"isRecalled"`
+	CreatedAt       time.Time `gorm:"column:createdAt" json:"createdAt"`
+}
+
+type chatRecallReq struct {
+	ChatMsgID int `json:"chatMsgID" binding:"required"`
+}
+
+type chatRecallPush struct {
+	Type   string          `json:"type"`
+	Recall chatHistoryResp `json:"recall"`
+}
+
+func pushJSONToUser(userID int, payload []byte) {
+	val, ok := clientMap.Load(userID)
+	if !ok {
+		return
+	}
+	node, ok := val.(*ChatNode)
+	if !ok {
+		return
+	}
+	node.DataQueue <- payload
+}
+
+func broadcastChatRecall(item *domain.ChatHistoryItem) {
+	if item == nil {
+		return
+	}
+	resp := chatHistoryResp{
+		ChatMsgID:       item.ChatMsgID,
+		TargetUserID:    item.TargetUserID,
+		SenderUserID:    item.SenderUserID,
+		Content:         item.Content,
+		IsAnonymous:     item.IsAnonymous,
+		ThreadAnonymous: item.ThreadAnonymous,
+		IsRecalled:      item.IsRecalled,
+		CreatedAt:       item.CreatedAt,
+	}
+	payload, err := json.Marshal(chatRecallPush{Type: "recall", Recall: resp})
+	if err != nil {
+		return
+	}
+	pushJSONToUser(item.SenderUserID, payload)
+	pushJSONToUser(item.TargetUserID, payload)
+}
+
+func RecallChatMessage(c *gin.Context) {
+	req := chatRecallReq{}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ChatMsgID <= 0 {
+		response.Fail(c, gin.H{}, "无效的请求参数")
+		return
+	}
+	ctxUser, ok := c.Get("user")
+	if !ok {
+		response.Fail(c, gin.H{}, "撤回失败，请重试")
+		return
+	}
+	currentUser, _ := ctxUser.(*domain.User)
+	recalled, err := service.Chats.RecallMessage(c.Request.Context(), currentUser.ID, req.ChatMsgID)
+	if err != nil {
+		response.Fail(c, gin.H{}, err.Error())
+		return
+	}
+	broadcastChatRecall(recalled)
+	response.Success(c, gin.H{"message": chatHistoryResp{
+		ChatMsgID:       recalled.ChatMsgID,
+		TargetUserID:    recalled.TargetUserID,
+		SenderUserID:    recalled.SenderUserID,
+		Content:         recalled.Content,
+		IsAnonymous:     recalled.IsAnonymous,
+		ThreadAnonymous: recalled.ThreadAnonymous,
+		IsRecalled:      recalled.IsRecalled,
+		CreatedAt:       recalled.CreatedAt,
+	}}, "撤回成功")
 }
 
 func removeChatViewInRedis(userID int) error {
@@ -138,14 +232,13 @@ func ChatHandler(c *gin.Context) {
 		_, claim, err := common.ParseToken(tokenString)
 		if err != nil {
 			response.Fail(c, gin.H{}, "请重新登录")
+			return
 		}
 		userID = claim.UserID
 	} else {
 		user := userInterface.(*domain.User)
 		userID = user.ID
 	}
-
-	go removeChatViewInRedis(userID)
 
 	chatFunc(c.Request, c.Writer, userID)
 }
@@ -209,14 +302,14 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 			return
 		}
 
-		heartB := HeartBeat{}
-		if err = json.Unmarshal(data, &heartB); err != nil {
+		var envelope map[string]json.RawMessage
+		if err = json.Unmarshal(data, &envelope); err != nil {
 			errorMsg := []byte(`{"code": 0, "msg": "` + err.Error() + `"}`)
 			node.Conn.WriteMessage(websocket.TextMessage, errorMsg)
 			continue
 		}
 
-		if heartB.UserID != 0 {
+		if _, isHeartbeat := envelope["beat"]; isHeartbeat {
 			node.Conn.SetReadDeadline(time.Now().Add(readTimeout))
 			continue
 		}
@@ -234,10 +327,12 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 
 func dispatch(data []byte, userID int) error {
 	type wsChatMsg struct {
-		ChatMsgID    int    `json:"chatMsgID"`
-		TargetUserID int    `json:"targetUserID"`
-		SenderUserID int    `json:"senderUserID"`
-		Content      string `json:"content"`
+		ChatMsgID       int    `json:"chatMsgID"`
+		TargetUserID    int    `json:"targetUserID"`
+		SenderUserID    int    `json:"senderUserID"`
+		Content         string `json:"content"`
+		IsAnonymous     bool   `json:"isAnonymous"`
+		ThreadAnonymous bool   `json:"threadAnonymous"`
 	}
 	msg := wsChatMsg{}
 	err := json.Unmarshal(data, &msg)
@@ -250,17 +345,26 @@ func dispatch(data []byte, userID int) error {
 	if err != nil {
 		return err
 	}
+	if !msg.ThreadAnonymous && msg.IsAnonymous {
+		msg.ThreadAnonymous = true
+	}
+	if !msg.ThreadAnonymous {
+		msg.IsAnonymous = false
+	}
 
-	saved, err := service.Chats.SaveMessage(context.Background(), msg.ChatMsgID, msg.SenderUserID, msg.TargetUserID, msg.Content)
+	saved, err := service.Chats.SaveMessage(context.Background(), msg.ChatMsgID, msg.SenderUserID, msg.TargetUserID, msg.Content, msg.IsAnonymous, msg.ThreadAnonymous)
 	if err != nil {
 		return err
 	}
 	chatResp := ChatMsgResp{
-		ChatMsgID:    saved.ChatMsgID,
-		TargetUserID: saved.TargetUserID,
-		SenderUserID: saved.SenderUserID,
-		Content:      saved.Content,
-		CreatedAt:    saved.CreatedAt,
+		ChatMsgID:       saved.ChatMsgID,
+		TargetUserID:    saved.TargetUserID,
+		SenderUserID:    saved.SenderUserID,
+		Content:         saved.Content,
+		IsAnonymous:     saved.IsAnonymous,
+		ThreadAnonymous: saved.ThreadAnonymous,
+		IsRecalled:      saved.IsRecalled,
+		CreatedAt:       saved.CreatedAt,
 	}
 
 	data, err = json.Marshal(chatResp)
@@ -270,17 +374,21 @@ func dispatch(data []byte, userID int) error {
 
 	if msg.SenderUserID != msg.TargetUserID {
 		sendMsg(saved.ChatMsgID, msg.TargetUserID, data)
+		pushJSONToUser(msg.SenderUserID, data)
 	}
 	return nil
 }
 
 type ChatMsgResp struct {
-	ChatMsgID    int       `json:"chatMsgID"`
-	TargetUserID int       `json:"targetUserID"`
-	SenderUserID int       `json:"senderUserID"`
-	Content      string    `json:"content"`
-	Unread       int       `json:"unread"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ChatMsgID       int       `json:"chatMsgID"`
+	TargetUserID    int       `json:"targetUserID"`
+	SenderUserID    int       `json:"senderUserID"`
+	Content         string    `json:"content"`
+	IsAnonymous     bool      `json:"isAnonymous"`
+	ThreadAnonymous bool      `json:"threadAnonymous"`
+	IsRecalled      bool      `json:"isRecalled"`
+	Unread          int       `json:"unread"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 func sendMsg(chatMsgID, userID int, msg []byte) {
@@ -290,10 +398,16 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 		return
 	}
 	if !ok {
+		// chatMsgID == 0 表示系统推送（如相关联系人列表），并非真实聊天消息，
+		// 离线时不应计入未读，否则会生成 senderUserID=0 的幽灵未读 key，
+		// 导致前端小红点常驻无法清除。
+		if chatMsgID == 0 {
+			return
+		}
 		Chat_EmailAlerter(chatMsg.TargetUserID, "")
 		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
-		unreadKey := util.GenerateUnreadKey(userID, chatMsg.SenderUserID)
+		unreadKey := util.GenerateUnreadKey(userID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)
 		core.MyRedis.Incr(redisCtx, unreadKey)
 		core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(userID), unreadKey)
 		return
@@ -304,9 +418,9 @@ func sendMsg(chatMsgID, userID int, msg []byte) {
 			chatMsg.ChatMsgID = chatMsgID
 			redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
-			err := core.MyRedis.Get(redisCtx, util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
+			err := core.MyRedis.Get(redisCtx, util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)).Err()
 			if err == redis.Nil {
-				unreadKey := util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID)
+				unreadKey := util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)
 				resUnread := core.MyRedis.Incr(redisCtx, unreadKey)
 				core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(chatMsg.TargetUserID), unreadKey)
 				unread, _ := resUnread.Result()
@@ -334,7 +448,7 @@ func buildRelevantUserJSON(ctx context.Context, userID int) ([]byte, error) {
 		}
 		relevantUser := peer.Peer
 		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.ID)).Result()
+		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.ID, peer.ThreadAnonymous)).Result()
 		cancel()
 		unreadNum, _ := strconv.Atoi(unreadStr)
 		if err != nil && err != redis.Nil {
@@ -344,16 +458,28 @@ func buildRelevantUserJSON(ctx context.Context, userID int) ([]byte, error) {
 		if len([]rune(preview)) > 80 {
 			preview = string([]rune(preview)[:80]) + "…"
 		}
+		displayName, displayAvatar := util.ChatPeerDisplay(relevantUser.Name, relevantUser.AvatarURL, peer.ThreadAnonymous, peer.PeerMasked)
+		email := relevantUser.Email
+		identity := relevantUser.Identity
+		if peer.PeerMasked {
+			email = ""
+			identity = ""
+		}
 		relevantRespUsers = append(relevantRespUsers, ChatRespUser{
 			UserID:             relevantUser.ID,
-			Email:              relevantUser.Email,
-			Name:               relevantUser.Name,
-			AvatarURL:          relevantUser.AvatarURL,
-			Identity:           relevantUser.Identity,
+			Email:              email,
+			Name:               displayName,
+			AvatarURL:          displayAvatar,
+			Identity:           identity,
 			Score:              relevantUser.Score,
 			UnRead:             unreadNum,
 			LastMessageAt:      peer.LastMessageAt.Format(time.RFC3339),
 			LastMessagePreview: preview,
+			PeerMasked:         peer.PeerMasked,
+			DisplayName:        displayName,
+			DisplayAvatar:      displayAvatar,
+			ThreadAnonymous:    peer.ThreadAnonymous,
+			ConversationKey:    chatConversationKey(relevantUser.ID, peer.ThreadAnonymous),
 		})
 	}
 	return json.Marshal(struct {
@@ -367,7 +493,7 @@ func GetRelevantUser(userID int) ([]byte, error) {
 
 func LeaveChatView(c *gin.Context) {
 	chatQuery := ChatHistoryQuery{}
-	if err := c.ShouldBind(&chatQuery); err != nil {
+	if err := c.ShouldBindQuery(&chatQuery); err != nil {
 		response.Fail(c, gin.H{}, "无效的查询参数")
 		return
 	}
@@ -384,14 +510,16 @@ func LeaveChatView(c *gin.Context) {
 
 	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
 	defer cancel()
-	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
-	err := core.MyRedis.Del(redisCtx, chatViewKey).Err()
-	_ = core.MyRedis.SRem(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
-	if err != nil {
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID, chatQuery.ThreadAnonymous)
+	if err := core.MyRedis.Del(redisCtx, chatViewKey).Err(); err != nil {
 		response.Fail(c, gin.H{}, "操作异常")
-	} else {
-		response.Success(c, gin.H{}, "操作成功")
+		return
 	}
+	if err := core.MyRedis.SRem(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "操作异常")
+		return
+	}
+	response.Success(c, gin.H{}, "操作成功")
 }
 
 func GetChatNotice(c *gin.Context) {

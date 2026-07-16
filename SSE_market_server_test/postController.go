@@ -367,34 +367,39 @@ func UpdatePostPrivacy(c *gin.Context) {
 }
 
 type SaveMsg struct {
-	UserTelephone string
-	PostID        uint
-	//IsSaved       bool
+	UserTelephone string `json:"userTelephone"`
+	PostID        uint   `json:"postID"`
 }
 
 func UpdateSave(c *gin.Context) {
-	var requestSaveMsg SaveMsg
-	c.Bind(&requestSaveMsg)
-	userTelephone := requestSaveMsg.UserTelephone
-	postID := int(requestSaveMsg.PostID)
-
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	if user.Phone != userTelephone {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	err = service.Posts.ToggleSave(c.Request.Context(), user.ID, postID)
+	var requestSaveMsg SaveMsg
+	if err := c.ShouldBindJSON(&requestSaveMsg); err != nil {
+		_ = c.ShouldBind(&requestSaveMsg)
+	}
+	postID := int(requestSaveMsg.PostID)
+	if postID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
+		return
+	}
+	isSaved, err := service.Posts.ToggleSave(c.Request.Context(), viewer.ID, postID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 			return
 		}
 		apperr.WriteMsg(c, err, "操作失败")
+		return
 	}
+	msg := "收藏成功"
+	if !isSaved {
+		msg = "已取消收藏"
+	}
+	response.Success(c, gin.H{"isSaved": isSaved}, msg)
 }
 
 type LikeMsg struct {

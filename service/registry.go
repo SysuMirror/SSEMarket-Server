@@ -42,7 +42,7 @@ func InitServices(db *gorm.DB) {
 	Users = NewUserService(userRepo)
 	Ranks = NewRankService(rankRepo)
 	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks)
-	Comments = NewCommentService(commentRepo)
+	Comments = NewCommentService(commentRepo, postRepo)
 	Chats = NewChatService(chatRepo)
 	Ratings = NewRatingService(ratingRepo)
 	Shops = NewShopService(shopRepo, userRepo)

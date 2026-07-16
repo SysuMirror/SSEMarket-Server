@@ -93,7 +93,7 @@ services:
     volumes:
       - loadtest-mysql-vol:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-padmin"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-padmin" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -111,7 +111,7 @@ services:
     environment:
       TZ: Asia/Shanghai
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -239,48 +239,49 @@ services:
       - /root/SSE_Market/sse_market_new_client/newSSE/dist:/usr/share/nginx/new
       - /root/SSE_Market/qiu/admin/dist:/usr/share/nginx/test_admin
       - /root/SSE_Market/tx/ai_interview/web/dist:/usr/share/nginx/interview
+      - /root/SSE_Market/iWiki/web:/usr/share/nginx/iwiki
   # certbot 不在 compose 中常驻；续期见 /root/SSE_Market/certbot-renew.sh
-# db:
-#   image: mysql:5.7
-#   volumes:
-#     - blog_db_data:/var/lib/mysql
-#   # networks:
-#   #   - default
-#   restart: always
-#   environment:
-#     MYSQL_ROOT_PASSWORD: somewordpress
-#     MYSQL_DATABASE: wordpress
-#     MYSQL_USER: wordpress
-#     MYSQL_PASSWORD: wordpress
-# wordpress:
-#   depends_on:
-#     - db
-#   # networks:
-#   #   - my_net
-#   #   - default
-#   container_name: wordpress
-#   image: docker.io/bitnami/wordpress-nginx
-#   ports:
-#     - 80:80
-#     - 443:443
-#   volumes:
-#     - /root/SSE_Market/Nginx:/etc/letsencrypt/
-#     - /root/SSE_Market/sse_market_mobile/dist:/usr/share/nginx/mb
-#     - /root/SSE_Market/SSE_market_client/dist:/usr/share/nginx/pc
-#     # - blog_wordpress_data:/opt/bitnami/wordpress
-#     - ../nginx_proxy/opt:/opt/bitnami/nginx/conf/server_blocks
-#     # - ../nginx_proxy/nginx.conf:/opt/bitnami/nginx/conf/nginx.conf:ro
-#     # - /root/SSE_Market/config/Apache/apache2:/etc/apache2
-#     # - /root/SSE_Market/SSL/Apache:/etc/ssl/Apache
-#   # ports:
-#   #   - 88:8080
-#   #   - 4433:8443
-#   restart: always
-#   environment:
-#     WORDPRESS_DATABASE_HOST: db
-#     WORDPRESS_DATABASE_USER: wordpress
-#     WORDPRESS_DATABASE_PASSWORD: wordpress
-#     WORDPRESS_DATABASE_NAME: wordpress
+  # db:
+  #   image: mysql:5.7
+  #   volumes:
+  #     - blog_db_data:/var/lib/mysql
+  #   # networks:
+  #   #   - default
+  #   restart: always
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: somewordpress
+  #     MYSQL_DATABASE: wordpress
+  #     MYSQL_USER: wordpress
+  #     MYSQL_PASSWORD: wordpress
+  # wordpress:
+  #   depends_on:
+  #     - db
+  #   # networks:
+  #   #   - my_net
+  #   #   - default
+  #   container_name: wordpress
+  #   image: docker.io/bitnami/wordpress-nginx
+  #   ports:
+  #     - 80:80
+  #     - 443:443
+  #   volumes:
+  #     - /root/SSE_Market/Nginx:/etc/letsencrypt/
+  #     - /root/SSE_Market/sse_market_mobile/dist:/usr/share/nginx/mb
+  #     - /root/SSE_Market/SSE_market_client/dist:/usr/share/nginx/pc
+  #     # - blog_wordpress_data:/opt/bitnami/wordpress
+  #     - ../nginx_proxy/opt:/opt/bitnami/nginx/conf/server_blocks
+  #     # - ../nginx_proxy/nginx.conf:/opt/bitnami/nginx/conf/nginx.conf:ro
+  #     # - /root/SSE_Market/config/Apache/apache2:/etc/apache2
+  #     # - /root/SSE_Market/SSL/Apache:/etc/ssl/Apache
+  #   # ports:
+  #   #   - 88:8080
+  #   #   - 4433:8443
+  #   restart: always
+  #   environment:
+  #     WORDPRESS_DATABASE_HOST: db
+  #     WORDPRESS_DATABASE_USER: wordpress
+  #     WORDPRESS_DATABASE_PASSWORD: wordpress
+  #     WORDPRESS_DATABASE_NAME: wordpress
 
 volumes:
   my-vol:

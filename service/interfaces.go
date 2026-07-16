@@ -17,7 +17,8 @@ type PostService interface {
 	UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error)
 	UserProfilePostNum(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	UpdatePrivacy(ctx context.Context, postID, userID int, isPrivate bool) error
-	ToggleSave(ctx context.Context, userID, postID int) error
+	ToggleSave(ctx context.Context, userID, postID int) (isSaved bool, err error)
+	ToggleWatch(ctx context.Context, userID, postID int) (bool, error)
 	ToggleLike(ctx context.Context, userID, postID int) error
 	RecordBrowse(ctx context.Context, userID, postID int) error
 	Delete(ctx context.Context, postID, userID int) error
@@ -49,6 +50,14 @@ type UserService interface {
 	ToggleEmailNotification(ctx context.Context, userID int) error
 	CalculateAndSaveScores(ctx context.Context)
 	GetStatistics(ctx context.Context, userID int) (*domain.UserStatistics, error)
+
+	// UserAPIToken PAT 管理（MCP 等对外调用）
+	ListAPITokenScopes(ctx context.Context) []domain.UserAPITokenScope
+	CreateAPIToken(ctx context.Context, in domain.UserAPITokenCreateInput) (*domain.UserAPITokenCreateResult, error)
+	ListAPITokens(ctx context.Context, userID, page, pageSize int) (*domain.UserAPITokenPage, error)
+	RevokeAPIToken(ctx context.Context, tokenID, userID int) error
+	DeleteAPIToken(ctx context.Context, tokenID, userID int) error
+	VerifyAPIToken(ctx context.Context, plainToken string) (*domain.UserAPITokenVerify, error)
 }
 
 // CommentService 评论领域服务。
@@ -57,7 +66,7 @@ type CommentService interface {
 	DeletePcomment(ctx context.Context, pcommentID int) error
 	DeleteCcomment(ctx context.Context, ccommentID int) error
 	CreatePcomment(ctx context.Context, in domain.PcommentCreateInput) (*domain.PcommentCreateResult, error)
-	CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) ([]*domain.CcommentNotifyInfo, error)
+	CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) (*domain.CcommentCreateResult, error)
 	TogglePcommentLike(ctx context.Context, userID, pcommentID int) error
 	TogglePcommentDeny(ctx context.Context, userID, pcommentID int) error
 	ToggleCcommentLike(ctx context.Context, userID, ccommentID int) error
@@ -67,6 +76,7 @@ type CommentService interface {
 	FindCcomment(ctx context.Context, ccommentID int) (*domain.Ccomment, error)
 	ValidatePcommentAccess(ctx context.Context, pcommentID, viewerUserID int) error
 	ValidateCcommentAccess(ctx context.Context, ccommentID, viewerUserID int) error
+	ResolveMentionUsers(ctx context.Context, names []string) ([]*domain.User, error)
 }
 
 // RankService 排行统计服务。
@@ -80,8 +90,9 @@ type RankService interface {
 
 // ChatService 聊天领域服务。
 type ChatService interface {
-	GetHistory(ctx context.Context, senderUserID, targetUserID int) ([]*domain.ChatHistoryItem, error)
-	SaveMessage(ctx context.Context, chatMsgID, senderUserID, targetUserID int, content string) (*domain.ChatHistoryItem, error)
+	GetHistory(ctx context.Context, senderUserID, targetUserID int, threadAnonymous bool) ([]*domain.ChatHistoryItem, error)
+	SaveMessage(ctx context.Context, chatMsgID, senderUserID, targetUserID int, content string, isAnonymous, threadAnonymous bool) (*domain.ChatHistoryItem, error)
+	RecallMessage(ctx context.Context, userID, chatMsgID int) (*domain.ChatHistoryItem, error)
 	ListRelevantPeers(ctx context.Context, userID int) ([]*domain.ChatPeerSummary, error)
 	FindUserByID(ctx context.Context, userID int) (*domain.User, error)
 }
@@ -165,7 +176,7 @@ type SueService interface {
 // VoteService 投票领域服务。
 type VoteService interface {
 	SearchByTitle(ctx context.Context, keyword string, viewerUserID int) ([]domain.VoteSearchItem, error)
-	SubmitVote(ctx context.Context, userID, postID int) error
+	ToggleVote(ctx context.Context, userID, postID int) (bool, error)
 	HasVoted(ctx context.Context, userID, postID int) (bool, error)
 	GetPostRanking(ctx context.Context) ([]domain.PostRankItem, error)
 	GetUserRanking(ctx context.Context) ([]domain.UserRankItem, error)

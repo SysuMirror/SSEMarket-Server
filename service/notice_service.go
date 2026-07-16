@@ -117,6 +117,9 @@ func (s *noticeService) buildNoticeItem(ctx context.Context, notice repository.N
 	case "lottery_win":
 		item.PostID = notice.Target
 		item.Time = notice.Time
+	case "post_watch":
+		item.PostID = notice.Target
+		item.Time = notice.Time
 	default:
 		item.Time = notice.Time
 	}

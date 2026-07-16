@@ -3,6 +3,7 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"loginTest/domain"
@@ -344,6 +345,129 @@ func (r *userRepository) ListOAuth2AuthRecords(ctx context.Context, userID, offs
 		})
 	}
 	return out, nil
+}
+
+// CreateUserAPIToken 创建 PAT 记录，返回 token_id。tokenHash 为 SHA-256(token)。
+func (r *userRepository) CreateUserAPIToken(ctx context.Context, userID int, tokenHash, tokenPrefix, name, scopes string) (int, error) {
+	now := time.Now()
+	rec := model.UserAPIToken{
+		UserID:      userID,
+		TokenHash:   tokenHash,
+		TokenPrefix: tokenPrefix,
+		Name:        name,
+		Scopes:      scopes,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := r.session(ctx).Create(&rec).Error; err != nil {
+		return 0, err
+	}
+	return rec.TokenID, nil
+}
+
+// FindUserAPITokenByHash 按 hash 查找活跃的 PAT，返回智能体验证所需的最小字段集。
+func (r *userRepository) FindUserAPITokenByHash(ctx context.Context, tokenHash string) (*domain.UserAPITokenVerify, error) {
+	var rec model.UserAPIToken
+	err := r.session(ctx).Where("token_hash = ? AND is_active = ?", tokenHash, true).First(&rec).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return &domain.UserAPITokenVerify{
+		TokenID:  rec.TokenID,
+		UserID:   rec.UserID,
+		Scopes:   splitScopes(rec.Scopes),
+		IsActive: rec.IsActive,
+	}, nil
+}
+
+// TouchUserAPITokenLastUsed 更新最后使用时间。失败仅记日志，不影响主流程。
+func (r *userRepository) TouchUserAPITokenLastUsed(ctx context.Context, tokenID int, lastUsedAt time.Time) error {
+	return r.session(ctx).Model(&model.UserAPIToken{}).
+		Where("token_id = ?", tokenID).
+		Update("last_used_at", lastUsedAt).Error
+}
+
+// CountUserAPITokens 统计用户活跃 PAT 数量。
+func (r *userRepository) CountUserAPITokens(ctx context.Context, userID int) (int64, error) {
+	var count int64
+	err := r.session(ctx).Model(&model.UserAPIToken{}).
+		Where("user_id = ? AND is_active = ?", userID, true).
+		Count(&count).Error
+	return count, err
+}
+
+// ListUserAPITokens 分页列出用户的 PAT（不含明文）。
+func (r *userRepository) ListUserAPITokens(ctx context.Context, userID, offset, limit int) ([]domain.UserAPITokenItem, error) {
+	var records []model.UserAPIToken
+	err := r.session(ctx).Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.UserAPITokenItem, 0, len(records))
+	for _, rec := range records {
+		out = append(out, domain.UserAPITokenItem{
+			TokenID:    rec.TokenID,
+			Prefix:     rec.TokenPrefix,
+			Name:       rec.Name,
+			Scopes:     rec.Scopes,
+			LastUsedAt: rec.LastUsedAt,
+			IsActive:   rec.IsActive,
+			CreatedAt:   rec.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// RevokeUserAPIToken 软删（is_active=0），同时校验 user_id 防越权。
+func (r *userRepository) RevokeUserAPIToken(ctx context.Context, tokenID, userID int) error {
+	res := r.session(ctx).Model(&model.UserAPIToken{}).
+		Where("token_id = ? AND user_id = ?", tokenID, userID).
+		Update("is_active", false)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// DeleteUserAPIToken 硬删，仅允许删除已吊销（is_active=0）的记录，校验 user_id 防越权。
+func (r *userRepository) DeleteUserAPIToken(ctx context.Context, tokenID, userID int) error {
+	res := r.session(ctx).
+		Where("token_id = ? AND user_id = ? AND is_active = ?", tokenID, userID, false).
+		Delete(&model.UserAPIToken{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// 不存在或仍处于活跃状态
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// splitScopes 将逗号分隔的 scope 字符串拆为切片。
+func splitScopes(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (r *userRepository) ListPostIDsByUserID(ctx context.Context, userID int) ([]int, error) {

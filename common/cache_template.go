@@ -40,7 +40,8 @@ func InvalidateCommentListCache(postID int, postType string) {
 	cache.Invalidate(util.GetCommentListKey(postID, postType))
 }
 
-// InvalidateHomeBrowseCache 公共 Feed 列表变更时失效缓存。
+// InvalidateHomeBrowseCache 帖子列表公共段变更时调用（发帖/删帖/改隐私等）。
+// 内部通过世代号 INCR 批量失效，见 cache.InvalidatePublicFeed。
 func InvalidateHomeBrowseCache() {
 	cache.InvalidatePublicFeed(ctx)
 }

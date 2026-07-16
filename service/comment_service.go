@@ -19,10 +19,11 @@ const commentWeight = float64(6)
 
 type commentService struct {
 	comments repository.CommentRepository
+	posts    repository.PostRepository
 }
 
-func NewCommentService(comments repository.CommentRepository) CommentService {
-	return &commentService{comments: comments}
+func NewCommentService(comments repository.CommentRepository, posts repository.PostRepository) CommentService {
+	return &commentService{comments: comments, posts: posts}
 }
 
 func (s *commentService) ListForPost(ctx context.Context, postID int, postType string, viewerUserID int) ([]*domain.PcommentWithMeta, error) {
@@ -47,7 +48,30 @@ func (s *commentService) ListForPost(ctx context.Context, postID int, postType s
 	if tree == nil || len(tree.Pcomments) == 0 {
 		return nil, nil
 	}
-	return s.buildCommentResponse(ctx, tree, viewerUserID)
+	items, err := s.buildCommentResponse(ctx, tree, viewerUserID)
+	if err != nil {
+		return nil, err
+	}
+	// 匿名帖：作者在自己帖下的评论/回复也显示为匿名用户，避免暴露发帖人身份
+	if post.IsAnonymous {
+		anonymizeCommentsByPostAuthor(items, post.UserID)
+	}
+	return items, nil
+}
+
+// anonymizeCommentsByPostAuthor 把匿名帖作者自己发的评论/回复替换为脱敏作者副本，
+// 不修改 userMap 中共享的 *domain.User（其他评论者信息不受影响）。
+func anonymizeCommentsByPostAuthor(items []*domain.PcommentWithMeta, postAuthorID int) {
+	for _, item := range items {
+		if item.Pcomment != nil && item.Pcomment.UserID == postAuthorID {
+			item.Author = &domain.User{Name: "匿名用户"}
+		}
+		for _, sc := range item.Subcomments {
+			if sc.Ccomment != nil && sc.Ccomment.UserID == postAuthorID {
+				sc.Author = &domain.User{Name: "匿名用户"}
+			}
+		}
+	}
 }
 
 func (s *commentService) loadCommentTree(ctx context.Context, postID int) (*dto.CommentTreeCacheDTO, error) {
@@ -285,6 +309,7 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		skipNotify[post.UserID] = struct{}{}
 	}
 	s.notifyMentions(ctx, in.UserID, content, "pcomment", pc.ID, skipNotify)
+	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, in.UserID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -300,14 +325,15 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		return nil, err
 	}
 	return &domain.PcommentCreateResult{
-		Pcomment:       pc,
-		Author:         author,
-		Subcomments:    subs,
-		NotifyReceiver: notifyReceiver,
+		Pcomment:                pc,
+		Author:                  author,
+		Subcomments:             subs,
+		NotifyReceiver:          notifyReceiver,
+		PostWatchEmailReceivers: postWatchReceivers,
 	}, nil
 }
 
-func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) ([]*domain.CcommentNotifyInfo, error) {
+func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) (*domain.CcommentCreateResult, error) {
 	content := strings.TrimSpace(in.Content)
 	if content == "" || utf8.RuneCountInString(content) > 1000 {
 		return nil, domain.ErrBadRequest
@@ -354,6 +380,9 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		}
 	}
 	skipNotify := map[int]struct{}{in.UserID: {}, pc.UserID: {}}
+	if post.UserID != 0 {
+		skipNotify[post.UserID] = struct{}{}
+	}
 	if in.UserTargetName != "" && in.ReplyCcommentID > 0 {
 		replyCC, err := s.comments.FindCcommentByID(ctx, in.ReplyCcommentID)
 		if err != nil {
@@ -368,6 +397,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		}
 	}
 	s.notifyMentions(ctx, in.UserID, content, "ccomment", cc.ID, skipNotify)
+	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, in.UserID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -377,7 +407,26 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 	}
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
-	return notifies, nil
+	return &domain.CcommentCreateResult{
+		Notifies:                notifies,
+		PostWatchEmailReceivers: postWatchReceivers,
+	}, nil
+}
+
+func (s *commentService) invalidateCommentListByPcommentID(ctx context.Context, pcommentID int) {
+	pc, err := s.comments.FindPcommentByID(ctx, pcommentID)
+	if err != nil || pc == nil || pc.PostID == 0 {
+		return
+	}
+	InvalidateCommentList(pc.PostID, "post")
+}
+
+func (s *commentService) invalidateCommentListByCcommentID(ctx context.Context, ccommentID int) {
+	cc, err := s.comments.FindCcommentByID(ctx, ccommentID)
+	if err != nil || cc == nil {
+		return
+	}
+	s.invalidateCommentListByPcommentID(ctx, cc.PcommentID)
 }
 
 func (s *commentService) TogglePcommentLike(ctx context.Context, userID, pcommentID int) error {
@@ -396,7 +445,11 @@ func (s *commentService) TogglePcommentLike(ctx context.Context, userID, pcommen
 		if err := s.comments.IncrPcommentLikeNum(ctx, pcommentID, -1); err != nil {
 			return err
 		}
-		return s.comments.DeletePcommentLike(ctx, userID, pcommentID)
+		if err := s.comments.DeletePcommentLike(ctx, userID, pcommentID); err != nil {
+			return err
+		}
+		s.invalidateCommentListByPcommentID(ctx, pcommentID)
+		return nil
 	}
 	if isDenied {
 		if err := s.comments.IncrPcommentDenyNum(ctx, pcommentID, -1); err != nil {
@@ -410,7 +463,11 @@ func (s *commentService) TogglePcommentLike(ctx context.Context, userID, pcommen
 		if err := s.comments.IncrPcommentLikeNum(ctx, pcommentID, 1); err != nil {
 			return err
 		}
-		return s.comments.CreatePcommentLike(ctx, userID, pcommentID)
+		if err := s.comments.CreatePcommentLike(ctx, userID, pcommentID); err != nil {
+			return err
+		}
+		s.invalidateCommentListByPcommentID(ctx, pcommentID)
+		return nil
 	}
 	return nil
 }
@@ -466,7 +523,11 @@ func (s *commentService) ToggleCcommentLike(ctx context.Context, userID, ccommen
 		if err := s.comments.IncrCcommentLikeNum(ctx, ccommentID, -1); err != nil {
 			return err
 		}
-		return s.comments.DeleteCcommentLike(ctx, userID, ccommentID)
+		if err := s.comments.DeleteCcommentLike(ctx, userID, ccommentID); err != nil {
+			return err
+		}
+		s.invalidateCommentListByCcommentID(ctx, ccommentID)
+		return nil
 	}
 	if isDenied {
 		if err := s.comments.IncrCcommentDenyNum(ctx, ccommentID, -1); err != nil {
@@ -480,7 +541,11 @@ func (s *commentService) ToggleCcommentLike(ctx context.Context, userID, ccommen
 		if err := s.comments.IncrCcommentLikeNum(ctx, ccommentID, 1); err != nil {
 			return err
 		}
-		return s.comments.CreateCcommentLike(ctx, userID, ccommentID)
+		if err := s.comments.CreateCcommentLike(ctx, userID, ccommentID); err != nil {
+			return err
+		}
+		s.invalidateCommentListByCcommentID(ctx, ccommentID)
+		return nil
 	}
 	return nil
 }
@@ -629,7 +694,43 @@ func (s *commentService) notifyMentions(ctx context.Context, authorID int, conte
 			continue
 		}
 		_ = s.comments.CreateNotice(ctx, u.ID, authorID, noticeType, content, targetID)
+		skip[u.ID] = struct{}{}
 	}
+}
+
+func (s *commentService) notifyPostWatchers(ctx context.Context, postID, authorID int, content string, skip map[int]struct{}) []*domain.User {
+	if postID == 0 || s.posts == nil {
+		return nil
+	}
+	watcherIDs, err := s.posts.ListWatcherUserIDsByPostID(ctx, postID)
+	if err != nil || len(watcherIDs) == 0 {
+		return nil
+	}
+	text := content
+	if utf8.RuneCountInString(text) > 200 {
+		text = string([]rune(text)[:200]) + "…"
+	}
+	var receivers []*domain.User
+	for _, uid := range watcherIDs {
+		if uid == authorID {
+			continue
+		}
+		if _, ok := skip[uid]; ok {
+			continue
+		}
+		_ = s.comments.CreateNotice(ctx, uid, authorID, "post_watch", text, postID)
+		if receiver, err := s.comments.FindUserByID(ctx, uid); err == nil && receiver != nil && receiver.ID != 0 {
+			receivers = append(receivers, receiver)
+		}
+	}
+	return receivers
+}
+
+func (s *commentService) ResolveMentionUsers(ctx context.Context, names []string) ([]*domain.User, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return s.comments.FindUsersByExactNames(ctx, names)
 }
 
 func authorForComment(m map[int]*domain.User, userID int) *domain.User {

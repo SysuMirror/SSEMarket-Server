@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"reflect"
 	"time"
 )
 
@@ -34,4 +35,18 @@ func decodeValue[T any](raw []byte) (CacheValue[T], bool) {
 
 func isLogicValid[T any](cv CacheValue[T]) bool {
 	return time.Now().Before(cv.ExpireAt)
+}
+
+// isEmptySlice 判断值是否为 nil 或 len==0 的 slice（用于跳过空列表缓存）。
+func isEmptySlice(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len() == 0
+	default:
+		return false
+	}
 }

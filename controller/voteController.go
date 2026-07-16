@@ -82,7 +82,7 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	err := service.Votes.SubmitVote(c.Request.Context(), user.ID, req.PostID)
+	voted, err := service.Votes.ToggleVote(c.Request.Context(), user.ID, req.PostID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusBadRequest, 400, nil, "帖子不存在")
@@ -96,7 +96,11 @@ func SubmitVote(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, nil, "投票成功")
+	msg := "投票成功"
+	if !voted {
+		msg = "已取消投票"
+	}
+	response.Success(c, gin.H{"voted": voted}, msg)
 }
 
 type VoteRankItem struct {

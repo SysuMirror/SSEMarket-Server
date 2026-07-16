@@ -74,6 +74,7 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 	}
 	observability.RecordCacheAccess("l2", profile.Name, false)
 
+	// 防击穿：singleflight 合并进程内并发回源；Redis 互斥锁供多实例部署时跨进程互斥。
 	lock := util.NewLock("lock:" + key)
 	acquired := lock.TryLock()
 	if !acquired {

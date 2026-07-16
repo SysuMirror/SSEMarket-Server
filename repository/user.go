@@ -38,6 +38,15 @@ type UserRepository interface {
 	CountOAuth2AuthRecords(ctx context.Context, userID int) (int64, error)
 	ListOAuth2AuthRecords(ctx context.Context, userID, offset, limit int) ([]domain.OAuth2AuthRecord, error)
 
+	// UserAPIToken PAT 持久化
+	CreateUserAPIToken(ctx context.Context, userID int, tokenHash, tokenPrefix, name, scopes string) (int, error)
+	FindUserAPITokenByHash(ctx context.Context, tokenHash string) (*domain.UserAPITokenVerify, error)
+	TouchUserAPITokenLastUsed(ctx context.Context, tokenID int, lastUsedAt time.Time) error
+	CountUserAPITokens(ctx context.Context, userID int) (int64, error)
+	ListUserAPITokens(ctx context.Context, userID, offset, limit int) ([]domain.UserAPITokenItem, error)
+	RevokeUserAPIToken(ctx context.Context, tokenID, userID int) error
+	DeleteUserAPIToken(ctx context.Context, tokenID, userID int) error
+
 	ListPostIDsByUserID(ctx context.Context, userID int) ([]int, error)
 	GetPostLikeNum(ctx context.Context, postID int) (int, error)
 	ListPcommentIDsByUserID(ctx context.Context, userID int) ([]int, error)

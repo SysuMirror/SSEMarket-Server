@@ -21,7 +21,7 @@ import (
 func browseListSelect(q *gorm.DB) *gorm.DB {
 	preview := util.BrowseContentPreviewRunes
 	return q.Select(fmt.Sprintf(
-		"postID, userID, `partition`, title, LEFT(ptext, %d) AS ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private",
+		"postID, userID, `partition`, title, LEFT(ptext, %d) AS ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous",
 		preview,
 	))
 }
@@ -128,8 +128,10 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 	if searchsort == "save" {
 		var saves []model.Psave
 		r.session(ctx).Model(&model.Psave{}).
-			Where("userID = ?", viewerID).
-			Order("psaveID DESC").
+			Joins("INNER JOIN posts ON psaves.ptargetID = posts.postID").
+			Where("psaves.userID = ? AND posts.postID != ? AND (posts.is_private = ? OR posts.userID = ?)",
+				viewerID, 0, false, viewerID).
+			Order("psaves.psaveID DESC").
 			Offset(offset).Limit(limit).
 			Find(&saves)
 		if len(saves) == 0 {
@@ -140,7 +142,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 			postIDs = append(postIDs, s.PtargetID)
 		}
 		var posts []model.Post
-		browseListSelect(applyVisibility(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs), viewerID)).Find(&posts)
+		browseListSelect(r.session(ctx).Model(&model.Post{}).Where("postID IN (?)", postIDs)).Find(&posts)
 		postMap := make(map[int]model.Post, len(posts))
 		for _, p := range posts {
 			postMap[p.PostID] = p
@@ -279,6 +281,42 @@ func (r *postRepository) IsSaved(ctx context.Context, userID, postID int) (bool,
 	return save.PsaveID != 0, err
 }
 
+func (r *postRepository) IsWatched(ctx context.Context, userID, postID int) (bool, error) {
+	var watch model.PostWatch
+	err := r.session(ctx).Where("userID = ? AND postID = ?", userID, postID).First(&watch).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return watch.PostWatchID != 0, err
+}
+
+func (r *postRepository) CreateWatch(ctx context.Context, userID, postID int) error {
+	w := model.PostWatch{
+		UserID:    userID,
+		PostID:    postID,
+		CreatedAt: time.Now(),
+	}
+	return r.session(ctx).Create(&w).Error
+}
+
+func (r *postRepository) DeleteWatch(ctx context.Context, userID, postID int) error {
+	return r.session(ctx).Where("userID = ? AND postID = ?", userID, postID).Delete(&model.PostWatch{}).Error
+}
+
+func (r *postRepository) ListWatcherUserIDsByPostID(ctx context.Context, postID int) ([]int, error) {
+	var rows []model.PostWatch
+	if err := r.session(ctx).Where("postID = ?", postID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]int, 0, len(rows))
+	for _, row := range rows {
+		if row.UserID != 0 {
+			out = append(out, row.UserID)
+		}
+	}
+	return out, nil
+}
+
 func (r *postRepository) buildBrowseQuery(ctx context.Context, filter domain.BrowseFilter) *gorm.DB {
 	searchsort := filter.Searchsort
 	if searchsort == "" {
@@ -409,6 +447,13 @@ func (r *postRepository) DeleteSave(ctx context.Context, userID, postID int) err
 }
 
 func (r *postRepository) CreateSave(ctx context.Context, userID, postID int) error {
+	exists, err := r.IsSaved(ctx, userID, postID)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
 	s := model.Psave{
 		UserID:    userID,
 		PtargetID: postID,
@@ -451,7 +496,8 @@ func (r *postRepository) ListUserProfile(ctx context.Context, targetUserID, view
 func (r *postRepository) CountUserProfile(ctx context.Context, targetUserID, viewerUserID int) (int64, error) {
 	query := r.session(ctx).Model(&model.Post{}).Where("userID = ?", targetUserID)
 	if viewerUserID != targetUserID {
-		query = query.Where("is_private = ?", false)
+		// 他人视角：计数也排除私密帖与匿名帖
+		query = query.Where("is_private = ? AND is_anonymous = ?", false, false)
 	}
 	var count int64
 	if err := query.Count(&count).Error; err != nil {

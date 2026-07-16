@@ -1,5 +1,7 @@
 config/application.yml
 loginTest.exe
+loginTest
+serve
 public/uploads
 public/resized
 ssl

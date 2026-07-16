@@ -24,9 +24,10 @@ func (r *chatRepository) session(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx)
 }
 
-func (r *chatRepository) ListHistory(ctx context.Context, userID, peerID int) ([]*domain.ChatHistoryItem, error) {
+func (r *chatRepository) ListHistory(ctx context.Context, userID, peerID int, threadAnonymous bool) ([]*domain.ChatHistoryItem, error) {
 	var rows []model.ChatMsg
 	err := r.session(ctx).Model(&model.ChatMsg{}).
+		Where("threadAnonymous = ?", threadAnonymous).
 		Where("(targetUserID = ? AND senderUserID = ?) OR (targetUserID = ? AND senderUserID = ?)",
 			userID, peerID, peerID, userID).
 		Order("createdAt").
@@ -43,15 +44,49 @@ func (r *chatRepository) ListHistory(ctx context.Context, userID, peerID int) ([
 
 func (r *chatRepository) Create(ctx context.Context, in domain.SaveChatMessageInput) (*domain.ChatHistoryItem, error) {
 	msg := model.ChatMsg{
-		SenderUserID: in.SenderUserID,
-		TargetUserID: in.TargetUserID,
-		Content:      in.Content,
-		CreatedAt:    time.Now(),
+		SenderUserID:    in.SenderUserID,
+		TargetUserID:    in.TargetUserID,
+		Content:         in.Content,
+		IsAnonymous:     in.IsAnonymous,
+		ThreadAnonymous: in.ThreadAnonymous,
+		CreatedAt:       time.Now(),
 	}
 	if err := r.session(ctx).Create(&msg).Error; err != nil {
 		return nil, err
 	}
 	return chatMsgToDomain(&msg), nil
+}
+
+func (r *chatRepository) FindByID(ctx context.Context, chatMsgID int) (*domain.ChatHistoryItem, error) {
+	var row model.ChatMsg
+	err := r.session(ctx).Where("chatMsgID = ?", chatMsgID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return chatMsgToDomain(&row), nil
+}
+
+func (r *chatRepository) Recall(ctx context.Context, chatMsgID int) (*domain.ChatHistoryItem, error) {
+	var row model.ChatMsg
+	err := r.session(ctx).Where("chatMsgID = ?", chatMsgID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if row.IsRecalled {
+		return chatMsgToDomain(&row), nil
+	}
+	row.IsRecalled = true
+	row.Content = ""
+	if err := r.session(ctx).Save(&row).Error; err != nil {
+		return nil, err
+	}
+	return chatMsgToDomain(&row), nil
 }
 
 func (r *chatRepository) ListMessagesForUser(ctx context.Context, userID int) ([]repository.ChatMsgWithUsers, error) {
@@ -68,11 +103,14 @@ func (r *chatRepository) ListMessagesForUser(ctx context.Context, userID int) ([
 	for i := range chatMsgs {
 		m := chatMsgs[i]
 		item := domain.ChatHistoryItem{
-			ChatMsgID:    m.ChatMsgID,
-			TargetUserID: m.TargetUserID,
-			SenderUserID: m.SenderUserID,
-			Content:      m.Content,
-			CreatedAt:    m.CreatedAt,
+			ChatMsgID:       m.ChatMsgID,
+			TargetUserID:    m.TargetUserID,
+			SenderUserID:    m.SenderUserID,
+			Content:         m.Content,
+			IsAnonymous:     m.IsAnonymous,
+			ThreadAnonymous: m.ThreadAnonymous,
+			IsRecalled:      m.IsRecalled,
+			CreatedAt:       m.CreatedAt,
 		}
 		out = append(out, repository.ChatMsgWithUsers{
 			Msg:        item,

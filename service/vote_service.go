@@ -22,33 +22,40 @@ func (s *voteService) SearchByTitle(ctx context.Context, keyword string, viewerU
 	return s.votes.SearchByTitle(ctx, keyword, viewerUserID)
 }
 
-func (s *voteService) SubmitVote(ctx context.Context, userID, postID int) error {
+func (s *voteService) ToggleVote(ctx context.Context, userID, postID int) (bool, error) {
 	post, err := s.posts.FindByID(ctx, postID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			return domain.ErrNotFound
+			return false, domain.ErrNotFound
 		}
-		return err
+		return false, err
 	}
 	if !canViewPost(post, userID) {
-		return domain.ErrNotFound
+		return false, domain.ErrNotFound
 	}
 	voted, err := s.votes.HasVoted(ctx, userID, postID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if voted {
-		return domain.ErrConflict
+		if err := s.votes.CancelVote(ctx, userID, postID); err != nil {
+			return false, err
+		}
+		s.ranks.AdjustPostVoteNum(ctx, postID, -1)
+		s.ranks.AdjustUserReceivedVote(ctx, post.UserID, -1)
+		InvalidatePostDetail(postID)
+		return false, nil
 	}
 	if err := s.votes.SubmitVote(ctx, userID, postID); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
-			return domain.ErrConflict
+			return false, domain.ErrConflict
 		}
-		return err
+		return false, err
 	}
 	s.ranks.AdjustPostVoteNum(ctx, postID, 1)
 	s.ranks.AdjustUserReceivedVote(ctx, post.UserID, 1)
-	return nil
+	InvalidatePostDetail(postID)
+	return true, nil
 }
 
 func (s *voteService) HasVoted(ctx context.Context, userID, postID int) (bool, error) {

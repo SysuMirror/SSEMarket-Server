@@ -28,7 +28,7 @@ type WarmupDeps struct {
 func BuildWarmupTasks(deps WarmupDeps) []WarmupTask {
 	tasks := []WarmupTask{
 		{Name: "hot_posts_top100_cache", Priority: 0, Load: taskHotPostsTop100Cache},
-		{Name: "public_feed_pages", Priority: 0, Load: taskPublicFeedPages(deps.Posts)},
+		// public_feed_pages 已停用：Browse 列表当前直查 DB，不再预热公共 Feed 缓存。
 		{Name: "browse_count_batch", Priority: 0, Load: taskBrowseCountBatch(deps.HotData)},
 		{Name: "active_users_top50", Priority: 1, Load: taskActiveUsersTop50(deps.Users)},
 	}
@@ -72,6 +72,7 @@ func taskPublicFeedPages(posts repository.PostRepository) func(ctx context.Conte
 	return func(ctx context.Context) error {
 		gen := PublicFeedGeneration(ctx)
 		limit := 15
+		// 预热首页前 3 页（offset 0/15/30），与压测/客户端默认分页对齐
 		for page := 0; page < 3; page++ {
 			filter := domain.BrowseFilter{
 				Searchsort: "home",
@@ -83,6 +84,10 @@ func taskPublicFeedPages(posts repository.PostRepository) func(ctx context.Conte
 			list, err := posts.ListBrowse(ctx, pubFilter)
 			if err != nil {
 				return err
+			}
+			if len(list) == 0 {
+				log.Printf("[cache] warmup public_feed skip empty page offset=%d", filter.Offset)
+				continue
 			}
 			key := util.GetPublicFeedCacheKey(util.BrowseFeedKeyInput{
 				Searchsort: filter.Searchsort,

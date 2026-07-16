@@ -203,22 +203,28 @@ func (s *postService) UpdatePrivacy(ctx context.Context, postID, userID int, isP
 	return nil
 }
 
-func (s *postService) ToggleSave(ctx context.Context, userID, postID int) error {
+func (s *postService) ToggleSave(ctx context.Context, userID, postID int) (bool, error) {
 	post, err := s.posts.FindByID(ctx, postID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !canViewPost(post, userID) {
-		return domain.ErrNotFound
+		return false, domain.ErrNotFound
 	}
 	isSaved, err := s.posts.IsSaved(ctx, userID, postID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if isSaved {
-		return s.posts.DeleteSave(ctx, userID, postID)
+		if err := s.posts.DeleteSave(ctx, userID, postID); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
-	return s.posts.CreateSave(ctx, userID, postID)
+	if err := s.posts.CreateSave(ctx, userID, postID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *postService) ToggleLike(ctx context.Context, userID, postID int) error {

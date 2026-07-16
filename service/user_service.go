@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -646,4 +649,200 @@ func (s *userService) GetStatistics(ctx context.Context, userID int) (*domain.Us
 		MaxSayUser:       maxSayUser,
 		MaxSayUserCnt:    maxSayUserCnt,
 	}, nil
+}
+
+// ---- User API Token (PAT) ----
+
+// apiTokenScopes 当前支持的所有 scope，与智能体 MCP 工具一一对应。
+// 顺序也用于前端展示。
+var apiTokenScopes = []domain.UserAPITokenScope{
+	{Name: "agent:chat", Description: "小秋通用对话：凭 token 即可直接调用智能体对话工具"},
+	{Name: "forum:read", Description: "论坛检索：搜索帖子、查看评论"},
+	{Name: "forum:write", Description: "论坛发帖：以你的身份发布新帖"},
+}
+
+const (
+	apiTokenPrefix       = "sk_xq_"     // token 明文前缀，便于识别
+	apiTokenRandomLen    = 32           // 随机部分字节数；hex 后 64 字符
+	apiTokenMaxPerUser   = 10           // 每个用户最多 10 个活跃 PAT
+	apiTokenPrefixShow   = 8            // 前缀展示长度（含 sk_xq_）
+	apiTokenDefaultPage  = 1
+	apiTokenDefaultLimit = 20
+)
+
+// ListAPITokenScopes 返回当前支持的所有 scope 定义。
+func (s *userService) ListAPITokenScopes(ctx context.Context) []domain.UserAPITokenScope {
+	return apiTokenScopes
+}
+
+// CreateAPIToken 创建 PAT。明文 token 仅在此返回一次。
+func (s *userService) CreateAPIToken(ctx context.Context, in domain.UserAPITokenCreateInput) (*domain.UserAPITokenCreateResult, error) {
+	if in.UserID <= 0 {
+		return nil, domain.ErrBadRequest
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, domain.ErrBadRequest
+	}
+	if len(name) > 64 {
+		name = name[:64]
+	}
+	// 校验 scope：必须是白名单中的合法值
+	validSet := make(map[string]struct{}, len(apiTokenScopes))
+	for _, sc := range apiTokenScopes {
+		validSet[sc.Name] = struct{}{}
+	}
+	cleaned := make([]string, 0, len(in.Scopes))
+	seen := make(map[string]struct{}, len(in.Scopes))
+	for _, sc := range in.Scopes {
+		sc = strings.TrimSpace(sc)
+		if sc == "" {
+			continue
+		}
+		if _, ok := validSet[sc]; !ok {
+			return nil, domain.ErrBadRequest
+		}
+		if _, dup := seen[sc]; dup {
+			continue
+		}
+		seen[sc] = struct{}{}
+		cleaned = append(cleaned, sc)
+	}
+	if len(cleaned) == 0 {
+		return nil, domain.ErrBadRequest
+	}
+	// 限流：每用户最多 apiTokenMaxPerUser 个活跃 token
+	count, err := s.users.CountUserAPITokens(ctx, in.UserID)
+	if err != nil {
+		log.Printf("[pat] count user tokens: %v", err)
+		return nil, domain.ErrInternal
+	}
+	if count >= apiTokenMaxPerUser {
+		return nil, domain.ErrTooManyRequests
+	}
+
+	// 生成明文 token：sk_xq_ + 32 字节随机 hex
+	raw := make([]byte, apiTokenRandomLen)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, domain.ErrInternal
+	}
+	plainText := apiTokenPrefix + hex.EncodeToString(raw)
+	hash := sha256Hex(plainText)
+	prefixShow := plainText
+	if len(prefixShow) > apiTokenPrefixShow {
+		prefixShow = prefixShow[:apiTokenPrefixShow]
+	}
+	scopesStr := strings.Join(cleaned, ",")
+
+	tokenID, err := s.users.CreateUserAPIToken(ctx, in.UserID, hash, prefixShow, name, scopesStr)
+	if err != nil {
+		log.Printf("[pat] create token: %v", err)
+		return nil, domain.ErrInternal
+	}
+	return &domain.UserAPITokenCreateResult{
+		TokenID:   tokenID,
+		PlainText: plainText,
+		Prefix:    prefixShow,
+		Name:      name,
+		Scopes:    scopesStr,
+		IsActive:  true,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+// ListAPITokens 分页列出用户的 PAT（不含明文）。
+func (s *userService) ListAPITokens(ctx context.Context, userID, page, pageSize int) (*domain.UserAPITokenPage, error) {
+	if userID <= 0 {
+		return nil, domain.ErrBadRequest
+	}
+	if page <= 0 {
+		page = apiTokenDefaultPage
+	}
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = apiTokenDefaultLimit
+	}
+	offset := (page - 1) * pageSize
+	total, err := s.users.CountUserAPITokens(ctx, userID)
+	if err != nil {
+		log.Printf("[pat] count: %v", err)
+		return nil, domain.ErrInternal
+	}
+	records, err := s.users.ListUserAPITokens(ctx, userID, offset, pageSize)
+	if err != nil {
+		log.Printf("[pat] list: %v", err)
+		return nil, domain.ErrInternal
+	}
+	totalPages := int64(0)
+	if pageSize > 0 {
+		totalPages = (total + int64(pageSize) - 1) / int64(pageSize)
+	}
+	return &domain.UserAPITokenPage{
+		Records:    records,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}, nil
+}
+
+// RevokeAPIToken 软删 PAT。tokenID 必须属于 userID，防越权。
+func (s *userService) RevokeAPIToken(ctx context.Context, tokenID, userID int) error {
+	if tokenID <= 0 || userID <= 0 {
+		return domain.ErrBadRequest
+	}
+	if err := s.users.RevokeUserAPIToken(ctx, tokenID, userID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ErrNotFound
+		}
+		log.Printf("[pat] revoke: %v", err)
+		return domain.ErrInternal
+	}
+	return nil
+}
+
+// DeleteAPIToken 硬删已吊销的 PAT 记录。活跃 token 必须先吊销才能删除。
+func (s *userService) DeleteAPIToken(ctx context.Context, tokenID, userID int) error {
+	if tokenID <= 0 || userID <= 0 {
+		return domain.ErrBadRequest
+	}
+	if err := s.users.DeleteUserAPIToken(ctx, tokenID, userID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.ErrNotFound
+		}
+		log.Printf("[pat] delete: %v", err)
+		return domain.ErrInternal
+	}
+	return nil
+}
+
+// VerifyAPIToken 验证明文 token，返回 user_id + scope。供主站内部或调试使用；
+// 智能体侧直连 MySQL 自行实现验证逻辑，不调此方法。
+func (s *userService) VerifyAPIToken(ctx context.Context, plainToken string) (*domain.UserAPITokenVerify, error) {
+	if plainToken == "" {
+		return nil, domain.ErrUnauthorized
+	}
+	hash := sha256Hex(plainToken)
+	res, err := s.users.FindUserAPITokenByHash(ctx, hash)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.ErrUnauthorized
+		}
+		log.Printf("[pat] verify: %v", err)
+		return nil, domain.ErrInternal
+	}
+	// 异步回写 last_used_at，不阻塞请求
+	go func(tokenID int) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := s.users.TouchUserAPITokenLastUsed(bgCtx, tokenID, time.Now()); err != nil {
+			log.Printf("[pat] touch last_used_at: %v", err)
+		}
+	}(res.TokenID)
+	return res, nil
+}
+
+// sha256Hex 返回 SHA-256 十六进制小写。
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
