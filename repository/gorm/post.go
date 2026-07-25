@@ -483,7 +483,8 @@ func (r *postRepository) ListUserProfile(ctx context.Context, targetUserID, view
 	}
 	query := r.session(ctx).Where("userID = ?", targetUserID)
 	if viewerUserID != targetUserID {
-		query = query.Where("is_private = ?", false)
+		// 他人视角：排除私密帖与匿名帖，避免通过个人主页关联出匿名帖作者
+		query = query.Where("is_private = ? AND is_anonymous = ?", false, false)
 	}
 	var posts []model.Post
 	err := query.Order("postID DESC").Offset(offset).Limit(limit).Find(&posts).Error
