@@ -46,11 +46,12 @@ func (r *voteRepository) SearchByTitle(ctx context.Context, keyword string, view
 	out := make([]domain.VoteSearchItem, 0, len(posts))
 	for _, post := range posts {
 		out = append(out, domain.VoteSearchItem{
-			PostID:    post.PostID,
-			Title:     post.Title,
-			Partition: post.Partition,
-			PostTime:  post.PostTime,
-			VoteCount: post.VoteNum,
+			PostID:      post.PostID,
+			Title:       post.Title,
+			Partition:   post.Partition,
+			PostTime:    post.PostTime,
+			VoteCount:   post.VoteNum,
+			IsAnonymous: post.IsAnonymous,
 		})
 	}
 	return out, nil

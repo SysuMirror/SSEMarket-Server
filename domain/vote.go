@@ -4,11 +4,12 @@ import "time"
 
 // VoteSearchItem 投票搜索单项。
 type VoteSearchItem struct {
-	PostID    int
-	Title     string
-	Partition string
-	PostTime  time.Time
-	VoteCount int
+	PostID      int
+	Title       string
+	Partition   string
+	PostTime    time.Time
+	VoteCount   int
+	IsAnonymous bool
 }
 
 // PostRankItem 帖子优质榜单项。

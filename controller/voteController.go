@@ -18,11 +18,12 @@ type VoteSearchMsg struct {
 }
 
 type VoteSearchResult struct {
-	PostID    int    `json:"postID"`
-	Title     string `json:"title"`
-	Partition string `json:"partition"`
-	PostTime  string `json:"postTime"`
-	VoteCount int    `json:"voteCount"`
+	PostID      int    `json:"postID"`
+	Title       string `json:"title"`
+	Partition   string `json:"partition"`
+	PostTime    string `json:"postTime"`
+	VoteCount   int    `json:"voteCount"`
+	IsAnonymous bool   `json:"isAnonymous"`
 }
 
 func SearchPostsByTitle(c *gin.Context) {
@@ -53,11 +54,12 @@ func SearchPostsByTitle(c *gin.Context) {
 	results := make([]VoteSearchResult, 0, len(items))
 	for _, post := range items {
 		results = append(results, VoteSearchResult{
-			PostID:    post.PostID,
-			Title:     post.Title,
-			Partition: post.Partition,
-			PostTime:  post.PostTime.Format("2006-01-02 15:04:05"),
-			VoteCount: post.VoteCount,
+			PostID:      post.PostID,
+			Title:       post.Title,
+			Partition:   post.Partition,
+			PostTime:    post.PostTime.Format("2006-01-02 15:04:05"),
+			VoteCount:   post.VoteCount,
+			IsAnonymous: post.IsAnonymous,
 		})
 	}
 
