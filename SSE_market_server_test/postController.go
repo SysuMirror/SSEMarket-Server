@@ -96,7 +96,7 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	err = service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
+	_, err = service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
 		UserID:    user.ID,
 		Title:     title,
 		Content:   content,

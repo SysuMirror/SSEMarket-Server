@@ -103,6 +103,17 @@ func (r *noticeRepository) FindCcommentChain(ctx context.Context, ccommentID int
 	return cc.CtargetID, postID, cc.Time, nil
 }
 
+func (r *noticeRepository) FindPostAnonMeta(ctx context.Context, postID int) (int, bool, error) {
+	var p model.Post
+	if err := r.session(ctx).Select("userID, is_anonymous").Where("postID = ?", postID).First(&p).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, domain.ErrNotFound
+		}
+		return 0, false, err
+	}
+	return p.UserID, p.IsAnonymous, nil
+}
+
 func noticeToRecord(n *model.Notice) repository.NoticeRecord {
 	if n == nil {
 		return repository.NoticeRecord{}

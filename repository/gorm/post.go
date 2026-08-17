@@ -6,24 +6,21 @@ import (
 	"strings"
 	"time"
 
-	"fmt"
-
 	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/model"
 	"loginTest/repository"
-	"loginTest/util"
 
 	"gorm.io/gorm"
 )
 
-// browseListSelect 列表只读摘要字段，避免拉取 varchar(10000) 全文。
+// browseListSelect 列表只读摘要字段。
+// ptext 不做 LEFT 截断，由 controller 层提取图片后统一截断，
+// 避免 markdown 图片 URL 被切断导致前端无法渲染预览图。
 func browseListSelect(q *gorm.DB) *gorm.DB {
-	preview := util.BrowseContentPreviewRunes
-	return q.Select(fmt.Sprintf(
-		"postID, userID, `partition`, title, LEFT(ptext, %d) AS ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous",
-		preview,
-	))
+	return q.Select(
+		"postID, userID, `partition`, title, ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous",
+	)
 }
 
 type postRepository struct {

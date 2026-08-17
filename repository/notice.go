@@ -28,4 +28,6 @@ type NoticeRepository interface {
 	FindUserByID(ctx context.Context, userID int) (*domain.User, error)
 	FindPcommentTargetPost(ctx context.Context, pcommentID int) (postID int, commentTime time.Time, err error)
 	FindCcommentChain(ctx context.Context, ccommentID int) (pcommentID, postID int, commentTime time.Time, err error)
+	// FindPostAnonMeta 返回帖子的作者 ID 与匿名标记，用于通知里脱敏匿名帖作者。
+	FindPostAnonMeta(ctx context.Context, postID int) (authorID int, isAnonymous bool, err error)
 }

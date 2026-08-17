@@ -3,9 +3,11 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"log"
 	"loginTest/api"
 	"loginTest/apperr"
 	"loginTest/domain"
+	"loginTest/mq"
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
@@ -169,6 +171,12 @@ func DeletePcomment(c *gin.Context) {
 		}
 		return
 	}
+	// 1h 内删除评论：从延迟队列移除该评论的入队消息（避免触发对已删除评论的归档）
+	if ID.PcommentID != 0 {
+		if err := mq.CancelPcomment(c.Request.Context(), int(ID.PcommentID)); err != nil {
+			log.Printf("[archive-mq] CancelPcomment 失败 pcommentID=%d: %v", ID.PcommentID, err)
+		}
+	}
 }
 
 type IDmesag struct {
@@ -254,6 +262,14 @@ func PostPcomment(c *gin.Context) {
 		CommentID: result.Pcomment.ID,
 		Content:   msg.Content,
 	})
+
+	// 入延迟归档队列：评论创建 1h 后触发该帖重新归档（worker 会读完整帖子+所有评论）
+	if result.Pcomment != nil && result.Pcomment.ID != 0 {
+		if err := mq.EnqueuePcomment(c.Request.Context(), msg.PostID, result.Pcomment.ID, msg.Content); err != nil {
+			log.Printf("[archive-mq] EnqueuePcomment 失败 postID=%d pcommentID=%d: %v",
+				msg.PostID, result.Pcomment.ID, err)
+		}
+	}
 
 	subs := make([]Subcomment, 0, len(result.Subcomments))
 	for _, sc := range result.Subcomments {

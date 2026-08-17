@@ -7,15 +7,18 @@ import (
 	"fmt"
 	"image"
 	"io/ioutil"
+	"log"
 	"loginTest/api"
 	"loginTest/apperr"
 	"loginTest/config"
 	"loginTest/domain"
+	"loginTest/mq"
 	"loginTest/response"
 	"loginTest/service"
 	"loginTest/util"
 	"mime/multipart"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -97,7 +100,7 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	err = service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
+	createdPost, err := service.Posts.Create(c.Request.Context(), domain.PostCreateInput{
 		UserID:      user.ID,
 		Title:       title,
 		Content:     content,
@@ -114,6 +117,12 @@ func Post(c *gin.Context) {
 		}
 		apperr.WriteMsg(c, err, "发帖失败")
 		return
+	}
+	// 入延迟归档队列（1h 后由 server-task 消费；若 1h 内删除则由 DeletePost 取消）
+	if createdPost != nil && createdPost.ID != 0 {
+		if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
+			log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
+		}
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
@@ -238,6 +247,13 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 	}
 	// 匿名帖对所有查看者脱敏作者信息，但返回 isOwner 标志
 	name, phone, avatar, identity, score, authorID, isOwner = anonymizeAuthor(p.IsAnonymous, viewerUserID, authorID, name, phone, avatar, identity, score)
+
+	// 从 Content 中提取 markdown 图片 URL，填充到 Photos（兼容新版帖子无 Photos 字段的情况）
+	photos := p.Photos
+	if photos == "" {
+		photos = extractImageURLs(p.Content)
+	}
+
 	return PostResponse{
 		PostID:        uint(p.ID),
 		Partition:     p.Partition,
@@ -256,12 +272,34 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		PostTime:      p.PostTime,
 		IsSaved:       item.IsSaved,
 		IsLiked:       item.IsLiked,
-		Photos:        p.Photos,
+		Photos:        photos,
 		Tag:           p.Tag,
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,
 	}
+}
+
+// mdImageURLRe 匹配 markdown 图片语法中的 URL
+var mdImageURLRe = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
+
+// extractImageURLs 从 markdown 内容中提取图片 URL，最多 9 张，以 | 分割返回
+func extractImageURLs(content string) string {
+	if content == "" {
+		return ""
+	}
+	matches := mdImageURLRe.FindAllStringSubmatch(content, 9)
+	if len(matches) == 0 {
+		return ""
+	}
+	urls := make([]string, 0, len(matches))
+	for _, m := range matches {
+		url := strings.TrimSpace(m[1])
+		if url != "" {
+			urls = append(urls, url)
+		}
+	}
+	return strings.Join(urls, "|")
 }
 
 type UserProfilePostsMsg struct {
@@ -539,6 +577,12 @@ func DeletePost(c *gin.Context) {
 		}
 		apperr.WriteMsg(c, err, "删除失败")
 		return
+	}
+	// 1h 内删除帖子：从延迟队列移除该帖子的入队消息（避免触发对已删除帖子的归档）
+	if postID != 0 {
+		if err := mq.CancelPost(c.Request.Context(), postID); err != nil {
+			log.Printf("[archive-mq] CancelPost 失败 postID=%d: %v", postID, err)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "帖子删除成功"})
 }

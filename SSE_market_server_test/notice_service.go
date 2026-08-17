@@ -120,5 +120,14 @@ func (s *noticeService) buildNoticeItem(ctx context.Context, notice repository.N
 	default:
 		item.Time = notice.Time
 	}
+	// 匿名帖作者在自己帖下的评论/回复/点赞等触发的通知，sender 脱敏为匿名用户，
+	// 避免通知列表暴露匿名帖作者真实身份（与评论列表脱敏范围一致）。
+	if item.PostID != 0 && sender != nil && sender.ID != 0 {
+		if authorID, anon, err := s.notices.FindPostAnonMeta(ctx, item.PostID); err == nil && anon && authorID == sender.ID {
+			item.SenderName = "匿名用户"
+			item.SenderAvatar = ""
+			item.SenderID = 0
+		}
+	}
 	return item, nil
 }

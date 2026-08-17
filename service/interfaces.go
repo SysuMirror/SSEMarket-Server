@@ -13,7 +13,8 @@ type PostService interface {
 	GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error)
 	FindByID(ctx context.Context, postID, viewerUserID int) (*domain.Post, error)
 	IncrBrowse(ctx context.Context, postID int) int64
-	Create(ctx context.Context, in domain.PostCreateInput) error
+	// Create 创建帖子并返回带 ID 的实体，便于上层（如归档 MQ）取用 post.ID。
+	Create(ctx context.Context, in domain.PostCreateInput) (*domain.Post, error)
 	UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error)
 	UserProfilePostNum(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	UpdatePrivacy(ctx context.Context, postID, userID int, isPrivate bool) error

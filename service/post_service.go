@@ -121,16 +121,17 @@ func (s *postService) IncrBrowse(ctx context.Context, postID int) int64 {
 	return HotData.IncrBrowseCount(postID)
 }
 
-func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) error {
+// Create 创建帖子并返回带 ID 的实体，便于上层（如归档 MQ）取用 post.ID。
+func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) (*domain.Post, error) {
 	user, err := s.users.FindByID(ctx, in.UserID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if user.BanEnd.After(time.Now()) {
-		return domain.ErrForbidden
+		return nil, domain.ErrForbidden
 	}
 	if in.Partition == coursePartition {
-		return domain.ErrForbidden
+		return nil, domain.ErrForbidden
 	}
 	tagString := strings.Join(in.Tags, ",")
 	post := &domain.Post{
@@ -149,7 +150,7 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) err
 		IsAnonymous: in.IsAnonymous,
 	}
 	if err := s.posts.Create(ctx, post); err != nil {
-		return err
+		return nil, err
 	}
 	common.AddPostID(post.ID)
 	InvalidateHomeBrowse()
@@ -163,7 +164,7 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) err
 			}
 		}
 	}
-	return nil
+	return post, nil
 }
 
 func (s *postService) UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error) {
