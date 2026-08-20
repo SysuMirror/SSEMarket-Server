@@ -13,14 +13,14 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
+	// "encoding/json" // 随 enqueue 暂时停用；恢复入队时取消注释
 	"fmt"
 	"log"
 	"time"
 
 	"loginTest/core"
 
-	"github.com/redis/go-redis/v9"
+	// "github.com/redis/go-redis/v9" // 随 enqueue 暂时停用；恢复入队时取消注释
 )
 
 // 队列默认 key 名称（与 Python 端约定一致）
@@ -79,48 +79,53 @@ func CancelPcomment(ctx context.Context, pcommentID int) error {
 
 // enqueue 通用入队逻辑
 func enqueue(ctx context.Context, msgType MessageType, postID, pcommentID int, title, content string) error {
-	if core.MyRedis == nil {
-		return fmt.Errorf("redis not initialized")
-	}
-	now := time.Now()
-	nowMs := now.UnixMilli()
-	expireMs := now.Add(defaultDelay).UnixMilli()
-
-	msgID := fmt.Sprintf("%s:%d:%d", msgType, postID, nowMs)
-	// pcomment 消息额外携带 pcomment_id 用于取消时匹配
-	if msgType == TypePcommentCreate {
-		msgID = fmt.Sprintf("%s:%d:%d", msgType, pcommentID, nowMs)
-	}
-
-	msg := Message{
-		MsgID:      msgID,
-		Type:       msgType,
-		PostID:     postID,
-		PcommentID: pcommentID,
-		Title:      title,
-		Content:    content,
-		EnqueueAt:  nowMs,
-		ExpireAt:   expireMs,
-	}
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal message: %w", err)
-	}
-
-	// ZADD + HSET 用 pipeline 一次性提交，保证原子性
-	pipe := core.MyRedis.Pipeline()
-	pipe.ZAdd(ctx, defaultQueueKey, redis.Z{
-		Score:  float64(expireMs),
-		Member: msgID,
-	})
-	pipe.HSet(ctx, defaultPayloadKey, msgID, payload)
-	_, err = pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("enqueue to redis: %w", err)
-	}
-	log.Printf("[archive-mq] enqueue type=%s postID=%d pcommentID=%d expire_at=%s",
-		msgType, postID, pcommentID, time.UnixMilli(expireMs).Format(time.RFC3339))
+	// 暂时停止向 iwiki 提取服务消费的 Redis key（archive_delay_queue / archive_msg_payloads）塞入数据，
+	// 以节省服务器成本。恢复时删除本 early return，并取消下方及 import 中的注释即可。
 	return nil
+	/*
+		if core.MyRedis == nil {
+			return fmt.Errorf("redis not initialized")
+		}
+		now := time.Now()
+		nowMs := now.UnixMilli()
+		expireMs := now.Add(defaultDelay).UnixMilli()
+
+		msgID := fmt.Sprintf("%s:%d:%d", msgType, postID, nowMs)
+		// pcomment 消息额外携带 pcomment_id 用于取消时匹配
+		if msgType == TypePcommentCreate {
+			msgID = fmt.Sprintf("%s:%d:%d", msgType, pcommentID, nowMs)
+		}
+
+		msg := Message{
+			MsgID:      msgID,
+			Type:       msgType,
+			PostID:     postID,
+			PcommentID: pcommentID,
+			Title:      title,
+			Content:    content,
+			EnqueueAt:  nowMs,
+			ExpireAt:   expireMs,
+		}
+		payload, err := json.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("marshal message: %w", err)
+		}
+
+		// ZADD + HSET 用 pipeline 一次性提交，保证原子性
+		pipe := core.MyRedis.Pipeline()
+		pipe.ZAdd(ctx, defaultQueueKey, redis.Z{
+			Score:  float64(expireMs),
+			Member: msgID,
+		})
+		pipe.HSet(ctx, defaultPayloadKey, msgID, payload)
+		_, err = pipe.Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("enqueue to redis: %w", err)
+		}
+		log.Printf("[archive-mq] enqueue type=%s postID=%d pcommentID=%d expire_at=%s",
+			msgType, postID, pcommentID, time.UnixMilli(expireMs).Format(time.RFC3339))
+		return nil
+	*/
 }
 
 // cancel 扫描 Hash 找匹配 prefix 的 msg_id 并移除（ZREM + HDEL）

@@ -12,3 +12,10 @@ var (
 	ErrTokenExpired     = errors.New("token expired")
 	ErrTooManyRequests  = errors.New("too many requests")
 )
+
+// 置顶相关业务错误。
+var (
+	ErrPinnedLimitReached = errors.New("每人仅可同时置顶 1 个帖子,请先取消现有置顶")
+	ErrAlreadyPinned      = errors.New("该帖子已置顶")
+	ErrNotPinned          = errors.New("该帖子未置顶")
+)

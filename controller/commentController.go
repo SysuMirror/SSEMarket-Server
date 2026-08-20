@@ -264,11 +264,12 @@ func PostPcomment(c *gin.Context) {
 	})
 
 	// 入延迟归档队列：评论创建 1h 后触发该帖重新归档（worker 会读完整帖子+所有评论）
+	// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
 	if result.Pcomment != nil && result.Pcomment.ID != 0 {
-		if err := mq.EnqueuePcomment(c.Request.Context(), msg.PostID, result.Pcomment.ID, msg.Content); err != nil {
-			log.Printf("[archive-mq] EnqueuePcomment 失败 postID=%d pcommentID=%d: %v",
-				msg.PostID, result.Pcomment.ID, err)
-		}
+		// if err := mq.EnqueuePcomment(c.Request.Context(), msg.PostID, result.Pcomment.ID, msg.Content); err != nil {
+		// 	log.Printf("[archive-mq] EnqueuePcomment 失败 postID=%d pcommentID=%d: %v",
+		// 		msg.PostID, result.Pcomment.ID, err)
+		// }
 	}
 
 	subs := make([]Subcomment, 0, len(result.Subcomments))

@@ -9,12 +9,16 @@ import (
 // PostService 帖子领域服务。
 type PostService interface {
 	CountBrowse(ctx context.Context, filter domain.BrowseFilter) (int64, error)
-	Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error)
+	Browse(ctx context.Context, filter domain.BrowseFilter) (domain.BrowseResult, error)
 	GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error)
 	FindByID(ctx context.Context, postID, viewerUserID int) (*domain.Post, error)
 	IncrBrowse(ctx context.Context, postID int) int64
 	// Create 创建帖子并返回带 ID 的实体，便于上层（如归档 MQ）取用 post.ID。
 	Create(ctx context.Context, in domain.PostCreateInput) (*domain.Post, error)
+	// PinPost 给帖子置顶 1 小时(权限校验 + 5 个上限 + 同帖不可重复置顶)。
+	PinPost(ctx context.Context, postID, userID int) error
+	// UnpinPost 取消帖子置顶。
+	UnpinPost(ctx context.Context, postID, userID int) error
 	UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error)
 	UserProfilePostNum(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	UpdatePrivacy(ctx context.Context, postID, userID int, isPrivate bool) error

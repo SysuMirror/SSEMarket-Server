@@ -49,15 +49,48 @@ func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilte
 
 // Browse 帖子浏览列表（首页/分区/搜索/收藏/历史等）。
 //
-// 两阶段流水线（详见 browse_feed.go）：
-//   1. fetchPublicFeed — 直查 MySQL 列表（当前不走公共 Feed 缓存）
-//   2. attachPersonalBrowseState — 按当前用户补全点赞/收藏/作者
-func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) ([]domain.BrowseItem, error) {
+// 主页(home)场景下:
+//   - 先 ListPinned 取当前未过期置顶帖(最多 5,按 pinned_at DESC)
+//   - 将这些 ID 放入 filter.ExcludePostIDs,普通列表查询会自动排除
+//   - 返回 BrowseResult{Pinned, Posts, Total}
+//
+// 其他场景(searchsort != "home")不走置顶逻辑,Pinned 字段为空,
+// 所有帖都在 Posts 中(与旧行为兼容)。
+func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) (domain.BrowseResult, error) {
+	result := domain.BrowseResult{}
+
+	// 仅主页列表展示置顶帖。其他场景(收藏/历史/分区/搜索)无置顶逻辑。
+	if filter.Searchsort == "home" || filter.Searchsort == "" {
+		pinnedPosts, err := s.posts.ListPinned(ctx, filter.ViewerUserID)
+		if err != nil {
+			return result, err
+		}
+		if len(pinnedPosts) > 0 {
+			pinnedItems, err := s.attachPersonalBrowseState(ctx, filter, pinnedPosts)
+			if err != nil {
+				return result, err
+			}
+			result.Pinned = pinnedItems
+
+			// 排除置顶帖 ID,避免分页列表中重复出现。
+			excludeIDs := make([]int, 0, len(pinnedPosts))
+			for _, p := range pinnedPosts {
+				excludeIDs = append(excludeIDs, p.ID)
+			}
+			filter.ExcludePostIDs = excludeIDs
+		}
+	}
+
 	posts, err := s.fetchPublicFeed(ctx, filter)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	return s.attachPersonalBrowseState(ctx, filter, posts)
+	items, err := s.attachPersonalBrowseState(ctx, filter, posts)
+	if err != nil {
+		return result, err
+	}
+	result.Posts = items
+	return result, nil
 }
 
 func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error) {
@@ -164,7 +197,79 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) (*d
 			}
 		}
 	}
+	// 若发帖入参指定置顶,尝试置顶。失败不回滚发帖,只返回错误让前端提示。
+	if in.Pinned {
+		_ = s.PinPost(ctx, post.ID, in.UserID)
+	}
 	return post, nil
+}
+
+// canPin 当前对所有登录用户开放置顶权限。
+// 单用户最多同时存在 1 个未过期置顶帖,全站最多 5 个(由 ListPinned 的 Limit(5) 控制)。
+func canPin(userID int) bool {
+	return userID > 0
+}
+
+// PinPost 给帖子置顶 1 小时。
+//
+// 校验链:
+//  1. 权限:canPin(userID)
+//  2. 帖子归属:FindByID 校验是本人帖子
+//  3. 同帖未置顶:is_pinned && pinned_expires_at > NOW() → ErrAlreadyPinned
+//  4. 1 个上限:CountPinnedByUser → ErrPinnedLimitReached
+//
+// 失效缓存,让主页下次请求看到新置顶。
+func (s *postService) PinPost(ctx context.Context, postID, userID int) error {
+	if !canPin(userID) {
+		return domain.ErrForbidden
+	}
+	post, err := s.posts.FindByID(ctx, postID)
+	if err != nil {
+		return err
+	}
+	if post.UserID != userID {
+		return domain.ErrForbidden
+	}
+	// 同帖未过期置顶检查。
+	if post.IsPinned && post.PinnedExpiresAt != nil && post.PinnedExpiresAt.After(time.Now()) {
+		return domain.ErrAlreadyPinned
+	}
+	// 每用户最多 1 个置顶帖。
+	count, err := s.posts.CountPinnedByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if count >= 1 {
+		return domain.ErrPinnedLimitReached
+	}
+	expiresAt := time.Now().Add(1 * time.Hour)
+	if err := s.posts.PinPost(ctx, postID, userID, expiresAt); err != nil {
+		return err
+	}
+	InvalidateHomeBrowse()
+	return nil
+}
+
+// UnpinPost 取消帖子置顶。校验是本人帖子。
+func (s *postService) UnpinPost(ctx context.Context, postID, userID int) error {
+	if !canPin(userID) {
+		return domain.ErrForbidden
+	}
+	post, err := s.posts.FindByID(ctx, postID)
+	if err != nil {
+		return err
+	}
+	if post.UserID != userID {
+		return domain.ErrForbidden
+	}
+	if !post.IsPinned {
+		return domain.ErrNotPinned
+	}
+	if err := s.posts.UnpinPost(ctx, postID, userID); err != nil {
+		return err
+	}
+	InvalidateHomeBrowse()
+	return nil
 }
 
 func (s *postService) UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error) {

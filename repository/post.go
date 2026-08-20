@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"loginTest/domain"
 	"loginTest/dto"
@@ -12,6 +13,13 @@ type PostRepository interface {
 	FindByID(ctx context.Context, id int) (*domain.Post, error)
 	List(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, int64, error)
 	ListBrowse(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, error)
+	ListPinned(ctx context.Context, viewerUserID int) ([]*domain.Post, error)
+	CountPinnedByUser(ctx context.Context, userID int) (int64, error)
+	PinPost(ctx context.Context, postID, userID int, expiresAt time.Time) error
+	UnpinPost(ctx context.Context, postID, userID int) error
+	// FindHotPcommentsByPostIDs 批量查询每个帖子的热门一级评论(点赞最多,并列按字数倒序)。
+	// 入参 postIDs 可为空(直接返回空 map)。返回 map[postID]*Pcomment,无评论的帖子不在 map 中。
+	FindHotPcommentsByPostIDs(ctx context.Context, postIDs []int) (map[int]*domain.Pcomment, error)
 	Count(ctx context.Context, filter domain.BrowseFilter) (int64, error)
 	UpdateBrowseNum(ctx context.Context, id int, browseNum int64) error
 	LoadDetailDTO(ctx context.Context, postID int) (*dto.PostDetailCacheDTO, error)

@@ -25,6 +25,9 @@ func postToDomain(p *model.Post) *domain.Post {
 		Tag:        p.Tag,
 		IsPrivate:   p.IsPrivate,
 		IsAnonymous: p.IsAnonymous,
+		IsPinned:        p.IsPinned,
+		PinnedAt:        p.PinnedAt,
+		PinnedExpiresAt: p.PinnedExpiresAt,
 	}
 }
 

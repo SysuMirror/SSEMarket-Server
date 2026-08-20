@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io/ioutil"
 	"log"
 	"loginTest/api"
@@ -18,6 +21,7 @@ import (
 	"loginTest/util"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -119,10 +123,11 @@ func Post(c *gin.Context) {
 		return
 	}
 	// 入延迟归档队列（1h 后由 server-task 消费；若 1h 内删除则由 DeletePost 取消）
+	// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
 	if createdPost != nil && createdPost.ID != 0 {
-		if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
-			log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
-		}
+		// if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
+		// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
+		// }
 	}
 	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
 }
@@ -151,6 +156,22 @@ type PostResponse struct {
 	IsPrivate     bool
 	IsAnonymous   bool `json:"isAnonymous"`
 	IsOwner       bool `json:"isOwner"`
+	// IsPinned 是否当前为置顶态(主页用于显示置顶徽章)。
+	IsPinned         bool `json:"isPinned"`
+	PinnedAt         *time.Time `json:"pinnedAt,omitempty"`
+	PinnedExpiresAt  *time.Time `json:"pinnedExpiresAt,omitempty"`
+	// HotComment 该帖点赞最多的一级评论(并列按字数倒序),无评论时为 nil。
+	HotComment *HotCommentResponse `json:"hotComment,omitempty"`
+}
+
+// HotCommentResponse 浏览列表热门评论预览(仅核心字段,避免暴露电话等敏感信息)。
+type HotCommentResponse struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"userID"`
+	UserName  string    `json:"userName"`
+	Content   string    `json:"content"`
+	LikeNum   int       `json:"likeNum"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // anonymizeAuthor 对匿名帖的作者信息脱敏：匿名帖对所有查看者（含作者本人）脱敏作者信息，
@@ -226,11 +247,85 @@ func Browse(c *gin.Context) {
 		apperr.WriteMsg(c, err, "查询失败")
 		return
 	}
-	responses := make([]PostResponse, 0, len(items))
-	for _, item := range items {
-		responses = append(responses, browseItemToResponse(item, viewer.ID))
+	pinnedResponses := make([]PostResponse, 0, len(items.Pinned))
+	for _, item := range items.Pinned {
+		pinnedResponses = append(pinnedResponses, browseItemToResponse(item, viewer.ID))
 	}
-	c.JSON(http.StatusOK, responses)
+	postResponses := make([]PostResponse, 0, len(items.Posts))
+	for _, item := range items.Posts {
+		postResponses = append(postResponses, browseItemToResponse(item, viewer.ID))
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"pinned": pinnedResponses,
+		"posts":  postResponses,
+		"total":  items.Total,
+	})
+}
+
+// PinPostRequest 置顶请求入参。
+type PinPostRequest struct {
+	PostID int `json:"postID"`
+}
+
+// PinPost 置顶当前用户自己的帖子 1 小时。
+//
+// 权限校验/上限/同帖去重在 service 层完成。
+// 错误码:403 无权限;400 业务错误(已置顶/超过 5 个上限等)。
+func PinPost(c *gin.Context) {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		response.Response(c, http.StatusUnauthorized, 403, nil, "未登录")
+		return
+	}
+	var req PinPostRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.PostID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "postID 无效")
+		return
+	}
+	if err := service.Posts.PinPost(c.Request.Context(), req.PostID, viewer.ID); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusForbidden, 403, nil, "无置顶权限")
+		case errors.Is(err, domain.ErrAlreadyPinned):
+			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrAlreadyPinned.Error())
+		case errors.Is(err, domain.ErrPinnedLimitReached):
+			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrPinnedLimitReached.Error())
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		default:
+			apperr.WriteMsg(c, err, "置顶失败")
+		}
+		return
+	}
+	response.Response(c, http.StatusOK, 200, nil, "置顶成功")
+}
+
+// UnpinPost 取消当前用户自己帖子的置顶。
+func UnpinPost(c *gin.Context) {
+	viewer, ok := viewerFromAuth(c)
+	if !ok {
+		response.Response(c, http.StatusUnauthorized, 403, nil, "未登录")
+		return
+	}
+	var req PinPostRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.PostID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "postID 无效")
+		return
+	}
+	if err := service.Posts.UnpinPost(c.Request.Context(), req.PostID, viewer.ID); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusForbidden, 403, nil, "无置顶权限")
+		case errors.Is(err, domain.ErrNotPinned):
+			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrNotPinned.Error())
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+		default:
+			apperr.WriteMsg(c, err, "取消置顶失败")
+		}
+		return
+	}
+	response.Response(c, http.StatusOK, 200, nil, "取消置顶成功")
 }
 
 func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse {
@@ -277,6 +372,37 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,
+		IsPinned:        p.IsPinned,
+		PinnedAt:        p.PinnedAt,
+		PinnedExpiresAt: p.PinnedExpiresAt,
+		HotComment:      buildHotCommentResponse(item.HotComment, item.HotCommentAuthor, p.IsAnonymous, p.UserID),
+	}
+}
+
+// buildHotCommentResponse 构造热门评论预览响应。
+// - hc 为空时返回 nil,前端 hotComment 字段 omitempty 不输出。
+// - 匿名帖场景下,若热门评论作者就是该帖作者,则脱敏作者信息(只留 userID=0、显示"匿名用户")。
+func buildHotCommentResponse(hc *domain.Pcomment, author *domain.User, postIsAnonymous bool, postAuthorID int) *HotCommentResponse {
+	if hc == nil {
+		return nil
+	}
+	name := ""
+	userID := hc.UserID
+	if author != nil {
+		name = author.Name
+	}
+	// 匿名帖作者自己评论也脱敏
+	if postIsAnonymous && hc.UserID == postAuthorID {
+		name = "匿名用户"
+		userID = 0
+	}
+	return &HotCommentResponse{
+		ID:        hc.ID,
+		UserID:    userID,
+		UserName:  name,
+		Content:   hc.Content,
+		LikeNum:   hc.LikeNum,
+		CreatedAt: hc.CreatedAt,
 	}
 }
 
@@ -655,6 +781,10 @@ type PostDetailsResponse struct {
 	IsAnonymous   bool `json:"isAnonymous"`
 	IsOwner       bool `json:"isOwner"`
 	IsLottery     bool
+	// IsPinned 是否当前为置顶态(用于已发帖列表显示置顶/取消置顶按钮)。
+	IsPinned         bool `json:"isPinned"`
+	PinnedAt         *time.Time `json:"pinnedAt,omitempty"`
+	PinnedExpiresAt  *time.Time `json:"pinnedExpiresAt,omitempty"`
 }
 
 type PostDetailsMsg struct {
@@ -788,6 +918,9 @@ func postDetailToResponse(d *domain.PostDetail, viewerUserID int) PostDetailsRes
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,
+		IsPinned:        p.IsPinned,
+		PinnedAt:        p.PinnedAt,
+		PinnedExpiresAt: p.PinnedExpiresAt,
 	}
 }
 
@@ -796,6 +929,7 @@ func UploadPhotos(c *gin.Context) {
 	// 获取前端传过来的图片
 	file, err := c.FormFile("file")
 	if err != nil {
+		log.Printf("[UploadPhotos] FormFile failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件上传失败"})
 		return
 	}
@@ -808,12 +942,14 @@ func UploadPhotos(c *gin.Context) {
 	// 保存文件到本地
 	err = c.SaveUploadedFile(file, filepath)
 	if err != nil {
+		log.Printf("[UploadPhotos] SaveUploadedFile failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败"})
 		return
 	}
 
 	_, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
 	if err != nil {
+		log.Printf("[UploadPhotos] COS UploadImage failed: path=%s err=%v", filepath, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "原图保存失败" + err.Error()})
 		return
 	}
@@ -822,6 +958,7 @@ func UploadPhotos(c *gin.Context) {
 	// 打开上传的文件
 	src, err := file.Open()
 	if err != nil {
+		log.Printf("[UploadPhotos] file.Open failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
 		return
 	}
@@ -829,7 +966,8 @@ func UploadPhotos(c *gin.Context) {
 	// 读取上传文件的内容，并解码为 image.Image 对象
 	img, _, err := image.Decode(src)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败"})
+		log.Printf("[UploadPhotos] image.Decode failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败" + err.Error()})
 		return
 	}
 
@@ -837,18 +975,21 @@ func UploadPhotos(c *gin.Context) {
 	resizedImage := imaging.Thumbnail(img, 200, 200, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
+	if err := os.MkdirAll("public/resized", 0o755); err != nil {
+		log.Printf("[UploadPhotos] MkdirAll resized failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图目录创建失败" + err.Error()})
+		return
+	}
 	err = imaging.Save(resizedImage, resizedPath)
 	if err != nil {
+		log.Printf("[UploadPhotos] imaging.Save failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
 		return
 	}
-
-	// 更新 Post 的 Photos 字段
-	// 我们存储的是可以通过 HTTP 访问的 URL，而不是服务器本地的文件路径
-	fileURL := ""
-	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
+	fileURL, err := api.UploadImage("/src/images/resized/"+filename, resizedPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+		log.Printf("[UploadPhotos] COS UploadImage(resized) failed: path=%s err=%v", resizedPath, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图上传失败" + err.Error()})
 		return
 	}
 

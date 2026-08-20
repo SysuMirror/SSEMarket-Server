@@ -19,6 +19,9 @@ type Post struct {
 	Tag        string
 	IsPrivate   bool
 	IsAnonymous bool
+	IsPinned         bool
+	PinnedAt         *time.Time
+	PinnedExpiresAt  *time.Time
 }
 
 // BrowseFilter 帖子列表查询条件。
@@ -33,14 +36,25 @@ type BrowseFilter struct {
 	TimeTo       string
 	Limit        int
 	Offset       int
+	// ExcludePostIDs 命中后从结果中排除的帖子 ID 列表(主页用:排除已置顶帖避免重复)。
+	ExcludePostIDs []int
+}
+
+// BrowseResult 帖子浏览列表合并返回(主页用)。
+type BrowseResult struct {
+	Pinned []BrowseItem // 未过期置顶帖(最多 5,按 PinnedAt DESC)
+	Posts  []BrowseItem // 正常帖(已排除 Pinned 中的 PostID)
+	Total  int64        // 正常帖总数(不含 Pinned)
 }
 
 // BrowseItem 浏览列表单项（含作者与互动状态）。
 type BrowseItem struct {
-	Post     *Post
-	Author   *User
-	IsSaved  bool
-	IsLiked  bool
+	Post             *Post
+	Author           *User
+	IsSaved          bool
+	IsLiked          bool
+	HotComment       *Pcomment // 该帖点赞最多的一条一级评论(并列按字数倒序),可能为 nil
+	HotCommentAuthor *User    // HotComment.UserID 对应的用户,可能为 nil
 }
 
 // PostDetail 帖子详情（含作者、互动状态、实时浏览数）。
@@ -70,6 +84,8 @@ type PostCreateInput struct {
 	Tags        []string
 	IsPrivate   bool
 	IsAnonymous bool
+	// Pinned 为 true 时,发帖成功后由 service 调 PinPost 给当前帖置顶 1 小时。
+	Pinned bool
 }
 
 // UserProfilePostsFilter 个人主页发帖列表查询。

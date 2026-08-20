@@ -19,7 +19,7 @@ import (
 // 避免 markdown 图片 URL 被切断导致前端无法渲染预览图。
 func browseListSelect(q *gorm.DB) *gorm.DB {
 	return q.Select(
-		"postID, userID, `partition`, title, ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous",
+		"postID, userID, `partition`, title, ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous, is_pinned, pinned_at, pinned_expires_at",
 	)
 }
 
@@ -192,8 +192,101 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 		}
 	}
 	var posts []model.Post
-	browseListSelect(base).Offset(offset).Limit(limit).Find(&posts)
+	q := browseListSelect(base)
+	// 排除已置顶帖,避免主页置顶帖重复出现在分页列表中。
+	if len(filter.ExcludePostIDs) > 0 {
+		q = q.Where("postID NOT IN (?)", filter.ExcludePostIDs)
+	}
+	q.Offset(offset).Limit(limit).Find(&posts)
 	return modelsToDomain(posts), nil
+}
+
+// ListPinned 查询当前生效的置顶帖(主页用,最多 5 个,按 pinned_at DESC)。
+// 过期帖(is_pinned=1 但 pinned_expires_at <= NOW())被 SQL 自动过滤。
+// 应用主页可见性 + 与 ListBrowse 相同的脱敏规则(由 service/controller 层 anonymizeAuthor 完成)。
+func (r *postRepository) ListPinned(ctx context.Context, viewerUserID int) ([]*domain.Post, error) {
+	q := r.session(ctx).Model(&model.Post{}).
+		Where("is_pinned = ? AND pinned_expires_at > NOW() AND `partition` = ?", true, "主页").
+		Where("is_private = ? OR userID = ?", false, viewerUserID)
+	var posts []model.Post
+	browseListSelect(q).Order("pinned_at DESC").Limit(5).Find(&posts)
+	return modelsToDomain(posts), nil
+}
+
+// CountPinnedByUser 当前用户未过期的置顶帖数量(用于校验 5 个上限)。
+func (r *postRepository) CountPinnedByUser(ctx context.Context, userID int) (int64, error) {
+	var count int64
+	err := r.session(ctx).Model(&model.Post{}).
+		Where("userID = ? AND is_pinned = ? AND pinned_expires_at > NOW()", userID, true).
+		Count(&count).Error
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// PinPost 设置帖子为置顶态。
+// 调用方需保证权限/上限/同一帖子未置顶的校验已完成。
+// expiresAt 由 service 层传入(NOW() + 1h),repo 层只负责持久化。
+func (r *postRepository) PinPost(ctx context.Context, postID, userID int, expiresAt time.Time) error {
+	result := r.session(ctx).Model(&model.Post{}).
+		Where("postID = ? AND userID = ?", postID, userID).
+		Updates(map[string]any{
+			"is_pinned":          1,
+			"pinned_at":          time.Now(),
+			"pinned_expires_at":  expiresAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// UnpinPost 取消帖子置顶态。重置三个字段。
+func (r *postRepository) UnpinPost(ctx context.Context, postID, userID int) error {
+	result := r.session(ctx).Model(&model.Post{}).
+		Where("postID = ? AND userID = ?", postID, userID).
+		Updates(map[string]any{
+			"is_pinned":          0,
+			"pinned_at":          nil,
+			"pinned_expires_at":  nil,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// FindHotPcommentsByPostIDs 批量查询每个帖子的热门一级评论。
+// 排序规则:like_num DESC, CHAR_LENGTH(pctext) DESC, pcommentID ASC
+// 然后按 ptargetID 分组取首条,得到每个帖子的 Top1。
+func (r *postRepository) FindHotPcommentsByPostIDs(ctx context.Context, postIDs []int) (map[int]*domain.Pcomment, error) {
+	out := make(map[int]*domain.Pcomment, len(postIDs))
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	var rows []model.Pcomment
+	err := r.session(ctx).
+		Where("ptargetID IN ?", postIDs).
+		Order("ptargetID, like_num DESC, CHAR_LENGTH(pctext) DESC, pcommentID ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		pid := rows[i].PtargetID
+		if _, exists := out[pid]; exists {
+			continue
+		}
+		out[pid] = pcommentToDomain(&rows[i])
+	}
+	return out, nil
 }
 
 func modelsToDomain(posts []model.Post) []*domain.Post {

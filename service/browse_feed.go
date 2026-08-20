@@ -24,7 +24,8 @@ func (s *postService) fetchPublicFeed(ctx context.Context, filter domain.BrowseF
 // 对列表结果：
 //   - canViewPost 二次过滤（私密帖仅作者可见）；
 //   - fetchBrowseInteractionSets 并行查 SavedSet / LikedSet / AuthorsByIDs；
-//   - 组装 BrowseItem{Post, Author, IsSaved, IsLiked} 供 controller 序列化。
+//   - 批量查每个帖子的热门一级评论(点赞最多,并列按字数倒序)；
+//   - 组装 BrowseItem{Post, Author, IsSaved, IsLiked, HotComment} 供 controller 序列化。
 func (s *postService) attachPersonalBrowseState(ctx context.Context, filter domain.BrowseFilter, posts []*domain.Post) ([]domain.BrowseItem, error) {
 	if len(posts) == 0 {
 		return nil, nil
@@ -51,6 +52,25 @@ func (s *postService) attachPersonalBrowseState(ctx context.Context, filter doma
 		userIDs = append(userIDs, id)
 	}
 	savedSet, likedSet, authorMap := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
+	hotCommentMap, _ := s.posts.FindHotPcommentsByPostIDs(ctx, postIDs)
+	// 把热门评论作者 ID 也加入查询集,复用 AuthorsByIDs 一次性查回。
+	hotAuthorIDs := make([]int, 0, len(hotCommentMap))
+	hotAuthorIDSet := make(map[int]struct{})
+	for _, hc := range hotCommentMap {
+		if hc.UserID != 0 {
+			if _, exists := hotAuthorIDSet[hc.UserID]; !exists {
+				hotAuthorIDSet[hc.UserID] = struct{}{}
+				hotAuthorIDs = append(hotAuthorIDs, hc.UserID)
+			}
+		}
+	}
+	hotAuthorMap := map[int]*domain.User{}
+	if len(hotAuthorIDs) > 0 {
+		// 复用同一接口(已含 userIDs 去重),直接传入新集合。
+		// 这里单独查一次,避免污染原 fetchBrowseInteractionSets 的并发结构。
+		m, _ := s.posts.AuthorsByIDs(ctx, hotAuthorIDs)
+		hotAuthorMap = m
+	}
 
 	isSaveMode := filter.Searchsort == "save"
 	items := make([]domain.BrowseItem, 0, len(visible))
@@ -61,12 +81,17 @@ func (s *postService) attachPersonalBrowseState(ctx context.Context, filter doma
 		if isSaveMode {
 			saved = true
 		}
-		items = append(items, domain.BrowseItem{
+		item := domain.BrowseItem{
 			Post:    p,
 			Author:  author,
 			IsSaved: saved,
 			IsLiked: liked,
-		})
+		}
+		if hc, ok := hotCommentMap[p.ID]; ok && hc != nil {
+			item.HotComment = hc
+			item.HotCommentAuthor = hotAuthorMap[hc.UserID]
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }

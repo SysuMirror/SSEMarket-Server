@@ -20,6 +20,9 @@ type Post struct {
 	Heat       float64   `gorm:"column:heat;type:double"`
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
 	Tag        string    `gorm:"column:tag;type:varchar(100)"`
-	IsPrivate  bool      `gorm:"column:is_private;type:tinyint(1);default:0"`
+	IsPrivate  bool     `gorm:"column:is_private;type:tinyint(1);default:0"`
 	IsAnonymous bool     `gorm:"column:is_anonymous;type:tinyint(1);default:0"`
+	IsPinned       bool       `gorm:"column:is_pinned;type:tinyint(1);default:0"`
+	PinnedAt       *time.Time `gorm:"column:pinned_at;type:datetime"`
+	PinnedExpiresAt *time.Time `gorm:"column:pinned_expires_at;type:datetime"`
 }
