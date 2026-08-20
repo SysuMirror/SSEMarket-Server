@@ -36,12 +36,22 @@ func AesCBCDecrypt(data, key, iv string, paddingMode PaddingMode) string {
 		return ""
 	}
 
-	decodeData, _ := base64.StdEncoding.DecodeString(data)
+	decodeData, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(decodeData) == 0 || len(decodeData)%aes.BlockSize != 0 {
+		// 非法密文（常见于前端误传明文）时不 panic，交由调用方判密码错误
+		return ""
+	}
+	if len(iv) < aes.BlockSize {
+		return ""
+	}
 	decryptData := make([]byte, len(decodeData))
-	mode := cipher.NewCBCDecrypter(block, []byte(iv))
+	mode := cipher.NewCBCDecrypter(block, []byte(iv[:aes.BlockSize]))
 	mode.CryptBlocks(decryptData, decodeData)
 
-	original, _ := UnPadding(paddingMode, decryptData)
+	original, err := UnPadding(paddingMode, decryptData)
+	if err != nil {
+		return ""
+	}
 	return string(original)
 }
 

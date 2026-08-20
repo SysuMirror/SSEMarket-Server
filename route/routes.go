@@ -62,6 +62,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)
+	auth.POST("/api/auth/pinPost", controller.PinPost)
+	auth.POST("/api/auth/unpinPost", controller.UnpinPost)
 	auth.POST("/api/auth/userProfilePosts", controller.UserProfilePosts)
 	auth.POST("/api/auth/userProfilePostNum", controller.UserProfilePostNum)
 	auth.POST("/api/auth/getPostNum", controller.GetPostNum)
@@ -162,6 +164,18 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/noViolation", controller.NoViolation)
 	adminAuth.POST("/api/auth/violation", controller.Violation)
 	adminAuth.POST("/api/auth/adminPost", controller.AdminPost)
+
+	adminAuth.GET("/api/auth/admin/oauth/apps", controller.AdminListOAuthApps)
+	adminAuth.POST("/api/auth/admin/oauth/apps", controller.AdminCreateOAuthApp)
+	adminAuth.PUT("/api/auth/admin/oauth/apps/:appId", controller.AdminUpdateOAuthApp)
+	adminAuth.DELETE("/api/auth/admin/oauth/apps/:appId", controller.AdminDeleteOAuthApp)
+	adminAuth.GET("/api/auth/admin/oauth/records", controller.AdminListOAuthRecords)
+
+	adminAuth.GET("/api/auth/admin/blog/posts", controller.AdminListBlogPosts)
+	adminAuth.GET("/api/auth/admin/blog/posts/:filename", controller.AdminGetBlogPost)
+	adminAuth.POST("/api/auth/admin/blog/posts", controller.AdminSaveBlogPost)
+	adminAuth.DELETE("/api/auth/admin/blog/posts/:filename", controller.AdminDeleteBlogPost)
+	adminAuth.POST("/api/auth/admin/blog/publish", controller.AdminPublishBlog)
 
 	return r
 }

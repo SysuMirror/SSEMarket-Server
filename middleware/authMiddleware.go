@@ -76,6 +76,7 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 		//若token为空或token格式不正确
 		if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			ctx.Abort()
 			return
 		}
 		tokenString = tokenString[7:]
@@ -94,10 +95,11 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 		}
 		admin, err := service.Admins.GetByID(ctx.Request.Context(), adminId)
 		if err != nil || admin == nil || admin.ID == 0 {
-			ctx.Set("admin", nil)
-		} else {
-			ctx.Set("admin", admin)
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			ctx.Abort()
+			return
 		}
+		ctx.Set("admin", admin)
 		ctx.Next()
 	}
 }

@@ -48,10 +48,18 @@ type Check struct {
 }
 
 func AdminLogin(ctx *gin.Context) {
-	var requesrAdmin domain.Admin
-	ctx.Bind(&requesrAdmin)
+	var body struct {
+		Account  string `json:"account"`
+		Password string `json:"password"`
+		Username string `json:"username"`
+	}
+	_ = ctx.ShouldBindJSON(&body)
+	account := strings.TrimSpace(body.Account)
+	if account == "" {
+		account = strings.TrimSpace(body.Username)
+	}
 
-	token, err := service.Admins.Login(ctx.Request.Context(), requesrAdmin.Account, requesrAdmin.Password)
+	token, err := service.Admins.Login(ctx.Request.Context(), account, body.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
