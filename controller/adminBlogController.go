@@ -239,5 +239,5 @@ func AdminPublishBlog(c *gin.Context) {
 		response.Fail(c, gin.H{"error": err.Error()}, "Hexo 生成失败")
 		return
 	}
-	response.Success(c, nil, "已重新生成并发布到 /blog")
+	response.Success(c, nil, "已重新生成并发布到站点根路径")
 }

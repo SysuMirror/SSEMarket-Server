@@ -2,8 +2,10 @@ package controller
 
 import (
 	"loginTest/common"
+	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/response"
+	"loginTest/service"
 	"loginTest/util"
 	"strconv"
 	"strings"
@@ -149,13 +151,28 @@ func AdminPinPost(c *gin.Context) {
 		response.Fail(c, nil, "缺少 PostID")
 		return
 	}
+	globalCount, err := service.Posts.CountActivePinned(c.Request.Context())
+	if err != nil {
+		response.Fail(c, nil, "置顶失败")
+		return
+	}
+	if globalCount >= int64(domain.MaxPinnedQueueSize) {
+		response.Fail(c, nil, domain.ErrGlobalPinnedLimitReached.Error())
+		return
+	}
 	now := time.Now()
+	// 旧逻辑未写 pinned_expires_at,ListPinned 要求 expires > NOW(),导致管理员置顶永远不进置顶区:
+	// if err := common.GetDB().Model(&model.Post{}).Where("postID = ?", req.PostID).Updates(map[string]interface{}{
+	// 	"is_pinned": true, "pinned_at": now,
+	// }).Error; err != nil {
+	expiresAt := now.Add(30 * 24 * time.Hour) // 管理员优质置顶默认 30 天
 	if err := common.GetDB().Model(&model.Post{}).Where("postID = ?", req.PostID).Updates(map[string]interface{}{
-		"is_pinned": true, "pinned_at": now,
+		"is_pinned": true, "pinned_at": now, "pinned_expires_at": expiresAt, // pinned_at=入队时刻,FIFO 排序依据
 	}).Error; err != nil {
 		response.Fail(c, nil, "置顶失败")
 		return
 	}
+	service.InvalidateHomeBrowse()
 	response.Success(c, nil, "已置顶（优质）")
 }
 
@@ -172,6 +189,7 @@ func AdminUnpinPost(c *gin.Context) {
 		response.Fail(c, nil, "取消置顶失败")
 		return
 	}
+	service.InvalidateHomeBrowse()
 	response.Success(c, nil, "已取消置顶")
 }
 

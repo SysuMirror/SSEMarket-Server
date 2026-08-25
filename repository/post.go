@@ -15,8 +15,12 @@ type PostRepository interface {
 	ListBrowse(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, error)
 	ListPinned(ctx context.Context, viewerUserID int) ([]*domain.Post, error)
 	CountPinnedByUser(ctx context.Context, userID int) (int64, error)
+	// CountActivePinned 当前全站未过期置顶帖数量(置顶队列长度)。
+	CountActivePinned(ctx context.Context) (int64, error)
 	PinPost(ctx context.Context, postID, userID int, expiresAt time.Time) error
 	UnpinPost(ctx context.Context, postID, userID int) error
+	// ClearExpiredPins 清理已过期或缺少过期时间的置顶标记,返回影响行数。
+	ClearExpiredPins(ctx context.Context) (int64, error)
 	// FindHotPcommentsByPostIDs 批量查询每个帖子的热门一级评论(点赞最多,并列按字数倒序)。
 	// 入参 postIDs 可为空(直接返回空 map)。返回 map[postID]*Pcomment,无评论的帖子不在 map 中。
 	FindHotPcommentsByPostIDs(ctx context.Context, postIDs []int) (map[int]*domain.Pcomment, error)

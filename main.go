@@ -13,6 +13,7 @@ import (
 	"loginTest/lottery"
 	"loginTest/middleware"
 	"loginTest/observability"
+	"loginTest/pin"
 	"loginTest/route"
 	gormrepo "loginTest/repository/gorm"
 	"loginTest/service"
@@ -194,6 +195,7 @@ func main() {
 	route.CollectRoute(r)
 	go heat.StartHeat()
 	go lottery.StartAutoDraw()
+	go pin.StartClearExpired()
 
 	port := viper.GetString("server.port")
 	if port == "" {

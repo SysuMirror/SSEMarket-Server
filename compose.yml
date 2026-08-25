@@ -260,6 +260,7 @@ services:
       - /root/SSE_Market/sse/ces/web/dist:/usr/share/nginx/ces
       - /root/SSE_Market/sse-sdpy/web:/usr/share/nginx/sdpy:ro
       - /root/SSE_Market/sse-sdpy/api/data/nginx/modules.conf:/etc/nginx/sdpy-modules.conf:ro
+      - /root/SSE_Market/sse-sdpy/api/data/nginx/modules-hosts.conf:/etc/nginx/sdpy-modules-hosts.conf:ro
   # certbot 不在 compose 中常驻；续期见 /root/SSE_Market/certbot-renew.sh
   # db:
   #   image: mysql:5.7

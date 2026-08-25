@@ -201,19 +201,23 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 	return modelsToDomain(posts), nil
 }
 
-// ListPinned 查询当前生效的置顶帖(主页用,最多 5 个,按 pinned_at DESC)。
-// 过期帖(is_pinned=1 但 pinned_expires_at <= NOW())被 SQL 自动过滤。
-// 应用主页可见性 + 与 ListBrowse 相同的脱敏规则(由 service/controller 层 anonymizeAuthor 完成)。
+// ListPinned 查询主页置顶队列(最多 MaxPinnedQueueSize 条)。
+//
+// 队列规则:
+//   - 仅 is_pinned=1 且 pinned_expires_at > NOW() 且 partition=主页 的帖入队
+//   - 按 pinned_at ASC 先进先出:最早置顶的排在最前,与普通帖列表完全分离
+//   - 过期/取消置顶由 ClearExpiredPins / UnpinPost 出队(清空 is_pinned 与 pinned_at)
 func (r *postRepository) ListPinned(ctx context.Context, viewerUserID int) ([]*domain.Post, error) {
 	q := r.session(ctx).Model(&model.Post{}).
 		Where("is_pinned = ? AND pinned_expires_at > NOW() AND `partition` = ?", true, "主页").
 		Where("is_private = ? OR userID = ?", false, viewerUserID)
 	var posts []model.Post
-	browseListSelect(q).Order("pinned_at DESC").Limit(5).Find(&posts)
+	// 旧排序(后进先出): Order("pinned_at DESC")
+	browseListSelect(q).Order("pinned_at ASC, postID ASC").Limit(domain.MaxPinnedQueueSize).Find(&posts)
 	return modelsToDomain(posts), nil
 }
 
-// CountPinnedByUser 当前用户未过期的置顶帖数量(用于校验 5 个上限)。
+// CountPinnedByUser 当前用户未过期的置顶帖数量(用于校验每人 1 个上限)。
 func (r *postRepository) CountPinnedByUser(ctx context.Context, userID int) (int64, error) {
 	var count int64
 	err := r.session(ctx).Model(&model.Post{}).
@@ -225,16 +229,28 @@ func (r *postRepository) CountPinnedByUser(ctx context.Context, userID int) (int
 	return count, nil
 }
 
-// PinPost 设置帖子为置顶态。
-// 调用方需保证权限/上限/同一帖子未置顶的校验已完成。
-// expiresAt 由 service 层传入(NOW() + 1h),repo 层只负责持久化。
+// CountActivePinned 当前全站置顶队列长度(未过期)。
+func (r *postRepository) CountActivePinned(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.session(ctx).Model(&model.Post{}).
+		Where("is_pinned = ? AND pinned_expires_at > NOW() AND `partition` = ?", true, "主页").
+		Count(&count).Error
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// PinPost 将帖子入队置顶:写入 pinned_at(入队时刻)与过期时间。
+// 调用方需保证权限/上限/分区等校验已完成。
 func (r *postRepository) PinPost(ctx context.Context, postID, userID int, expiresAt time.Time) error {
+	now := time.Now()
 	result := r.session(ctx).Model(&model.Post{}).
 		Where("postID = ? AND userID = ?", postID, userID).
 		Updates(map[string]any{
-			"is_pinned":          1,
-			"pinned_at":          time.Now(),
-			"pinned_expires_at":  expiresAt,
+			"is_pinned":         1,
+			"pinned_at":         now, // 入队时刻,决定 FIFO 顺序
+			"pinned_expires_at": expiresAt,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -245,7 +261,7 @@ func (r *postRepository) PinPost(ctx context.Context, postID, userID int, expire
 	return nil
 }
 
-// UnpinPost 取消帖子置顶态。重置三个字段。
+// UnpinPost 手动出队:清空置顶标记与入队时间。
 func (r *postRepository) UnpinPost(ctx context.Context, postID, userID int) error {
 	result := r.session(ctx).Model(&model.Post{}).
 		Where("postID = ? AND userID = ?", postID, userID).
@@ -261,6 +277,21 @@ func (r *postRepository) UnpinPost(ctx context.Context, postID, userID int) erro
 		return domain.ErrNotFound
 	}
 	return nil
+}
+
+// ClearExpiredPins 定时出队:清理过期或无效置顶标记。
+func (r *postRepository) ClearExpiredPins(ctx context.Context) (int64, error) {
+	result := r.session(ctx).Model(&model.Post{}).
+		Where("is_pinned = ? AND (pinned_expires_at IS NULL OR pinned_expires_at <= NOW())", true).
+		Updates(map[string]any{
+			"is_pinned":         0,
+			"pinned_at":         nil,
+			"pinned_expires_at": nil,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 // FindHotPcommentsByPostIDs 批量查询每个帖子的热门一级评论。

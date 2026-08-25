@@ -2,6 +2,8 @@ config/application.yml
 loginTest.exe
 loginTest
 serve
+sse_market_server
+tmp/
 public/uploads
 public/resized
 ssl

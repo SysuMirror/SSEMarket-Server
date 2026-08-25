@@ -15,10 +15,14 @@ type PostService interface {
 	IncrBrowse(ctx context.Context, postID int) int64
 	// Create 创建帖子并返回带 ID 的实体，便于上层（如归档 MQ）取用 post.ID。
 	Create(ctx context.Context, in domain.PostCreateInput) (*domain.Post, error)
-	// PinPost 给帖子置顶 1 小时(权限校验 + 5 个上限 + 同帖不可重复置顶)。
+	// PinPost 给帖子置顶 1 小时(权限校验 + 队列上限 + 同帖不可重复置顶)。
 	PinPost(ctx context.Context, postID, userID int) error
 	// UnpinPost 取消帖子置顶。
 	UnpinPost(ctx context.Context, postID, userID int) error
+	// CountActivePinned 当前全站置顶队列长度。
+	CountActivePinned(ctx context.Context) (int64, error)
+	// ClearExpiredPins 定时清理过期/无效置顶标记。
+	ClearExpiredPins(ctx context.Context) (int64, error)
 	UserProfilePosts(ctx context.Context, filter domain.UserProfilePostsFilter) ([]domain.BrowseItem, error)
 	UserProfilePostNum(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	UpdatePrivacy(ctx context.Context, postID, userID int, isPrivate bool) error

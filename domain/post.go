@@ -2,6 +2,9 @@ package domain
 
 import "time"
 
+// MaxPinnedQueueSize 主页置顶队列最大长度(先进先出,全站共享)。
+const MaxPinnedQueueSize = 5
+
 // Post 领域帖子实体（与持久化 model 解耦）。
 type Post struct {
 	ID         int
@@ -24,6 +27,15 @@ type Post struct {
 	PinnedExpiresAt  *time.Time
 }
 
+// EffectiveIsPinned 是否「当前仍有效」的置顶。
+// 过期后库中 is_pinned 可能仍为 1(无回写时),列表/角标应以此为准,避免假置顶。
+func EffectiveIsPinned(p *Post) bool {
+	if p == nil || !p.IsPinned || p.PinnedExpiresAt == nil {
+		return false
+	}
+	return p.PinnedExpiresAt.After(time.Now())
+}
+
 // BrowseFilter 帖子列表查询条件。
 type BrowseFilter struct {
 	ViewerUserID int
@@ -42,7 +54,7 @@ type BrowseFilter struct {
 
 // BrowseResult 帖子浏览列表合并返回(主页用)。
 type BrowseResult struct {
-	Pinned []BrowseItem // 未过期置顶帖(最多 5,按 PinnedAt DESC)
+	Pinned []BrowseItem // 置顶队列:未过期置顶帖(最多 MaxPinnedQueueSize,按 PinnedAt 先进先出)
 	Posts  []BrowseItem // 正常帖(已排除 Pinned 中的 PostID)
 	Total  int64        // 正常帖总数(不含 Pinned)
 }

@@ -47,6 +47,8 @@ type PostMsg struct {
 	TagList       string
 	IsPrivate     bool `json:"isPrivate"`
 	IsAnonymous   bool `json:"isAnonymous"`
+	// Pinned 前端「同时置顶 1 小时」勾选;旧 PostMsg 缺此字段导致永远不置顶。
+	Pinned bool `json:"pinned"`
 }
 
 func Post(c *gin.Context) {
@@ -113,8 +115,29 @@ func Post(c *gin.Context) {
 		Tags:        tags,
 		IsPrivate:   requestPostMsg.IsPrivate,
 		IsAnonymous: requestPostMsg.IsAnonymous,
+		// 旧代码未传入 Pinned,前端勾选无效:
+		// Pinned 字段缺失
+		Pinned: requestPostMsg.Pinned,
 	})
 	if err != nil {
+		var pinAfter *domain.PinAfterCreateError
+		if errors.As(err, &pinAfter) {
+			createdPost = pinAfter.Post
+			// 发帖已成功;继续走归档注释块后返回带置顶失败提示的成功文案。
+			// 入延迟归档队列（1h 后由 server-task 消费；若 1h 内删除则由 DeletePost 取消）
+			// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
+			if createdPost != nil && createdPost.ID != 0 {
+				// if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
+				// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
+				// }
+			}
+			msg := "发帖成功，但置顶失败"
+			if pinAfter.PinErr != nil {
+				msg = "发帖成功，但置顶失败：" + pinAfter.PinErr.Error()
+			}
+			response.Response(c, http.StatusOK, 200, nil, msg)
+			return
+		}
 		if errors.Is(err, domain.ErrForbidden) {
 			response.Response(c, http.StatusBadRequest, 400, nil, "权限不足")
 			return
@@ -286,10 +309,14 @@ func PinPost(c *gin.Context) {
 		switch {
 		case errors.Is(err, domain.ErrForbidden):
 			response.Response(c, http.StatusForbidden, 403, nil, "无置顶权限")
+		case errors.Is(err, domain.ErrPinnedWrongPartition):
+			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrPinnedWrongPartition.Error())
 		case errors.Is(err, domain.ErrAlreadyPinned):
 			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrAlreadyPinned.Error())
 		case errors.Is(err, domain.ErrPinnedLimitReached):
 			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrPinnedLimitReached.Error())
+		case errors.Is(err, domain.ErrGlobalPinnedLimitReached):
+			response.Response(c, http.StatusBadRequest, 400, nil, domain.ErrGlobalPinnedLimitReached.Error())
 		case errors.Is(err, domain.ErrNotFound):
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 		default:
@@ -372,7 +399,11 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,
-		IsPinned:        p.IsPinned,
+		// 旧逻辑直接返回库字段,过期后仍可能显示置顶角标:
+		// IsPinned:        p.IsPinned,
+		// PinnedAt:        p.PinnedAt,
+		// PinnedExpiresAt: p.PinnedExpiresAt,
+		IsPinned:        domain.EffectiveIsPinned(p),
 		PinnedAt:        p.PinnedAt,
 		PinnedExpiresAt: p.PinnedExpiresAt,
 		HotComment:      buildHotCommentResponse(item.HotComment, item.HotCommentAuthor, p.IsAnonymous, p.UserID),
@@ -918,7 +949,8 @@ func postDetailToResponse(d *domain.PostDetail, viewerUserID int) PostDetailsRes
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,
-		IsPinned:        p.IsPinned,
+		// 旧逻辑: IsPinned: p.IsPinned — 过期后角标仍为 true
+		IsPinned:        domain.EffectiveIsPinned(p),
 		PinnedAt:        p.PinnedAt,
 		PinnedExpiresAt: p.PinnedExpiresAt,
 	}

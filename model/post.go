@@ -23,6 +23,7 @@ type Post struct {
 	IsPrivate  bool     `gorm:"column:is_private;type:tinyint(1);default:0"`
 	IsAnonymous bool     `gorm:"column:is_anonymous;type:tinyint(1);default:0"`
 	IsPinned       bool       `gorm:"column:is_pinned;type:tinyint(1);default:0"`
+	// PinnedAt 进入主页置顶队列的时间戳;ListPinned 按此字段先进先出排序。
 	PinnedAt       *time.Time `gorm:"column:pinned_at;type:datetime"`
 	PinnedExpiresAt *time.Time `gorm:"column:pinned_expires_at;type:datetime"`
 }

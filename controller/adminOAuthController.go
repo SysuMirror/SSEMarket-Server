@@ -13,13 +13,13 @@ import (
 )
 
 type adminOAuthAppReq struct {
-	AppID       string `json:"app_id"`
-	AppName     string `json:"app_name"`
-	AppIcon     string `json:"app_icon"`
-	RedirectURI string `json:"redirect_uri"`
-	Description string `json:"description"`
-	IsActive    *bool  `json:"is_active"`
-	RegenSecret bool   `json:"regenerate_secret"`
+	AppID       string  `json:"app_id"`
+	AppName     string  `json:"app_name"`
+	AppIcon     *string `json:"app_icon"`
+	RedirectURI string  `json:"redirect_uri"`
+	Description *string `json:"description"`
+	IsActive    *bool   `json:"is_active"`
+	RegenSecret bool    `json:"regenerate_secret"`
 }
 
 func maskSecret(secret string) string {
@@ -71,13 +71,21 @@ func AdminCreateOAuthApp(c *gin.Context) {
 	}
 	secret := util.GenerateRandomString(32)
 	now := time.Now()
+	appIcon := ""
+	if req.AppIcon != nil {
+		appIcon = strings.TrimSpace(*req.AppIcon)
+	}
+	desc := ""
+	if req.Description != nil {
+		desc = strings.TrimSpace(*req.Description)
+	}
 	app := model.OAuth2App{
 		AppID:       appID,
 		AppName:     req.AppName,
 		AppSecret:   secret,
-		AppIcon:     strings.TrimSpace(req.AppIcon),
+		AppIcon:     appIcon,
 		RedirectURI: req.RedirectURI,
-		Description: strings.TrimSpace(req.Description),
+		Description: desc,
 		IsActive:    true,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -116,10 +124,13 @@ func AdminUpdateOAuthApp(c *gin.Context) {
 	if strings.TrimSpace(req.RedirectURI) != "" {
 		updates["redirect_uri"] = strings.TrimSpace(req.RedirectURI)
 	}
-	if req.Description != "" || req.AppName != "" {
-		updates["description"] = strings.TrimSpace(req.Description)
+	// 仅当显式传入 description / app_icon 时才更新，避免每次停用/重置密钥把已有值清空。
+	if req.Description != nil {
+		updates["description"] = strings.TrimSpace(*req.Description)
 	}
-	updates["app_icon"] = strings.TrimSpace(req.AppIcon)
+	if req.AppIcon != nil {
+		updates["app_icon"] = strings.TrimSpace(*req.AppIcon)
+	}
 	if req.IsActive != nil {
 		updates["is_active"] = *req.IsActive
 	}
