@@ -21,6 +21,8 @@ var (
 	Sues     SueService
 	Votes     VoteService
 	Lotteries LotteryService
+	Sso       SsoService
+	Quest     QuestService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -52,4 +54,10 @@ func InitServices(db *gorm.DB) {
 	Sues = NewSueService(sueRepo)
 	Votes = NewVoteService(voteRepo, postRepo, Ranks)
 	Lotteries = NewLotteryService(lotteryRepo, postRepo)
+
+	ssoBindingRepo := gormrepo.NewSsoBindingRepository(db)
+	Sso = NewSsoService(ssoBindingRepo, userRepo, Users)
+
+	questRepo := gormrepo.NewQuestRepository(db)
+	Quest = NewQuestService(questRepo, postRepo, userRepo)
 }

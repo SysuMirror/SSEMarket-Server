@@ -67,6 +67,27 @@ type UserService interface {
 	RevokeAPIToken(ctx context.Context, tokenID, userID int) error
 	DeleteAPIToken(ctx context.Context, tokenID, userID int) error
 	VerifyAPIToken(ctx context.Context, plainToken string) (*domain.UserAPITokenVerify, error)
+	// IssueTokensForUser 为已存在用户发放令牌（SSO 登录/绑定路径复用，
+	// 与邮箱密码登录产物完全一致：JWT + refresh token 落库）。
+	IssueTokensForUser(ctx context.Context, userID int) (*domain.AuthTokens, error)
+}
+
+// SsoService UniSSO 单点登录服务。
+type SsoService interface {
+	// BuildAuthorizeURL 生成 state+PKCE 存 Redis，返回 UniSSO authorize 地址。
+	// bindUID>0 表示已登录用户主动绑定；SSO 未启用返回 ErrBadRequest。
+	BuildAuthorizeURL(ctx context.Context, bindUID int) (string, error)
+	// ConsumeCallback 消费回调：校验 state（GETDEL 一次性）→ 换 token → 取 userinfo
+	// → 按绑定关系分派一次性 ticket。错误用 ErrSsoStateInvalid/ErrSsoExchange/ErrSsoConflict 区分。
+	ConsumeCallback(ctx context.Context, code, state string) (string, error)
+	// ExchangeTicket ticket → 登录令牌（login/bound，一次性）或 bind_needed 信息（可重复读）。
+	ExchangeTicket(ctx context.Context, ticket string) (*domain.SsoExchangeResult, error)
+	// BindWithCredentials bind_needed ticket + 集市邮箱密码 → 写绑定 + 发令牌（ticket 一次性消费）。
+	BindWithCredentials(ctx context.Context, ticket, email, password string) (*domain.AuthTokens, error)
+	// GetStatus 查询用户绑定状态（未绑定返回 Bound=false，不报错）。
+	GetStatus(ctx context.Context, userID int) (*domain.SsoStatus, error)
+	// Unbind 验证密码后删除绑定。
+	Unbind(ctx context.Context, userID int, password string) error
 }
 
 // CommentService 评论领域服务。

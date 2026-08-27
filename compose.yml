@@ -74,6 +74,11 @@ services:
       - OBSERVABILITY_JAEGER_ENDPOINT=jaeger:4317
       - HEXO_ROOT=/app/hexo_blog
       - HEXO_PUBLISH_URL=http://hexo_publish:3951/generate
+      # SSO（UniSSO）单点登录：仅后端使用，client_secret 禁止入前端/git
+      - SSO_ENABLED=true
+      - SSO_CLIENT_ID=client_uKTL00HcD4VAXyKi2TkBzA
+      - SSO_CLIENT_SECRET=TvPaKBlMtbQvOUCeHINOCK8meA6ttW5VpSkLPRIkwwk
+      # 其余 URL/scope/ttl 走 application.yml 默认值
     volumes:
       - /root/SSE_Market/sse_market_server_resource:/app/public
       - /root/SSE_Market/log/server:/app/log

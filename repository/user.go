@@ -30,6 +30,8 @@ type UserRepository interface {
 	UseCDKey(ctx context.Context, content string) error
 
 	FindActiveOAuth2App(ctx context.Context, appID string) (*domain.OAuth2App, error)
+	FindActiveOAuth2AppByRedirectURI(ctx context.Context, appID, redirectURI string) (*domain.OAuth2App, error)
+	FindActiveOAuth2AppBySecret(ctx context.Context, appID, appSecret string) (*domain.OAuth2App, error)
 	CreateOAuth2Code(ctx context.Context, code string, appID string, userID int, scope, redirectURI, state string, expiresAt time.Time) error
 	CreateOAuth2AuthRecord(ctx context.Context, record *domain.OAuth2AuthRecord) error
 	FindUnusedOAuth2Code(ctx context.Context, code, appID string) (*domain.OAuth2Code, error)

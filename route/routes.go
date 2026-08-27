@@ -59,6 +59,17 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", controller.Login)
 	noauth.POST("/api/auth/refresh", controller.RefreshToken)
+
+	// SSO 单点登录（UniSSO）—— 公共入口 + 回调 + 登录/绑定提交
+	noauth.GET("/api/sso/login", controller.SsoLogin)
+	noauth.GET("/api/sso/callback", controller.SsoCallback)
+	noauth.POST("/api/sso/exchange", controller.SsoExchange)
+	noauth.POST("/api/sso/bind", controller.SsoBind)
+	// SSO 已登录态：发起绑定 / 查询状态 / 解绑
+	auth.POST("/api/sso/bind/start", controller.SsoBindStart)
+	auth.GET("/api/sso/status", controller.SsoStatus)
+	auth.POST("/api/sso/unbind", controller.SsoUnbind)
+
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)
@@ -124,6 +135,17 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getTags", controller.GetTags)
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	auth.POST("api/auth/statistics", controller.GetStatistics)
+
+	auth.POST("/api/auth/quest/list", controller.QuestList)
+	auth.POST("/api/auth/quest/detail", controller.QuestDetail)
+	auth.POST("/api/auth/quest/create", controller.QuestCreate)
+	auth.POST("/api/auth/quest/updateStatus", controller.QuestUpdateStatus)
+	auth.GET("/api/auth/quest/me", controller.QuestMe)
+	auth.GET("/api/auth/quest/chatPeers", controller.QuestChatPeers)
+	auth.GET("/api/auth/quest/levelRules", controller.QuestLevelRules)
+	auth.POST("/api/auth/quest/order/accept", controller.QuestOrderAccept)
+	auth.POST("/api/auth/quest/order/submitComplete", controller.QuestOrderSubmitComplete)
+	auth.POST("/api/auth/quest/order/confirmComplete", controller.QuestOrderConfirmComplete)
 
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
 	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)

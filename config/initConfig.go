@@ -37,6 +37,13 @@ func InitConfig() {
 	_ = viper.BindEnv("cos.appid", "COS_APPID")
 	_ = viper.BindEnv("observability.tracing.enabled", "OBSERVABILITY_TRACING_ENABLED")
 	_ = viper.BindEnv("observability.tracing.jaeger_endpoint", "OBSERVABILITY_JAEGER_ENDPOINT")
+	_ = viper.BindEnv("sso.enabled", "SSO_ENABLED")
+	_ = viper.BindEnv("sso.client_id", "SSO_CLIENT_ID")
+	_ = viper.BindEnv("sso.client_secret", "SSO_CLIENT_SECRET")
+	_ = viper.BindEnv("sso.authorize_url", "SSO_AUTHORIZE_URL")
+	_ = viper.BindEnv("sso.token_url", "SSO_TOKEN_URL")
+	_ = viper.BindEnv("sso.userinfo_url", "SSO_USERINFO_URL")
+	_ = viper.BindEnv("sso.redirect_uri", "SSO_REDIRECT_URI")
 
 	if err := viper.ReadInConfig(); err != nil {
 		panic(err)

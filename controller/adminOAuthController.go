@@ -39,6 +39,7 @@ func AdminListOAuthApps(c *gin.Context) {
 	out := make([]gin.H, 0, len(apps))
 	for _, app := range apps {
 		out = append(out, gin.H{
+			"id":           app.ID,
 			"app_id":       app.AppID,
 			"app_name":     app.AppName,
 			"app_icon":     app.AppIcon,
@@ -91,7 +92,7 @@ func AdminCreateOAuthApp(c *gin.Context) {
 		UpdatedAt:   now,
 	}
 	if err := common.GetDB().Create(&app).Error; err != nil {
-		response.Fail(c, nil, "写入失败，app_id 可能已存在")
+		response.Fail(c, nil, "写入失败，同一 app_id + redirect_uri 不可重复")
 		return
 	}
 	response.Success(c, gin.H{

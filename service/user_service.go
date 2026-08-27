@@ -129,6 +129,15 @@ func (s *userService) Register(ctx context.Context, in domain.RegisterInput) (*d
 	return tokens, nil
 }
 
+// IssueTokensForUser 为已存在用户发放令牌（SSO 登录/绑定路径复用）。
+func (s *userService) IssueTokensForUser(ctx context.Context, userID int) (*domain.AuthTokens, error) {
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.issueTokens(ctx, u)
+}
+
 func (s *userService) issueTokens(ctx context.Context, u *domain.User) (*domain.AuthTokens, error) {
 	access, err := common.ReleaseToken(*u)
 	if err != nil {
@@ -298,12 +307,12 @@ func (s *userService) AuthorizeOAuth2App(ctx context.Context, in domain.OAuth2Au
 	if in.Scope != "read_basic" {
 		return "", domain.ErrBadRequest
 	}
-	app, err := s.users.FindActiveOAuth2App(ctx, in.AppID)
+	app, err := s.users.FindActiveOAuth2AppByRedirectURI(ctx, in.AppID, in.RedirectURI)
 	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", domain.ErrBadRequest
+		}
 		return "", err
-	}
-	if app.RedirectURI != in.RedirectURI {
-		return "", domain.ErrBadRequest
 	}
 	code := util.GenerateRandomString(32)
 	expiresAt := time.Now().Add(5 * time.Minute)
@@ -331,12 +340,9 @@ func (s *userService) GetTokenByOAuth2(ctx context.Context, in domain.OAuth2Toke
 	if in.Code == "" || in.AppID == "" || in.AppSecret == "" {
 		return nil, domain.ErrBadRequest
 	}
-	app, err := s.users.FindActiveOAuth2App(ctx, in.AppID)
+	_, err := s.users.FindActiveOAuth2AppBySecret(ctx, in.AppID, in.AppSecret)
 	if err != nil {
 		return nil, err
-	}
-	if app.AppSecret != in.AppSecret {
-		return nil, domain.ErrUnauthorized
 	}
 	authCode, err := s.users.FindUnusedOAuth2Code(ctx, in.Code, in.AppID)
 	if err != nil {

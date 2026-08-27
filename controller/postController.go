@@ -176,6 +176,7 @@ type PostResponse struct {
 	IsWatched     bool
 	Photos        string
 	Tag           string
+	PostKind      string `json:"PostKind"`
 	IsPrivate     bool
 	IsAnonymous   bool `json:"isAnonymous"`
 	IsOwner       bool `json:"isOwner"`
@@ -396,6 +397,7 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		IsLiked:       item.IsLiked,
 		Photos:        photos,
 		Tag:           p.Tag,
+		PostKind:      p.PostKind,
 		IsPrivate:     p.IsPrivate,
 		IsAnonymous:   p.IsAnonymous,
 		IsOwner:       isOwner,

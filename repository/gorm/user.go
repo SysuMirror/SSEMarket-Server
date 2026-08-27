@@ -218,6 +218,17 @@ func (r *userRepository) MarkRefreshTokenUsed(ctx context.Context, id int) error
 	return r.session(ctx).Model(&model.RefreshToken{}).Where("id = ?", id).Update("is_used", true).Error
 }
 
+func oauth2AppToDomain(app model.OAuth2App) *domain.OAuth2App {
+	return &domain.OAuth2App{
+		AppID:       app.AppID,
+		AppName:     app.AppName,
+		AppSecret:   app.AppSecret,
+		AppIcon:     app.AppIcon,
+		RedirectURI: app.RedirectURI,
+		Description: app.Description,
+	}
+}
+
 func (r *userRepository) FindActiveOAuth2App(ctx context.Context, appID string) (*domain.OAuth2App, error) {
 	var app model.OAuth2App
 	err := r.session(ctx).Where("app_id = ? AND is_active = ?", appID, true).First(&app).Error
@@ -227,14 +238,35 @@ func (r *userRepository) FindActiveOAuth2App(ctx context.Context, appID string) 
 		}
 		return nil, err
 	}
-	return &domain.OAuth2App{
-		AppID:       app.AppID,
-		AppName:     app.AppName,
-		AppSecret:   app.AppSecret,
-		AppIcon:     app.AppIcon,
-		RedirectURI: app.RedirectURI,
-		Description: app.Description,
-	}, nil
+	return oauth2AppToDomain(app), nil
+}
+
+func (r *userRepository) FindActiveOAuth2AppByRedirectURI(ctx context.Context, appID, redirectURI string) (*domain.OAuth2App, error) {
+	var app model.OAuth2App
+	err := r.session(ctx).
+		Where("app_id = ? AND redirect_uri = ? AND is_active = ?", appID, redirectURI, true).
+		First(&app).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return oauth2AppToDomain(app), nil
+}
+
+func (r *userRepository) FindActiveOAuth2AppBySecret(ctx context.Context, appID, appSecret string) (*domain.OAuth2App, error) {
+	var app model.OAuth2App
+	err := r.session(ctx).
+		Where("app_id = ? AND app_secret = ? AND is_active = ?", appID, appSecret, true).
+		First(&app).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrUnauthorized
+		}
+		return nil, err
+	}
+	return oauth2AppToDomain(app), nil
 }
 
 func (r *userRepository) CreateOAuth2Code(ctx context.Context, code string, appID string, userID int, scope, redirectURI, state string, expiresAt time.Time) error {

@@ -19,7 +19,7 @@ import (
 // 避免 markdown 图片 URL 被切断导致前端无法渲染预览图。
 func browseListSelect(q *gorm.DB) *gorm.DB {
 	return q.Select(
-		"postID, userID, `partition`, title, ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, is_private, is_anonymous, is_pinned, pinned_at, pinned_expires_at",
+		"postID, userID, `partition`, title, ptext, comment_num, like_num, vote_num, browse_num, post_time, heat, photos, tag, post_kind, quote_price, quest_status, is_private, is_anonymous, is_pinned, pinned_at, pinned_expires_at",
 	)
 }
 

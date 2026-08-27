@@ -16,6 +16,7 @@ type User struct {
 	PunishNum                  int
 	HideProfilePosts           bool
 	ISEmailNotificationBlocked bool
+	UserType                   string
 }
 
 // DeleteMeInput 用户自助注销入参。

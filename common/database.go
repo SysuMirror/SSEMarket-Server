@@ -76,6 +76,7 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.LotteryWinner{})
 	ensureLotteryParticipantUniqueIndex(db)
 	db.AutoMigrate(&model.Resume{})
+	db.AutoMigrate(&model.QuestOrder{})
 	RunRatingMigration(db)
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
 
