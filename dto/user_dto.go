@@ -1,7 +1,6 @@
-// token结构体
 package dto
 
-import "loginTest/model"
+import "loginTest/domain"
 
 type UserDto struct {
 	UserID    int    `json:"userID"`
@@ -12,9 +11,9 @@ type UserDto struct {
 	Identity  string `json:"identity"`
 }
 
-func ToUserDto(user model.User) UserDto {
+func ToUserDto(user domain.User) UserDto {
 	return UserDto{
-		UserID:    user.UserID,
+		UserID:    user.ID,
 		Name:      user.Name,
 		Phone:     user.Phone,
 		AvatarURL: user.AvatarURL,

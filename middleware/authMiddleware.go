@@ -2,13 +2,14 @@
 package middleware
 
 import (
-	"github.com/gin-gonic/gin"
-	"loginTest/common"
-	"loginTest/model"
+	"fmt"
 	"net/http"
 	"strings"
 
- 	"fmt"
+	"loginTest/common"
+	"loginTest/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -42,7 +43,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		if err != nil || !token.Valid {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
-			if(isWs) {
+			if isWs {
 				fmt.Println(tokenString)
 			}
 			return
@@ -52,24 +53,18 @@ func AuthMiddleware() gin.HandlerFunc {
 		if userId == 0 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
-			if(isWs) {
+			if isWs {
 				fmt.Println(tokenString)
 			}
 			return
 		}
-		db := common.GetDB()
-		user := model.User{}
-		db.Where("userID = ?", userId).First(&user)
-		//用户不存在
-		if user.UserID == 0 {
-			// 如果用户不存在，则将user设置为nil，表示当前用户为游客。
+		user, err := LoadUserSession(ctx.Request.Context(), userId)
+		if err != nil || user == nil || user.ID == 0 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
-			return;
-		} else {
-			// 用户存在，将user的信息写入上下文
-			ctx.Set("user", user)
+			return
 		}
+		ctx.Set("user", user)
 		ctx.Next()
 	}
 }
@@ -81,6 +76,7 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 		//若token为空或token格式不正确
 		if tokenString == "" || len(tokenString) <= 7 || !strings.HasPrefix(tokenString, "Bearer ") {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			ctx.Abort()
 			return
 		}
 		tokenString = tokenString[7:]
@@ -90,24 +86,20 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 			ctx.Abort()
 			return
 		}
-		//验证通过后获取claims中的userId
+		//验证通过后获取claims中的adminId
 		adminId := claims_admin.AdminID
 		if adminId == 0 {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
 			return
 		}
-		db := common.GetDB()
-		admin := model.Admin{}
-		db.Where("adminID = ?", adminId).First(&admin)
-		//用户不存在
-		if admin.AdminID == 0 {
-			// 如果用户不存在，则将user设置为nil，表示当前用户为游客。
-			ctx.Set("admin", nil)
-		} else {
-			// 用户存在，将user的信息写入上下文
-			ctx.Set("admin", admin)
+		admin, err := service.Admins.GetByID(ctx.Request.Context(), adminId)
+		if err != nil || admin == nil || admin.ID == 0 {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
+			ctx.Abort()
+			return
 		}
+		ctx.Set("admin", admin)
 		ctx.Next()
 	}
 }

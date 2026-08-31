@@ -1,19 +1,21 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"loginTest/api"
-	"loginTest/common"
-	"loginTest/model"
+	"loginTest/apperr"
+	"loginTest/domain"
+	"loginTest/mq"
 	"loginTest/response"
-	"math"
+	"loginTest/service"
 	"net/http"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/jinzhu/gorm"
 )
 
 type CommentResponse struct {
@@ -38,6 +40,7 @@ type Commentsmsg struct {
 	PostID        int    `json:"postID"`
 	TypePost      string `json:"postType"`
 }
+
 type Subcomment struct {
 	CcommentID      int       `json:"ccommentID"`
 	Author          string    `json:"author"`
@@ -56,11 +59,60 @@ type Subcomment struct {
 	ShowMenu        bool      `json:"showMenu"`
 }
 
+func pcommentWithMetaToResponse(item *domain.PcommentWithMeta) CommentResponse {
+	author := item.Author
+	if author == nil {
+		author = &domain.User{}
+	}
+	subs := make([]Subcomment, 0, len(item.Subcomments))
+	for _, sc := range item.Subcomments {
+		subs = append(subs, ccommentWithMetaToSubcomment(sc))
+	}
+	return CommentResponse{
+		PcommentID:      item.Pcomment.ID,
+		AuthorID:        author.ID,
+		Author:          author.Name,
+		AuthorTelephone: author.Phone,
+		AuthorScore:     author.Score,
+		AuthorAvatar:    author.AvatarURL,
+		AuthorIdentity:  author.Identity,
+		CommentTime:     item.Pcomment.CreatedAt,
+		Content:         item.Pcomment.Content,
+		LikeNum:         item.Pcomment.LikeNum,
+		DenyNum:         item.Pcomment.DenyNum,
+		SubComments:     subs,
+		IsLiked:         item.IsLiked,
+		IsDenied:        item.IsDenied,
+	}
+}
+
+func ccommentWithMetaToSubcomment(item *domain.CcommentWithMeta) Subcomment {
+	author := item.Author
+	if author == nil {
+		author = &domain.User{}
+	}
+	return Subcomment{
+		CcommentID:      item.Ccomment.ID,
+		Author:          author.Name,
+		AuthorID:        author.ID,
+		AuthorScore:     author.Score,
+		AuthorTelephone: author.Phone,
+		AuthorAvatar:    author.AvatarURL,
+		AuthorIdentity:  author.Identity,
+		CommentTime:     item.Ccomment.CreatedAt,
+		Content:         item.Ccomment.Content,
+		LikeNum:         item.Ccomment.LikeNum,
+		DenyNum:         item.Ccomment.DenyNum,
+		IsLiked:         item.IsLiked,
+		IsDenied:        item.IsDenied,
+		UserTargetName:  item.Ccomment.UserTargetName,
+		ShowMenu:        false,
+	}
+}
+
 // GetComments 给前端返回对应帖子的评论以及每条帖子评论的评论
 func GetComments(c *gin.Context) {
-	db := common.GetDB()
 	var msg Commentsmsg
-	// 新增参数绑定错误处理
 	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "服务器无法成功解析请求")
 		return
@@ -82,121 +134,26 @@ func GetComments(c *gin.Context) {
 		response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
 		return
 	}
-	userID := temUser.UserID
 
-	var post model.Post
-	db.Where("postID = ?", postid).First(&post)
-	if post.PostID == 0 || !canViewPost(post, userID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+	items, err := service.Comments.ListForPost(c.Request.Context(), postid, postType, temUser.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
+		response.Response(c, http.StatusInternalServerError, 500, nil, "获取评论失败")
 		return
 	}
-
-	// ------------------- 核心优化：批量查询，消除N+1 -------------------
-	// 1. 一次性查询所有主评论（保留原有变量名 pcomments）
-	var pcomments []model.Pcomment
-	db.Where("ptargetID = ?", postid).Find(&pcomments)
-	if len(pcomments) == 0 {
+	if len(items) == 0 {
 		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
 
-	// 批量提取所有评论ID、用户ID（循环仅提取ID，无DB操作）
-	commentIDs := make([]int, 0, len(pcomments))
-	userIDs := make(map[int]struct{}, len(pcomments))
-	for _, comment := range pcomments {
-		commentIDs = append(commentIDs, comment.PcommentID)
-		userIDs[comment.UserID] = struct{}{}
-	}
-
-	// 2. 批量查询所有关联数据（固定次数查询，无循环DB）
-	// 批量查询评论用户
-	userMap := getBatchUserMap(db, userIDs)
-	// 批量查询点赞状态
-	likeMap := getBatchCommentLike(db, userID, commentIDs)
-	// 批量查询踩状态
-	denyMap := getBatchCommentDeny(db, userID, commentIDs)
-
-	var comments []CommentResponse
-	for _, pcomment := range pcomments {
-		isLike := likeMap[pcomment.PcommentID]
-		isDeny := denyMap[pcomment.PcommentID]
-		commentuser := getUserByMap(userMap, pcomment.UserID)
-		comment := CommentResponse{
-			PcommentID:      pcomment.PcommentID,
-			Author:          commentuser.Name,
-			AuthorID:        commentuser.UserID,
-			AuthorTelephone: commentuser.Phone,
-			AuthorScore:     commentuser.Score,
-			AuthorAvatar:    commentuser.AvatarURL,
-			AuthorIdentity:  commentuser.Identity,
-			CommentTime:     pcomment.Time,
-			Content:         pcomment.Pctext,
-			LikeNum:         pcomment.LikeNum,
-			DenyNum:         pcomment.DenyNum,
-			SubComments:     GetSubComments(pcomment, temUser.UserID),
-			IsLiked:         isLike,
-			IsDenied:        isDeny,
-		}
-		comments = append(comments, comment)
+	comments := make([]CommentResponse, 0, len(items))
+	for _, item := range items {
+		comments = append(comments, pcommentWithMetaToResponse(item))
 	}
 	c.JSON(http.StatusOK, comments)
-}
-
-// getBatchUserMap 批量查询用户，保留原有逻辑
-func getBatchUserMap(db *gorm.DB, userIDs map[int]struct{}) map[int]model.User {
-	ids := make([]int, 0, len(userIDs))
-	for id := range userIDs {
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return map[int]model.User{}
-	}
-	var users []model.User
-	db.Where("userID IN (?)", ids).Find(&users)
-	userMap := make(map[int]model.User, len(users))
-	for _, user := range users {
-		userMap[user.UserID] = user
-	}
-	return userMap
-}
-
-// getBatchCommentLike 批量查询评论点赞
-func getBatchCommentLike(db *gorm.DB, userID int, commentIDs []int) map[int]bool {
-	if len(commentIDs) == 0 {
-		return map[int]bool{}
-	}
-	var likes []model.Pclike
-	db.Where("userID = ? AND pctargetID IN (?)", userID, commentIDs).Find(&likes)
-	likeMap := make(map[int]bool)
-	for _, like := range likes {
-		likeMap[like.PctargetID] = true
-	}
-	return likeMap
-}
-
-// getBatchCommentDeny 批量查询评论踩
-func getBatchCommentDeny(db *gorm.DB, userID int, commentIDs []int) map[int]bool {
-	if len(commentIDs) == 0 {
-		return map[int]bool{}
-	}
-	var denies []model.Pcdeny
-	db.Where("userID = ? AND pctargetID IN (?)", userID, commentIDs).Find(&denies)
-	denyMap := make(map[int]bool)
-	for _, deny := range denies {
-		denyMap[deny.PctargetID] = true
-	}
-	return denyMap
-}
-
-// getUserByMap 从Map中获取用户，保留原有管理员逻辑
-func getUserByMap(userMap map[int]model.User, userID int) model.User {
-	if userID == 0 {
-		return model.User{Name: "管理员", Phone: "11111111111"}
-	}
-	if user, ok := userMap[userID]; ok {
-		return user
-	}
-	return model.User{}
 }
 
 type IDmesg struct {
@@ -204,44 +161,22 @@ type IDmesg struct {
 }
 
 func DeletePcomment(c *gin.Context) {
-	db := common.GetDB()
 	var ID IDmesg
 	c.Bind(&ID)
-	PcommentID := ID.PcommentID
-	var pcomment model.Pcomment
-	db.Where("pcommentID = ?", PcommentID).First(&pcomment)
-	if pcomment.PcommentID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "未找到该评论")
+	err := service.Comments.DeletePcomment(c.Request.Context(), int(ID.PcommentID))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "未找到该评论")
+			return
+		}
 		return
 	}
-	// 剪掉相应的热度
-	currentTime := time.Now()
-	timedif := currentTime.Sub(pcomment.Time)
-	hours := timedif.Hours()
-	days := int(hours / 24)
-	fmt.Println("days: ", days)
-	weightComment := float64(6)
-	var post model.Post
-	db.Where("postID = ?", pcomment.PtargetID).First(&post)
-	if post.PostID == 0 {
-		return
+	// 1h 内删除评论：从延迟队列移除该评论的入队消息（避免触发对已删除评论的归档）
+	if ID.PcommentID != 0 {
+		if err := mq.CancelPcomment(c.Request.Context(), int(ID.PcommentID)); err != nil {
+			log.Printf("[archive-mq] CancelPcomment 失败 pcommentID=%d: %v", ID.PcommentID, err)
+		}
 	}
-	// 帖子评论数减相应数字
-	var ccomment model.Ccomment
-	var count int64
-	db.Model(&ccomment).Where("ctargetID = ?", pcomment.PcommentID).Count(&count)
-	db.Model(&post).UpdateColumn("comment_num", gorm.Expr("comment_num - ?", count+1))
-	if days > 0 {
-		weightCommentPower := math.Pow(0.5, float64(days))
-		deleteHeat := math.Pow(weightComment, weightCommentPower)
-		db.Model(&post).Update("heat", post.Heat-(deleteHeat+float64(count)))
-	} else {
-		deleteCcommentHeat := float64(count * int64(weightComment))
-		db.Model(&post).Update("heat", post.Heat-(weightComment+deleteCcommentHeat))
-	}
-	common.InvalidatePostDetailCache(post.PostID)
-	//
-	db.Delete(&pcomment)
 }
 
 type IDmesag struct {
@@ -249,112 +184,31 @@ type IDmesag struct {
 }
 
 func DeleteCcomment(c *gin.Context) {
-	db := common.GetDB()
 	var ID IDmesag
 	c.Bind(&ID)
-	CcommentID := ID.CcommentID
-	var ccomment model.Ccomment
-	db.Where("ccommentID = ?", CcommentID).First(&ccomment)
-	if ccomment.CcommentID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "未找到该评论")
+	err := service.Comments.DeleteCcomment(c.Request.Context(), int(ID.CcommentID))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "未找到该评论")
+			return
+		}
 		return
 	}
-	// 剪掉相应的热度
-	currentTime := time.Now()
-	timedif := currentTime.Sub(ccomment.Time)
-	hours := timedif.Hours()
-	days := int(hours / 24)
-	fmt.Println("days: ", days)
-	weightComment := float64(6)
-	var targetcommentid model.Pcomment
-	db.Where("pcommentID= ?", ccomment.CtargetID).First(&targetcommentid)
-	if targetcommentid.PcommentID == 0 {
-		return
-	}
-	var post model.Post
-	db.Where("postID = ?", targetcommentid.PtargetID).First(&post)
-	if post.PostID == 0 {
-		return
-	}
-	// 帖子评论数减一
-	db.Model(&post).UpdateColumn("comment_num", gorm.Expr("comment_num - ?", 1))
-	if days > 0 {
-		weightCommentPower := math.Pow(0.5, float64(days))
-		deleteHeat := math.Pow(weightComment, weightCommentPower)
-		db.Model(&post).Update("heat", post.Heat-deleteHeat)
-	} else {
-		db.Model(&post).Update("heat", post.Heat-weightComment)
-	}
-	common.InvalidatePostDetailCache(post.PostID)
-	//
-	db.Delete(&ccomment)
 }
 
-// GetSubComments 返回pcomment帖子的评论对应的子评论列表
-func GetSubComments(pcomment model.Pcomment, userID int) []Subcomment {
-	db := common.GetDB()
-	var ccomments []model.Ccomment
-	db.Find(&ccomments, "ctargetID =?", pcomment.PcommentID)
-	var subcomments []Subcomment
-	for _, ccomment := range ccomments {
-		isLike := false
-		isDeny := false
-		var like model.Cclike
-		var deny model.Ccdeny
-		db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&deny)
-		if deny.CcdenyID != 0 {
-			isDeny = true
-		} else {
-			db.Where("cctargetID =? AND userID =?", ccomment.CcommentID, userID).First(&like)
-			if like.CclikeID != 0 {
-				isLike = true
-			}
-		}
-
-		var commentuser model.User
-		db.Where("userID =?", ccomment.UserID).First(&commentuser)
-		comment := Subcomment{
-			CcommentID:      ccomment.CcommentID,
-			Author:          commentuser.Name,
-			AuthorID:        commentuser.UserID,
-			AuthorScore:     commentuser.Score,
-			AuthorTelephone: commentuser.Phone,
-			AuthorAvatar:    commentuser.AvatarURL,
-			AuthorIdentity:  commentuser.Identity,
-			CommentTime:     ccomment.Time,
-			Content:         ccomment.Cctext,
-			LikeNum:         ccomment.LikeNum,
-			DenyNum:         ccomment.DenyNum,
-			IsLiked:         isLike,
-			IsDenied:        isDeny,
-			UserTargetName:  ccomment.UserTargetName,
-			ShowMenu:        false,
-		}
-		subcomments = append(subcomments, comment)
-	}
-	if len(subcomments) == 0 {
-		return []Subcomment{}
-	}
-	return subcomments
-}
-
-// 用于接收来自前端发表帖子的评论的结构体
 type PcommentMsg struct {
 	UserTelephone string
 	PostID        int
 	Content       string
 }
 
-// PostPcomment 进行帖子评论
 func PostPcomment(c *gin.Context) {
-	db := common.GetDB()
 	var msg PcommentMsg
 	c.Bind(&msg)
 	if len(msg.Content) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	// 这里不能直接用len(),否则中文字符会计算错误
 	if utf8.RuneCountInString(msg.Content) > 1000 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
@@ -363,93 +217,79 @@ func PostPcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
 		return
 	}
-	// if api.GetSuggestion(msg.Content) == "Block" {
-	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-	// 	// return
-	// }
-	var user model.User
-	var receiver model.User
-	var tempost model.Post
-	db.Where("phone = ?", msg.UserTelephone).First(&user)
-	if user.UserID == 0 {
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), msg.UserTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	currentDateTime := time.Now()
-	if user.Banend.After(currentDateTime) {
+	if user.BanEnd.After(time.Now()) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
 		return
 	}
-	db.Where("postID =?", msg.PostID).First(&tempost)
-	db.Where("userID =?", tempost.UserID).First(&receiver)
-	if tempost.PostID == 0 {
-		return
-	}
-	if !canViewPost(tempost, user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
-		return
-	}
-	pcomment := model.Pcomment{
-		UserID:    user.UserID,
-		PtargetID: msg.PostID,
-		Pctext:    msg.Content,
-		Time:      time.Now(),
-		LikeNum:   0,
-		DenyNum:   0,
-	}
-	// 创建一条帖子评论
-	db.Create(&pcomment)
 
-	// 如果用户自己评论自己的帖子，则不用通知
-	if tempost.UserID != user.UserID {
-		notice := model.Notice{
-			Receiver: tempost.UserID,
-			User:     model.User{},
-			Sender:   user.UserID,
-			Type:     "pcomment",
-			Ntext:    msg.Content,
-			Time:     time.Now(),
-			Read:     false,
-			Target:   pcomment.PcommentID,
+	result, err := service.Comments.CreatePcomment(c.Request.Context(), domain.PcommentCreateInput{
+		UserID:  user.ID,
+		PostID:  msg.PostID,
+		Content: msg.Content,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
 		}
-		// 创建一条通知
-		db.Create(&notice)
-		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 1, msg.Content)
+		if errors.Is(err, domain.ErrBadRequest) {
+			response.Response(c, http.StatusBadRequest, 400, nil, "评论内容无效")
+			return
 		}
+		return
 	}
 
-	var post model.Post
-	db.Where("postID = ?", msg.PostID).First(&post)
-	if post.PostID == 0 {
-		return
+	if result.NotifyReceiver != nil && result.NotifyReceiver.ID != 0 && !result.NotifyReceiver.ISEmailNotificationBlocked {
+		EmailAlerter(result.NotifyReceiver.Email, 1, msg.Content)
 	}
-	db.Model(&post).Update("comment_num", post.CommentNum+1)
-	// 在这里设置 评论 的权重
-	weightComment := float64(6)
-	db.Model(&post).Update("heat", post.Heat+weightComment)
-	common.InvalidatePostDetailCache(post.PostID)
-	comment := CommentResponse{
-		PcommentID:     pcomment.PcommentID,
+	for _, u := range result.PostWatchEmailReceivers {
+		emailNotifyIfEnabled(u, 1, msg.Content)
+	}
+
+	_ = service.Lotteries.ParticipateByComment(c.Request.Context(), domain.LotteryParticipateInput{
+		UserID:    user.ID,
+		PostID:    msg.PostID,
+		CommentID: result.Pcomment.ID,
+		Content:   msg.Content,
+	})
+
+	// 入延迟归档队列：评论创建 1h 后触发该帖重新归档（worker 会读完整帖子+所有评论）
+	// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
+	if result.Pcomment != nil && result.Pcomment.ID != 0 {
+		// if err := mq.EnqueuePcomment(c.Request.Context(), msg.PostID, result.Pcomment.ID, msg.Content); err != nil {
+		// 	log.Printf("[archive-mq] EnqueuePcomment 失败 postID=%d pcommentID=%d: %v",
+		// 		msg.PostID, result.Pcomment.ID, err)
+		// }
+	}
+
+	subs := make([]Subcomment, 0, len(result.Subcomments))
+	for _, sc := range result.Subcomments {
+		subs = append(subs, ccommentWithMetaToSubcomment(sc))
+	}
+	c.JSON(http.StatusOK, CommentResponse{
+		PcommentID:     result.Pcomment.ID,
 		Author:         user.Name,
 		AuthorAvatar:   user.AvatarURL,
 		AuthorIdentity: user.Identity,
-		CommentTime:    pcomment.Time,
-		Content:        pcomment.Pctext,
-		LikeNum:        pcomment.LikeNum,
-		DenyNum:        pcomment.DenyNum,
-		SubComments:    GetSubComments(pcomment, user.UserID),
+		CommentTime:    result.Pcomment.CreatedAt,
+		Content:        result.Pcomment.Content,
+		LikeNum:        result.Pcomment.LikeNum,
+		DenyNum:        result.Pcomment.DenyNum,
+		SubComments:    subs,
 		IsLiked:        false,
-	}
-	c.JSON(http.StatusOK, comment)
+	})
 }
 
-// CcommentMsg 用于接收来自前端发表评论的评论的结构体
 type CcommentMsg struct {
 	UserTelephone  string `json:"userTelephone"`
 	PcommentID     int    `json:"pcommentID"`
@@ -459,9 +299,7 @@ type CcommentMsg struct {
 	CcommentID     int    `json:"ccommentID"`
 }
 
-// PostCcomment 发表评论的评论
 func PostCcomment(c *gin.Context) {
-	db := common.GetDB()
 	var msg CcommentMsg
 	err := c.Bind(&msg)
 	if err != nil {
@@ -473,7 +311,6 @@ func PostCcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	// 这里不能直接用len(),否则中文字符会计算错误
 	if utf8.RuneCountInString(content) > 1000 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
@@ -482,106 +319,44 @@ func PostCcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论人不能为空")
 		return
 	}
-	// if api.GetSuggestion(content) == "Block" {
-	// 	// response.Response(c, http.StatusBadRequest, 400, nil, "评论内容含有不良信息,请重新编辑")
-	// 	// return
-	// }
-	var user model.User
-	var receiver model.User
-	db.Where("phone =?", msg.UserTelephone).First(&user)
-	if user.UserID == 0 {
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), msg.UserTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	currentDateTime := time.Now()
-	if user.Banend.After(currentDateTime) {
+	if user.BanEnd.After(time.Now()) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得评论")
 		return
 	}
 
-	var post model.Post
-	db.Where("postID = ?", msg.PostID).First(&post)
-	if post.PostID == 0 || !canViewPost(post, user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
-		return
-	}
-
-	newCcomment := model.Ccomment{
-		UserID:         user.UserID,
-		CtargetID:      msg.PcommentID,
-		Cctext:         msg.Content,
-		Time:           time.Now(),
-		LikeNum:        0,
-		DenyNum:        0,
-		UserTargetName: msg.UserTargetName,
-	}
-	// 数据库创建一条新的评论的评论
-	db.Create(&newCcomment)
-	var tempcomment model.Pcomment
-	db.Where("pcommentID =?", msg.PcommentID).First(&tempcomment)
-	db.Where("userID =?", tempcomment.UserID).First(&receiver)
-	if tempcomment.PcommentID == 0 {
-		return
-	}
-	// 如果是评论的评论
-	// 如果是用户在自己发的一级评论下发回复，那么不需要通知
-	if tempcomment.UserID != user.UserID {
-		notice1 := model.Notice{
-			Receiver: tempcomment.UserID,
-			User:     model.User{},
-			Sender:   user.UserID,
-			Type:     "ccomment",
-			Ntext:    msg.Content,
-			Time:     time.Now(),
-			Read:     false,
-			Target:   newCcomment.CcommentID,
-		}
-		// 数据库创建一条通知
-		db.Create(&notice1)
-		if !receiver.ISEmailNotificationBlocked {
-			EmailAlerter(receiver.Email, 3, msg.Content)
-		}
-	}
-	// 如果是二级评论的回复
-	if msg.UserTargetName != "" {
-		var temccomment model.Ccomment
-		var receiver2 model.User
-		db.Where("ccommentID =?", msg.CcommentID).First(&temccomment)
-		db.Where("userID =?", temccomment.UserID).First(&receiver2)
-		if temccomment.CcommentID == 0 {
+	result, err := service.Comments.CreateCcomment(c.Request.Context(), domain.CcommentCreateInput{
+		UserID:          user.ID,
+		PostID:          msg.PostID,
+		PcommentID:      msg.PcommentID,
+		Content:         content,
+		UserTargetName:  msg.UserTargetName,
+		ReplyCcommentID: msg.CcommentID,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
 			return
 		}
-		// 如果是自己回复自己就不用发通知,还有一种情况，就是上面的一级回复已经发了通知，这里就不需要重发了
-		if temccomment.UserID != user.UserID && tempcomment.UserID != temccomment.UserID {
-			notice2 := model.Notice{
-				Receiver: temccomment.UserID,
-				User:     model.User{},
-				Sender:   user.UserID,
-				Type:     "ccomment",
-				Ntext:    msg.Content,
-				Time:     time.Now(),
-				Read:     false,
-				Target:   newCcomment.CcommentID,
-			}
-			// 数据库创建一条通知
-			db.Create(&notice2)
-			if !receiver2.ISEmailNotificationBlocked {
-				EmailAlerter(receiver2.Email, 3, msg.Content)
-			}
+		return
+	}
+	for _, n := range result.Notifies {
+		if n.Receiver != nil && n.Receiver.ID != 0 && !n.Receiver.ISEmailNotificationBlocked {
+			EmailAlerter(n.Receiver.Email, 3, content)
 		}
 	}
-	// 如果是评论的回复
-
-	db.Model(&post).Update("comment_num", post.CommentNum+1)
-	// 在这里设置 评论 的权重
-	weightComment := float64(6)
-	db.Model(&post).Update("heat", post.Heat+weightComment)
-	common.InvalidatePostDetailCache(post.PostID)
+	for _, u := range result.PostWatchEmailReceivers {
+		emailNotifyIfEnabled(u, 1, content)
+	}
 	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
 }
 
@@ -591,7 +366,6 @@ type PcMsg struct {
 }
 
 func UpdatePcommentLike(c *gin.Context) {
-	db := common.GetDB()
 	var requestMsg PcMsg
 	c.Bind(&requestMsg)
 
@@ -602,63 +376,30 @@ func UpdatePcommentLike(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
-	// Find the user by telephone
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	var pcomment model.Pcomment
-	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
-	if pcomment.PcommentID == 0 {
+	if _, err := service.Comments.FindPcomment(c.Request.Context(), int(pcommentID)); err != nil {
 		return
 	}
-	if !canViewPostByPcommentID(db, int(pcommentID), user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+	if err := service.Comments.ValidatePcommentAccess(c.Request.Context(), int(pcommentID), user.ID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
 		return
 	}
-	//数据库查询点赞和踩的记录
-	isLiked := false
-	isDenied := false
-	var like model.Pclike
-	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&like)
-	if like.PclikeID != 0 {
-		isLiked = true
-	}
-	var deny model.Pcdeny
-	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&deny)
-	if deny.PcdenyID != 0 {
-		isDenied = true
-	}
-
-	if isLiked {
-		db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
-		db.Delete(&like)
-	} else {
-		//没点过赞的话则先检查是否有过踩,有的话取消
-		if isDenied {
-			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
-			db.Delete(&deny)
-		}
-		newLike := model.Pclike{
-			UserID:     user.UserID,
-			PctargetID: pcomment.PcommentID,
-		}
-		if newLike.UserID != 0 && newLike.PctargetID != 0 {
-			db.Model(&pcomment).Update("like_num", pcomment.LikeNum+1)
-			db.Create(&newLike)
-		}
-	}
+	_ = service.Comments.TogglePcommentLike(c.Request.Context(), user.ID, int(pcommentID))
 }
 
 func UpdatePcommentDeny(c *gin.Context) {
-	db := common.GetDB()
 	var requestMsg PcMsg
 	c.Bind(&requestMsg)
 
@@ -669,61 +410,27 @@ func UpdatePcommentDeny(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
-	// Find the user by telephone
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
-		//找不到用户
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	var pcomment model.Pcomment
-	db.Where("pcommentID = ?", pcommentID).First(&pcomment)
-	if pcomment.PcommentID == 0 {
-		//找不到评论
+	if _, err := service.Comments.FindPcomment(c.Request.Context(), int(pcommentID)); err != nil {
 		return
 	}
-	if !canViewPostByPcommentID(db, int(pcommentID), user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+	if err := service.Comments.ValidatePcommentAccess(c.Request.Context(), int(pcommentID), user.ID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
 		return
 	}
-
-	isLiked := false
-	isDenied := false
-	var like model.Pclike
-	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&like)
-	if like.PclikeID != 0 {
-		isLiked = true
-	}
-	var deny model.Pcdeny
-	db.Where("userID = ? AND pctargetID = ?", user.UserID, pcomment.PcommentID).First(&deny)
-	if deny.PcdenyID != 0 {
-		isDenied = true
-	}
-
-	if isDenied {
-		db.Model(&pcomment).Update("deny_num", pcomment.DenyNum-1)
-		db.Delete(&deny)
-	} else {
-		//没踩过的话先检查是否有过赞,有的话取消
-		if isLiked {
-			db.Model(&pcomment).Update("like_num", pcomment.LikeNum-1)
-			db.Delete(&like)
-		}
-		newDeny := model.Pcdeny{
-			UserID:     user.UserID,
-			PctargetID: pcomment.PcommentID,
-		}
-		if newDeny.UserID != 0 && newDeny.PctargetID != 0 {
-			db.Model(&pcomment).Update("deny_num", pcomment.DenyNum+1)
-			db.Create(&newDeny)
-		}
-	}
+	_ = service.Comments.TogglePcommentDeny(c.Request.Context(), user.ID, int(pcommentID))
 }
 
 type CcMsg struct {
@@ -732,7 +439,6 @@ type CcMsg struct {
 }
 
 func UpdateCcommentLike(c *gin.Context) {
-	db := common.GetDB()
 	var requestMsg CcMsg
 	c.Bind(&requestMsg)
 
@@ -743,63 +449,30 @@ func UpdateCcommentLike(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
-	// Find the user by ID
-	var user model.User
-	db.Where("phone =?", userTelephone).First(&user)
-	if user.UserID == 0 {
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	var ccomment model.Ccomment
-	db.Where("ccommentID =?", ccommentID).First(&ccomment)
-	if ccomment.CcommentID == 0 {
+	if _, err := service.Comments.FindCcomment(c.Request.Context(), int(ccommentID)); err != nil {
 		return
 	}
-	if !canViewPostByCcommentID(db, int(ccommentID), user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+	if err := service.Comments.ValidateCcommentAccess(c.Request.Context(), int(ccommentID), user.ID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
 		return
 	}
-
-	isLiked := false
-	isDenied := false
-	var like model.Cclike
-	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&like)
-	if like.CclikeID != 0 {
-		isLiked = true
-	}
-	var deny model.Ccdeny
-	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&deny)
-	if deny.CcdenyID != 0 {
-		isDenied = true
-	}
-
-	if isLiked {
-		db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
-		db.Delete(&like)
-	} else {
-		//没点过赞的话则先检查是否有过踩,有的话取消
-		if isDenied {
-			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
-			db.Delete(&deny)
-		}
-		newLike := model.Cclike{
-			UserID:     user.UserID,
-			CctargetID: ccomment.CcommentID,
-		}
-		if newLike.UserID != 0 && newLike.CctargetID != 0 {
-			db.Model(&ccomment).Update("like_num", ccomment.LikeNum+1)
-			db.Create(&newLike)
-		}
-	}
+	_ = service.Comments.ToggleCcommentLike(c.Request.Context(), user.ID, int(ccommentID))
 }
 
 func UpdateCcommentDeny(c *gin.Context) {
-	db := common.GetDB()
 	var requestMsg CcMsg
 	c.Bind(&requestMsg)
 
@@ -810,60 +483,57 @@ func UpdateCcommentDeny(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
-	// Find the user by telephone
-	var user model.User
-	db.Where("phone = ?", userTelephone).First(&user)
-	if user.UserID == 0 {
+
+	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
+	if err != nil || user == nil || user.ID == 0 {
 		return
 	}
-	// 获取token中的用户标识符
 	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.UserID {
+	if tokenUserID != user.ID {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	var ccomment model.Ccomment
-	db.Where("ccommentID = ?", ccommentID).First(&ccomment)
-	if ccomment.CcommentID == 0 {
-		//找不到评论
+	if _, err := service.Comments.FindCcomment(c.Request.Context(), int(ccommentID)); err != nil {
 		return
 	}
-	if !canViewPostByCcommentID(db, int(ccommentID), user.UserID) {
-		response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+	if err := service.Comments.ValidateCcommentAccess(c.Request.Context(), int(ccommentID), user.ID); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
+			return
+		}
 		return
 	}
+	_ = service.Comments.ToggleCcommentDeny(c.Request.Context(), user.ID, int(ccommentID))
+}
 
-	isLiked := false
-	isDenied := false
-	var like model.Cclike
-	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&like)
-	if like.CclikeID != 0 {
-		isLiked = true
-	}
-	var deny model.Ccdeny
-	db.Where("userID = ? AND cctargetID = ?", user.UserID, ccomment.CcommentID).First(&deny)
-	if deny.CcdenyID != 0 {
-		isDenied = true
-	}
+type ResolveMentionsMsg struct {
+	Names []string `json:"names"`
+}
 
-	if isDenied {
-		db.Model(&ccomment).Update("deny_num", ccomment.DenyNum-1)
-		db.Delete(&deny)
-	} else {
-		//没踩过的话先检查是否有过赞,有的话取消
-		if isLiked {
-			db.Model(&ccomment).Update("like_num", ccomment.LikeNum-1)
-			db.Delete(&like)
-		}
-		newDeny := model.Ccdeny{
-			UserID:     user.UserID,
-			CctargetID: ccomment.CcommentID,
-		}
-		if newDeny.UserID != 0 && newDeny.CctargetID != 0 {
-			db.Model(&ccomment).Update("deny_num", ccomment.DenyNum+1)
-			db.Create(&newDeny)
-		}
+type MentionUserResp struct {
+	Name   string `json:"name"`
+	UserID uint   `json:"userID"`
+}
+
+func ResolveMentions(c *gin.Context) {
+	var req ResolveMentionsMsg
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Names) == 0 {
+		response.Success(c, gin.H{"users": []MentionUserResp{}}, "ok")
+		return
 	}
+	users, err := service.Comments.ResolveMentionUsers(c.Request.Context(), req.Names)
+	if err != nil {
+		apperr.WriteMsg(c, err, "查询失败")
+		return
+	}
+	out := make([]MentionUserResp, 0, len(users))
+	for _, u := range users {
+		if u == nil || u.ID == 0 {
+			continue
+		}
+		out = append(out, MentionUserResp{Name: u.Name, UserID: uint(u.ID)})
+	}
+	response.Success(c, gin.H{"users": out}, "ok")
 }
 
 // EmailAlerter 异步发信，避免 SMTP 握手阻塞 HTTP 响应（评论/回复通知）。
@@ -877,4 +547,11 @@ func EmailAlerter(receiver string, status int, msg string) {
 			fmt.Println("async notify email:", err)
 		}
 	}()
+}
+
+func emailNotifyIfEnabled(receiver *domain.User, status int, msg string) {
+	if receiver == nil || receiver.ID == 0 || receiver.ISEmailNotificationBlocked || receiver.Email == "" {
+		return
+	}
+	EmailAlerter(receiver.Email, status, msg)
 }

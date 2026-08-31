@@ -2,14 +2,16 @@ package middleware
 
 import (
 	"fmt"
+	"loginTest/config"
+	"loginTest/observability"
+	"os"
+	"path"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"github.com/rifflock/lfshook"
 	"github.com/sirupsen/logrus"
-	"loginTest/config"
-	"os"
-	"path"
-	"time"
 )
 
 // 日志记录到文件
@@ -92,14 +94,17 @@ func LoggerToFile() gin.HandlerFunc {
 		// 请求IP
 		clientIP := c.ClientIP()
 
-		// 日志格式
-		logger.WithFields(logrus.Fields{
+		fields := logrus.Fields{
 			"status_code":  statusCode,
 			"latency_time": latencyTime,
 			"client_ip":    clientIP,
 			"req_method":   reqMethod,
 			"req_uri":      reqUri,
-		}).Info()
+		}
+		if reqID := observability.RequestIDFromGin(c); reqID != "" {
+			fields["request_id"] = reqID
+		}
+		logger.WithFields(fields).Info()
 	}
 }
 

@@ -20,11 +20,13 @@ type PostCacheItem struct {
 	Ptext      string `json:"ptext"`
 	LikeNum    int    `json:"like_num"`
 	CommentNum int    `json:"comment_num"`
-	BrowseNum  int    `json:"browse_num"`
-	Photos     string `json:"photos"`
+	BrowseNum  int     `json:"browse_num"`
+	Heat       float64 `json:"heat"`
+	Photos     string  `json:"photos"`
 	Tag        string `json:"tag"`
-	IsPrivate  bool   `json:"is_private"`
-	PostTime   string `json:"post_time"`
+	IsPrivate   bool   `json:"is_private"`
+	IsAnonymous bool   `json:"is_anonymous"`
+	PostTime    string `json:"post_time"`
 }
 
 // UserCacheItem 用户信息缓存结构
@@ -45,17 +47,19 @@ type UserCacheItem struct {
 func (d *PostDetailCacheDTO) ConvertFromModel(post model.Post, user model.User) {
 	// 转换帖子信息
 	d.Post = PostCacheItem{
-		PostID:     uint(post.PostID),
-		UserID:     uint(post.UserID),
-		Title:      post.Title,
-		Ptext:      post.Ptext,
-		LikeNum:    post.LikeNum,
-		CommentNum: post.CommentNum,
-		BrowseNum:  post.BrowseNum,
-		Photos:     post.Photos,
-		Tag:        post.Tag,
-		IsPrivate:  post.IsPrivate,
-		PostTime:   post.PostTime.Format(time.RFC3339), // 时间格式化，无崩溃
+		PostID:      uint(post.PostID),
+		UserID:      uint(post.UserID),
+		Title:       post.Title,
+		Ptext:       post.Ptext,
+		LikeNum:     post.LikeNum,
+		CommentNum:  post.CommentNum,
+		BrowseNum:   post.BrowseNum,
+		Heat:        post.Heat,
+		Photos:      post.Photos,
+		Tag:         post.Tag,
+		IsPrivate:   post.IsPrivate,
+		IsAnonymous: post.IsAnonymous,
+		PostTime:    post.PostTime.Format(time.RFC3339), // 时间格式化，无崩溃
 	}
 
 	// 转换用户信息
@@ -81,17 +85,19 @@ func (d *PostDetailCacheDTO) ConvertToModel() (model.Post, model.User) {
 
 	// 组装 Post model
 	post := model.Post{
-		PostID:     int(d.Post.PostID),
-		UserID:     int(d.Post.UserID),
-		Title:      d.Post.Title,
-		Ptext:      d.Post.Ptext,
-		LikeNum:    d.Post.LikeNum,
-		CommentNum: d.Post.CommentNum,
-		BrowseNum:  d.Post.BrowseNum,
-		Photos:     d.Post.Photos,
-		Tag:        d.Post.Tag,
-		IsPrivate:  d.Post.IsPrivate,
-		PostTime:   postTime,
+		PostID:      int(d.Post.PostID),
+		UserID:      int(d.Post.UserID),
+		Title:       d.Post.Title,
+		Ptext:       d.Post.Ptext,
+		LikeNum:     d.Post.LikeNum,
+		CommentNum:  d.Post.CommentNum,
+		BrowseNum:   d.Post.BrowseNum,
+		Heat:        d.Post.Heat,
+		Photos:      d.Post.Photos,
+		Tag:         d.Post.Tag,
+		IsPrivate:   d.Post.IsPrivate,
+		IsAnonymous: d.Post.IsAnonymous,
+		PostTime:    postTime,
 	}
 
 	// 组装 User model

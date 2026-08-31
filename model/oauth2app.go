@@ -2,9 +2,10 @@ package model
 
 import "time"
 
-// OAuth2应用信息表
+// OAuth2应用信息表（同一 app_id 可有多条，按 redirect_uri / app_secret 区分）
 type OAuth2App struct {
-	AppID       string    `gorm:"primary_key;column:app_id;type:varchar(100)"`
+	ID          int       `gorm:"primaryKey;autoIncrement;column:id"`
+	AppID       string    `gorm:"column:app_id;type:varchar(100);index:idx_oauth2_app_id"`
 	AppName     string    `gorm:"column:app_name;type:varchar(100)"`
 	AppSecret   string    `gorm:"column:app_secret;type:varchar(255)"`
 	AppIcon     string    `gorm:"column:app_icon;type:varchar(255)"`

@@ -11,6 +11,8 @@ import (
 // 创建路由
 
 func CollectRoute(r *gin.Engine) *gin.Engine {
+	r.GET("/health", controller.Health)
+	r.GET("/ready", controller.Ready)
 
 	r.Use(middleware.CORSMiddleware())
 	// 这里把路由分成了三组，其中auth是需要token验证的，也就是需要用户登录
@@ -20,9 +22,10 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth := r.Group("")
 	oauth := r.Group("")
 
-	auth.Use(middleware.AuthMiddleware())
+	auth.Use(middleware.StrictAuthMiddleware())
 	auth.Use(middleware.BloomFilterMiddleware()) // 使用布隆过滤器防止恶意攻击
 	oauth.Use(middleware.OAuthMiddleware())
+	noauth.Use(middleware.OptionalAuthMiddleware())
 
 	//OAuth2认证
 	auth.POST("/api/auth/connect/check", controller.CheckOAuth2App)
@@ -31,6 +34,13 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	oauth.POST("/api/auth/connect/userinfo", controller.GetInfobyOAuth2)
 	//OAuth2授权记录管理
 	auth.GET("/api/auth/connect/records", controller.GetOAuth2AuthRecords)
+
+	// 用户个人访问令牌（PAT，用于 MCP 等对外调用）
+	auth.GET("/api/auth/token/scopes", controller.ListAPITokenScopes)
+	auth.POST("/api/auth/token/create", controller.CreateAPIToken)
+	auth.GET("/api/auth/token/list", controller.ListAPITokens)
+	auth.POST("/api/auth/token/revoke", controller.RevokeAPIToken)
+	auth.POST("/api/auth/token/delete", controller.DeleteAPIToken)
 
 	// 打分专区（独立数据与接口）
 	auth.POST("/api/auth/rating/category/list", controller.RatingCategoryList)
@@ -49,9 +59,22 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", controller.Login)
 	noauth.POST("/api/auth/refresh", controller.RefreshToken)
+
+	// SSO 单点登录（UniSSO）—— 公共入口 + 回调 + 登录/绑定提交
+	noauth.GET("/api/sso/login", controller.SsoLogin)
+	noauth.GET("/api/sso/callback", controller.SsoCallback)
+	noauth.POST("/api/sso/exchange", controller.SsoExchange)
+	noauth.POST("/api/sso/bind", controller.SsoBind)
+	// SSO 已登录态：发起绑定 / 查询状态 / 解绑
+	auth.POST("/api/sso/bind/start", controller.SsoBindStart)
+	auth.GET("/api/sso/status", controller.SsoStatus)
+	auth.POST("/api/sso/unbind", controller.SsoUnbind)
+
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)
+	auth.POST("/api/auth/pinPost", controller.PinPost)
+	auth.POST("/api/auth/unpinPost", controller.UnpinPost)
 	auth.POST("/api/auth/userProfilePosts", controller.UserProfilePosts)
 	auth.POST("/api/auth/userProfilePostNum", controller.UserProfilePostNum)
 	auth.POST("/api/auth/getPostNum", controller.GetPostNum)
@@ -66,6 +89,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/updateCcommentDeny", controller.UpdateCcommentDeny)
 	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
+	auth.POST("/api/auth/toggleWatch", controller.ToggleWatch)
+	auth.POST("/api/auth/resolveMentions", controller.ResolveMentions)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)
 	auth.POST("/api/auth/updatePostPrivacy", controller.UpdatePostPrivacy)
 	auth.POST("/api/auth/deletePost", controller.DeletePost)
@@ -84,6 +109,11 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)
 	auth.POST("/api/auth/searchPostsByTitle", controller.SearchPostsByTitle)
+	auth.POST("/api/auth/lottery/create", controller.LotteryCreate)
+	auth.POST("/api/auth/lottery/detail", controller.LotteryDetail)
+	auth.POST("/api/auth/lottery/participate", controller.LotteryParticipate)
+	auth.POST("/api/auth/lottery/checkParticipated", controller.LotteryCheckParticipated)
+
 	auth.POST("/api/auth/submitVote", controller.SubmitVote)
 	auth.GET("/api/auth/voteRanking", controller.GetVoteRanking)
 	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
@@ -107,14 +137,22 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/gettitle", controller.GetTitle)
 	auth.POST("api/auth/statistics", controller.GetStatistics)
 
-	//获得所有聊天用户列表，并且建立ws链接
+	auth.POST("/api/auth/quest/list", controller.QuestList)
+	auth.POST("/api/auth/quest/detail", controller.QuestDetail)
+	auth.POST("/api/auth/quest/create", controller.QuestCreate)
+	auth.POST("/api/auth/quest/updateStatus", controller.QuestUpdateStatus)
+	auth.GET("/api/auth/quest/me", controller.QuestMe)
+	auth.GET("/api/auth/quest/chatPeers", controller.QuestChatPeers)
+	auth.GET("/api/auth/quest/levelRules", controller.QuestLevelRules)
+	auth.POST("/api/auth/quest/order/accept", controller.QuestOrderAccept)
+	auth.POST("/api/auth/quest/order/submitComplete", controller.QuestOrderSubmitComplete)
+	auth.POST("/api/auth/quest/order/confirmComplete", controller.QuestOrderConfirmComplete)
+
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
-	//点击与某人聊天主页的接口，需要监听用户是否在聊天页面
-	//auth.GET("/api/auth/intoChatView", controller.IntoChatView)
-	//退出与某人聊天主页的接口，需要监听用户是否在聊天页面
-	//auth.POST("/api/auth/leaveChatView", controller.LeaveChatView)
+	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)
 	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
 	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
+	auth.POST("/api/auth/recallChatMessage", controller.RecallChatMessage)
 	//商城板块
 	auth.POST("/api/auth/postProduct", controller.PostProduct)
 	auth.POST("/api/auth/getProducts", controller.GetProducts)
@@ -149,6 +187,36 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/noViolation", controller.NoViolation)
 	adminAuth.POST("/api/auth/violation", controller.Violation)
 	adminAuth.POST("/api/auth/adminPost", controller.AdminPost)
+
+	adminAuth.GET("/api/auth/admin/dashboard", controller.AdminDashboard)
+	adminAuth.POST("/api/auth/adminBrowse", controller.AdminBrowsePosts)
+	adminAuth.POST("/api/auth/adminBrowseNum", controller.AdminBrowsePostNum)
+	adminAuth.POST("/api/auth/admin/getPostDetail", controller.AdminGetPostDetail)
+	adminAuth.POST("/api/auth/adminDeletePost", controller.AdminDeletePostByID)
+	adminAuth.POST("/api/auth/markHQPost", controller.AdminPinPost)
+	adminAuth.POST("/api/auth/removeHQPost", controller.AdminUnpinPost)
+	adminAuth.POST("/api/auth/getKey", controller.AdminListKeys)
+	adminAuth.GET("/api/auth/admin/keys", controller.AdminListKeys)
+	adminAuth.POST("/api/auth/addKey", controller.AdminAddKey)
+	adminAuth.POST("/api/auth/admin/keys/batch", controller.AdminBatchAddKeys)
+	adminAuth.POST("/api/auth/muteUser", controller.AdminMuteUser)
+	adminAuth.POST("/api/auth/release", controller.AdminReleaseUser)
+	adminAuth.GET("/api/auth/admin/muted", controller.AdminListMutedUsers)
+	adminAuth.POST("/api/auth/getfeedback", controller.AdminListFeedback)
+	adminAuth.GET("/api/auth/admin/feedback", controller.AdminListFeedback)
+	adminAuth.POST("/api/auth/admin/feedback/:id", controller.AdminMarkFeedback)
+
+	adminAuth.GET("/api/auth/admin/oauth/apps", controller.AdminListOAuthApps)
+	adminAuth.POST("/api/auth/admin/oauth/apps", controller.AdminCreateOAuthApp)
+	adminAuth.PUT("/api/auth/admin/oauth/apps/:appId", controller.AdminUpdateOAuthApp)
+	adminAuth.DELETE("/api/auth/admin/oauth/apps/:appId", controller.AdminDeleteOAuthApp)
+	adminAuth.GET("/api/auth/admin/oauth/records", controller.AdminListOAuthRecords)
+
+	adminAuth.GET("/api/auth/admin/blog/posts", controller.AdminListBlogPosts)
+	adminAuth.GET("/api/auth/admin/blog/posts/:filename", controller.AdminGetBlogPost)
+	adminAuth.POST("/api/auth/admin/blog/posts", controller.AdminSaveBlogPost)
+	adminAuth.DELETE("/api/auth/admin/blog/posts/:filename", controller.AdminDeleteBlogPost)
+	adminAuth.POST("/api/auth/admin/blog/publish", controller.AdminPublishBlog)
 
 	return r
 }

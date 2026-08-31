@@ -20,5 +20,21 @@ type Post struct {
 	Heat       float64   `gorm:"column:heat;type:double"`
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
 	Tag        string    `gorm:"column:tag;type:varchar(100)"`
-	IsPrivate  bool      `gorm:"column:is_private;type:tinyint(1);default:0"`
+	// PostKind 空=普通帖；bounty/inquiry 为 Quest 帖（不影响既有 browse 逻辑）。
+	PostKind   string   `gorm:"column:post_kind;type:varchar(16);default:''"`
+	QuotePrice *float64 `gorm:"column:quote_price;type:decimal(10,2)"`
+	PriceType  string   `gorm:"column:price_type;type:varchar(16);default:negotiable"`
+	QuotePriceMin *float64 `gorm:"column:quote_price_min;type:decimal(10,2)"`
+	QuotePriceMax *float64 `gorm:"column:quote_price_max;type:decimal(10,2)"`
+	// QuestStatus open|in_progress|pending_confirm|completed|cancelled
+	QuestStatus string `gorm:"column:quest_status;type:varchar(16);default:''"`
+	QuestDeadline *time.Time `gorm:"column:quest_deadline;type:datetime"`
+	// QuestAttachments 须为合法 JSON 或 NULL；空字符串会导致 MySQL Error 3140。
+	QuestAttachments *string `gorm:"column:quest_attachments;type:json"`
+	IsPrivate  bool     `gorm:"column:is_private;type:tinyint(1);default:0"`
+	IsAnonymous bool     `gorm:"column:is_anonymous;type:tinyint(1);default:0"`
+	IsPinned       bool       `gorm:"column:is_pinned;type:tinyint(1);default:0"`
+	// PinnedAt 进入主页置顶队列的时间戳;ListPinned 按此字段先进先出排序。
+	PinnedAt       *time.Time `gorm:"column:pinned_at;type:datetime"`
+	PinnedExpiresAt *time.Time `gorm:"column:pinned_expires_at;type:datetime"`
 }

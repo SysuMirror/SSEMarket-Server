@@ -8,11 +8,11 @@ import (
 	"loginTest/api"
 	"loginTest/common"
 	"loginTest/core"
-	"loginTest/model"
+	"loginTest/domain"
 	"loginTest/response"
+	"loginTest/service"
 	"loginTest/util"
 	"net/http"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -33,12 +33,11 @@ type ChatRespUser struct {
 	UnRead             int    `json:"unRead"`
 	LastMessageAt      string `json:"lastMessageAt"`
 	LastMessagePreview string `json:"lastMessagePreview"`
-}
-
-// 定义心跳结构体
-type HeartBeat struct {
-	UserID int `json:"userID"`
-	Beat   int `json:"beat"`
+	PeerMasked         bool   `json:"peerMasked"`
+	DisplayName        string `json:"displayName"`
+	DisplayAvatar      string `json:"displayAvatar"`
+	ThreadAnonymous    bool   `json:"threadAnonymous"`
+	ConversationKey    string `json:"conversationKey"`
 }
 
 // ws连接节点
@@ -53,8 +52,62 @@ var clientMap sync.Map
 // 获得聊天记录
 
 type ChatHistoryQuery struct {
-	SenderUserID int `form:"senderUserID" binding:"required"` // 绑定 query 参数 senderUserID
-	TargetUserID int `form:"targetUserID" binding:"required"` // 绑定 query 参数 targetUserID
+	SenderUserID    int  `form:"senderUserID" binding:"required"`
+	TargetUserID    int  `form:"targetUserID" binding:"required"`
+	ThreadAnonymous bool `form:"threadAnonymous"`
+}
+
+func chatConversationKey(peerID int, threadAnonymous bool) string {
+	if threadAnonymous {
+		return fmt.Sprintf("%d_anon", peerID)
+	}
+	return fmt.Sprintf("%d_direct", peerID)
+}
+
+// anonMapTTL 控制伪 ID → 真实 ID 映射在 Redis 中的存活时间。
+// 30 天足够覆盖长会话；过期后 buildRelevantUserJSON 会重新写入。
+const anonMapTTL = 30 * 24 * time.Hour
+
+// anonMapKey 构造 Redis 中存储伪 ID → 真实 ID 的键。
+func anonMapKey(viewerID, pseudoID int) string {
+	return fmt.Sprintf("chat:anonmap:v:%d:p:%d", viewerID, pseudoID)
+}
+
+// ensureAnonMapping 计算 (viewerID, realPeerID) 的伪 ID 并在 Redis 中保存双向映射。
+// 返回伪 ID。即使 Redis 写入失败也返回伪 ID（降级：resolveAnonPeerID 会走 DB 回退）。
+func ensureAnonMapping(ctx context.Context, viewerID, realPeerID int) int {
+	pseudoID := util.AnonPeerID(viewerID, realPeerID)
+	_ = core.MyRedis.Set(ctx, anonMapKey(viewerID, pseudoID), realPeerID, anonMapTTL).Err()
+	return pseudoID
+}
+
+// resolveAnonPeerID 尝试将伪 ID 反解为真实 ID。
+// 1) 先查 Redis；2) 未命中时遍历 viewer 的匿名会话重新计算并回填映射。
+// 第二个返回值为 false 表示该 ID 不是伪 ID（发送方视角，直接用真实 ID）。
+func resolveAnonPeerID(ctx context.Context, viewerID, maybePseudoID int) (int, bool) {
+	if !util.IsAnonPeerID(maybePseudoID) {
+		return maybePseudoID, false
+	}
+	if realID, err := core.MyRedis.Get(ctx, anonMapKey(viewerID, maybePseudoID)).Int(); err == nil && realID > 0 {
+		return realID, true
+	}
+	// Redis 未命中：遍历 viewer 的匿名会话，重新计算伪 ID 查找匹配。
+	peers, err := service.Chats.ListRelevantPeers(ctx, viewerID)
+	if err != nil {
+		return maybePseudoID, false
+	}
+	for _, p := range peers {
+		if !p.ThreadAnonymous || p.Peer == nil {
+			continue
+		}
+		realPeerID := p.Peer.ID
+		pseudo := util.AnonPeerID(viewerID, realPeerID)
+		if pseudo == maybePseudoID {
+			_ = core.MyRedis.Set(ctx, anonMapKey(viewerID, pseudo), realPeerID, anonMapTTL).Err()
+			return realPeerID, true
+		}
+	}
+	return maybePseudoID, false
 }
 
 func GetChatHistory(c *gin.Context) {
@@ -63,63 +116,186 @@ func GetChatHistory(c *gin.Context) {
 		response.Fail(c, gin.H{}, "无效的查询参数")
 		return
 	}
-	//校验是否本人操作
 	ctxUser, ok := c.Get("user")
 	if !ok {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
 		return
 	}
-	currentUser, _ := ctxUser.(model.User)
-	if currentUser.UserID != chatQuery.SenderUserID {
+	currentUser, _ := ctxUser.(*domain.User)
+	if currentUser.ID != chatQuery.SenderUserID {
 		response.Fail(c, gin.H{}, "没有权利查看他人聊天记录")
 		return
 	}
-	_ = removeChatViewInRedis(chatQuery.SenderUserID)
 
 	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
 	defer cancel()
-	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
-	//设置redis表示用户存在当前聊天界面
+	threadAnonymous := chatQuery.ThreadAnonymous
+	// 匿名会话里前端持有的 targetUserID 是伪 ID，需反解为真实 ID 供 DB/Redis 使用。
+	// masked=true 表示 viewer 是接收方（被隐藏身份的一方），响应中需把 peer 真实 ID 替换回伪 ID。
+	realPeerID, masked := resolveAnonPeerID(redisCtx, chatQuery.SenderUserID, chatQuery.TargetUserID)
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, realPeerID, threadAnonymous)
 	if err := core.MyRedis.Set(redisCtx, chatViewKey, 1, 24*time.Hour).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
 	}
-	_ = core.MyRedis.SAdd(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
-	//清空redis的未读情况
-	unreadKey := util.GenerateUnreadKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	if err := core.MyRedis.SAdd(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
+	}
+	unreadKey := util.GenerateUnreadKey(chatQuery.SenderUserID, realPeerID, threadAnonymous)
 	if err := core.MyRedis.Del(redisCtx, unreadKey).Err(); err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
 	}
-	_ = core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(chatQuery.SenderUserID), unreadKey).Err()
+	if err := core.MyRedis.SRem(redisCtx, util.GenerateUnreadIndexKey(chatQuery.SenderUserID), unreadKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
+		return
+	}
 
-	//获得聊天信息
-	chatList, err := GetChatHistoryService(chatQuery.SenderUserID, chatQuery.TargetUserID)
+	chatList, err := service.Chats.GetHistory(c.Request.Context(), chatQuery.SenderUserID, realPeerID, threadAnonymous)
 	if err != nil {
 		response.Fail(c, gin.H{}, "获得聊天记录失败，请重试")
-	} else {
-		response.Success(c, gin.H{"chatHistoryList": chatList}, "获得聊天记录成功")
+		return
 	}
+	displayPeerID := chatQuery.TargetUserID
+	if masked {
+		displayPeerID = ensureAnonMapping(redisCtx, chatQuery.SenderUserID, realPeerID)
+	}
+	history := make([]chatHistoryResp, 0, len(chatList))
+	for _, item := range chatList {
+		resp := chatHistoryResp{
+			ChatMsgID:       item.ChatMsgID,
+			TargetUserID:    item.TargetUserID,
+			SenderUserID:    item.SenderUserID,
+			Content:         item.Content,
+			IsAnonymous:     item.IsAnonymous,
+			ThreadAnonymous: item.ThreadAnonymous,
+			IsRecalled:      item.IsRecalled,
+			CreatedAt:       item.CreatedAt,
+		}
+		if masked {
+			if resp.SenderUserID == realPeerID {
+				resp.SenderUserID = displayPeerID
+			}
+			if resp.TargetUserID == realPeerID {
+				resp.TargetUserID = displayPeerID
+			}
+		}
+		history = append(history, resp)
+	}
+	response.Success(c, gin.H{"chatHistoryList": history}, "获得聊天记录成功")
 }
 
-// 获得聊天记录服务
 type chatHistoryResp struct {
-	ChatMsgID    int       `gorm:"column:chatMsgID" json:"chatMsgID"`
-	TargetUserID int       `gorm:"column:targetUserID" json:"targetUserID"`
-	SenderUserID int       `gorm:"column:senderUserID" json:"senderUserID"`
-	Content      string    `gorm:"column:content" json:"content"`
-	CreatedAt    time.Time `gorm:"column:createdAt" json:"createdAt"`
+	ChatMsgID       int       `gorm:"column:chatMsgID" json:"chatMsgID"`
+	TargetUserID    int       `gorm:"column:targetUserID" json:"targetUserID"`
+	SenderUserID    int       `gorm:"column:senderUserID" json:"senderUserID"`
+	Content         string    `gorm:"column:content" json:"content"`
+	IsAnonymous     bool      `json:"isAnonymous"`
+	ThreadAnonymous bool      `json:"threadAnonymous"`
+	IsRecalled      bool      `json:"isRecalled"`
+	CreatedAt       time.Time `gorm:"column:createdAt" json:"createdAt"`
 }
 
-func GetChatHistoryService(userIdTarget int, fromUserId int) ([]chatHistoryResp, error) {
-	var messageList []chatHistoryResp
-	if err := common.DB.Model(model.ChatMsg{}).Where("(targetUserID = ? AND senderUserID = ?) OR (targetUserID = ? AND senderUserID = ?)", userIdTarget, fromUserId, fromUserId, userIdTarget).
-		Order("createdAt").
-		Scan(&messageList).Error; err != nil {
-		return nil, err
+type chatRecallReq struct {
+	ChatMsgID int `json:"chatMsgID" binding:"required"`
+}
+
+type chatRecallPush struct {
+	Type   string          `json:"type"`
+	Recall chatHistoryResp `json:"recall"`
+}
+
+func pushJSONToUser(userID int, payload []byte) {
+	val, ok := clientMap.Load(userID)
+	if !ok {
+		return
 	}
-	return messageList, nil
+	node, ok := val.(*ChatNode)
+	if !ok {
+		return
+	}
+	node.DataQueue <- payload
 }
 
-// 取消用户redis里所有的在线状态
+func broadcastChatRecall(item *domain.ChatHistoryItem) {
+	if item == nil {
+		return
+	}
+	base := chatHistoryResp{
+		ChatMsgID:       item.ChatMsgID,
+		TargetUserID:    item.TargetUserID,
+		SenderUserID:    item.SenderUserID,
+		Content:         item.Content,
+		IsAnonymous:     item.IsAnonymous,
+		ThreadAnonymous: item.ThreadAnonymous,
+		IsRecalled:      item.IsRecalled,
+		CreatedAt:       item.CreatedAt,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// 发送方视角的 payload
+	senderResp := base
+	// 匿名线程里非匿名消息 = 接收方回复的撤回，发送方（接收方）被隐藏身份，
+	// 需把 targetUserID 替换为伪 ID，否则发送方 WS 帧会暴露匿名发起方真实 ID。
+	if item.ThreadAnonymous && !item.IsAnonymous {
+		senderResp.TargetUserID = ensureAnonMapping(ctx, item.SenderUserID, item.TargetUserID)
+	}
+	if senderPayload, err := json.Marshal(chatRecallPush{Type: "recall", Recall: senderResp}); err == nil {
+		pushJSONToUser(item.SenderUserID, senderPayload)
+	}
+
+	// 接收方视角的 payload
+	recipientResp := base
+	// 匿名消息 = 匿名发起方撤回，接收方被隐藏身份，
+	// 需把 senderUserID 替换为伪 ID，否则接收方 WS 帧会暴露匿名发送方真实 ID。
+	if item.ThreadAnonymous && item.IsAnonymous {
+		recipientResp.SenderUserID = ensureAnonMapping(ctx, item.TargetUserID, item.SenderUserID)
+	}
+	if recipientPayload, err := json.Marshal(chatRecallPush{Type: "recall", Recall: recipientResp}); err == nil {
+		pushJSONToUser(item.TargetUserID, recipientPayload)
+	}
+}
+
+func RecallChatMessage(c *gin.Context) {
+	req := chatRecallReq{}
+	if err := c.ShouldBindJSON(&req); err != nil || req.ChatMsgID <= 0 {
+		response.Fail(c, gin.H{}, "无效的请求参数")
+		return
+	}
+	ctxUser, ok := c.Get("user")
+	if !ok {
+		response.Fail(c, gin.H{}, "撤回失败，请重试")
+		return
+	}
+	currentUser, _ := ctxUser.(*domain.User)
+	recalled, err := service.Chats.RecallMessage(c.Request.Context(), currentUser.ID, req.ChatMsgID)
+	if err != nil {
+		response.Fail(c, gin.H{}, err.Error())
+		return
+	}
+	broadcastChatRecall(recalled)
+	// 撤回只能由发送方发起。匿名线程里非匿名消息 = 接收方（调用者）回复的撤回，
+	// 调用方是被隐藏身份的一方，HTTP 响应里的 targetUserID 需替换为伪 ID。
+	resp := chatHistoryResp{
+		ChatMsgID:       recalled.ChatMsgID,
+		TargetUserID:    recalled.TargetUserID,
+		SenderUserID:    recalled.SenderUserID,
+		Content:         recalled.Content,
+		IsAnonymous:     recalled.IsAnonymous,
+		ThreadAnonymous: recalled.ThreadAnonymous,
+		IsRecalled:      recalled.IsRecalled,
+		CreatedAt:       recalled.CreatedAt,
+	}
+	if recalled.ThreadAnonymous && !recalled.IsAnonymous {
+		redisCtx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
+		defer cancel()
+		resp.TargetUserID = ensureAnonMapping(redisCtx, recalled.SenderUserID, recalled.TargetUserID)
+	}
+	response.Success(c, gin.H{"message": resp}, "撤回成功")
+}
+
 func removeChatViewInRedis(userID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
@@ -136,9 +312,7 @@ func removeChatViewInRedis(userID int) error {
 	return core.MyRedis.Del(ctx, indexKey).Err()
 }
 
-// 聊天ws
 func ChatHandler(c *gin.Context) {
-	//获得当前操作用户的userID
 	var userID int
 	userInterface, ok := c.Get("user")
 	if !ok {
@@ -146,55 +320,43 @@ func ChatHandler(c *gin.Context) {
 		_, claim, err := common.ParseToken(tokenString)
 		if err != nil {
 			response.Fail(c, gin.H{}, "请重新登录")
+			return
 		}
 		userID = claim.UserID
 	} else {
-		user := userInterface.(model.User)
-		userID = user.UserID
+		user := userInterface.(*domain.User)
+		userID = user.ID
 	}
-
-	// 避免 Redis 异常阻塞握手：清理逻辑异步执行
-	go removeChatViewInRedis(userID)
 
 	chatFunc(c.Request, c.Writer, userID)
 }
 
-// 处理聊天逻辑
 func chatFunc(request *http.Request, writer http.ResponseWriter, userID int) {
-	//升级http请求为ws
 	conn, err := (&websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
 	}).Upgrade(writer, request, nil)
 	if err != nil {
-		// 打印错误并返回错误信息
 		http.Error(writer, "Failed to upgrade WebSocket connection: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	//	创建chatnode节点并且添加映射
 	node := &ChatNode{
 		conn,
 		make(chan []byte, 200),
 	}
 	clientMap.Store(userID, node)
 
-	//	启动发送消息协程
 	go sendMsg2User(node)
-
-	//	启动接收消息协程
 	go recvMsgFromUser(node, userID)
 
-	//	响应该用户所有的聊天用户信息
-	relevantUserJSON, err := GetRelevantUser(userID)
+	relevantUserJSON, err := buildRelevantUserJSON(request.Context(), userID)
 	if err != nil {
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 	}
 	sendMsg(0, userID, relevantUserJSON)
-
 }
 
-// 将用户消息队列的消息发送给用户
 func sendMsg2User(node *ChatNode) {
 	for {
 		select {
@@ -207,49 +369,39 @@ func sendMsg2User(node *ChatNode) {
 	}
 }
 
-// 从请求读取用户发送的信息，并且将信息派发（考虑到后续群聊功能的实现因此实现dispatch，增加可扩展性）
 func recvMsgFromUser(node *ChatNode, userID int) {
 	defer func() {
-		node.Conn.Close()        // 关闭连接
-		clientMap.Delete(userID) // 移除用户的连接
+		node.Conn.Close()
+		clientMap.Delete(userID)
 	}()
 
-	// 设置读超时时间，比如 60 秒
 	readTimeout := 60 * time.Second
 
 	for {
-		// 设置读超时
 		node.Conn.SetReadDeadline(time.Now().Add(readTimeout))
 
 		_, data, err := node.Conn.ReadMessage()
 		if err != nil {
-			// 检查是否是超时错误
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				//取消用户redis里所有的在线状态
 				removeChatViewInRedis(userID)
-
 				return
 			}
-			// 其他错误，直接退出
 			removeChatViewInRedis(userID)
 			return
 		}
 
-		// 处理心跳
-		heartB := HeartBeat{}
-		if err = json.Unmarshal(data, &heartB); err != nil {
+		var envelope map[string]json.RawMessage
+		if err = json.Unmarshal(data, &envelope); err != nil {
 			errorMsg := []byte(`{"code": 0, "msg": "` + err.Error() + `"}`)
 			node.Conn.WriteMessage(websocket.TextMessage, errorMsg)
 			continue
 		}
 
-		if heartB.UserID != 0 {
-			// 收到心跳包，重新设置读超时
+		if _, isHeartbeat := envelope["beat"]; isHeartbeat {
 			node.Conn.SetReadDeadline(time.Now().Add(readTimeout))
 			continue
 		}
 
-		// 将消息分发给目标用户
 		err = dispatch(data, userID)
 		if err != nil {
 			errorMsg := []byte(`{"code": 0, "msg": "` + err.Error() + `"}`)
@@ -261,9 +413,16 @@ func recvMsgFromUser(node *ChatNode, userID int) {
 	}
 }
 
-// 将信息派发（考虑到后续群聊功能的实现因此实现dispatch，增加可扩展性）
 func dispatch(data []byte, userID int) error {
-	msg := model.ChatMsg{}
+	type wsChatMsg struct {
+		ChatMsgID       int    `json:"chatMsgID"`
+		TargetUserID    int    `json:"targetUserID"`
+		SenderUserID    int    `json:"senderUserID"`
+		Content         string `json:"content"`
+		IsAnonymous     bool   `json:"isAnonymous"`
+		ThreadAnonymous bool   `json:"threadAnonymous"`
+	}
+	msg := wsChatMsg{}
 	err := json.Unmarshal(data, &msg)
 	if msg.ChatMsgID != 0 {
 		return errors.New("非法操作！")
@@ -271,19 +430,33 @@ func dispatch(data []byte, userID int) error {
 	if msg.SenderUserID != userID {
 		return errors.New("非法操作！")
 	}
-
 	if err != nil {
 		return err
 	}
-	// 添加聊天记录到数据库
-	db := common.GetDB()
-	db.Create(&msg)
+	if !msg.ThreadAnonymous && msg.IsAnonymous {
+		msg.ThreadAnonymous = true
+	}
+	if !msg.ThreadAnonymous {
+		msg.IsAnonymous = false
+	}
+
+	ctx := context.Background()
+	// 匿名会话里接收方持有的 targetUserID 是伪 ID，需反解后才能写入 DB。
+	realTargetID, senderMasked := resolveAnonPeerID(ctx, msg.SenderUserID, msg.TargetUserID)
+
+	saved, err := service.Chats.SaveMessage(ctx, msg.ChatMsgID, msg.SenderUserID, realTargetID, msg.Content, msg.IsAnonymous, msg.ThreadAnonymous)
+	if err != nil {
+		return err
+	}
 	chatResp := ChatMsgResp{
-		ChatMsgID:    msg.ChatMsgID,
-		TargetUserID: msg.TargetUserID,
-		SenderUserID: msg.SenderUserID,
-		Content:      msg.Content,
-		CreatedAt:    msg.CreatedAt,
+		ChatMsgID:       saved.ChatMsgID,
+		TargetUserID:    saved.TargetUserID,
+		SenderUserID:    saved.SenderUserID,
+		Content:         saved.Content,
+		IsAnonymous:     saved.IsAnonymous,
+		ThreadAnonymous: saved.ThreadAnonymous,
+		IsRecalled:      saved.IsRecalled,
+		CreatedAt:       saved.CreatedAt,
 	}
 
 	data, err = json.Marshal(chatResp)
@@ -291,206 +464,191 @@ func dispatch(data []byte, userID int) error {
 		return err
 	}
 
-	if msg.SenderUserID != msg.TargetUserID {
-		// 发送消息
-		sendMsg(msg.ChatMsgID, msg.TargetUserID, data)
+	if msg.SenderUserID != realTargetID {
+		// 推送给接收方：sendMsg 内部在计算未读后会把匿名发送方的 ID 替换为伪 ID。
+		sendMsg(saved.ChatMsgID, realTargetID, data)
+		// 回推给发送方：若发送方是被隐藏身份的一方（接收方回复），需把 targetID 换回伪 ID。
+		if senderMasked {
+			echoResp := chatResp
+			echoResp.TargetUserID = msg.TargetUserID
+			if echoData, mErr := json.Marshal(echoResp); mErr == nil {
+				pushJSONToUser(msg.SenderUserID, echoData)
+			} else {
+				pushJSONToUser(msg.SenderUserID, data)
+			}
+		} else {
+			pushJSONToUser(msg.SenderUserID, data)
+		}
 	}
 	return nil
 }
 
 type ChatMsgResp struct {
-	ChatMsgID    int       `json:"chatMsgID"`
-	TargetUserID int       `json:"targetUserID"`
-	SenderUserID int       `json:"senderUserID"`
-	Content      string    `json:"content"`
-	Unread       int       `json:"unread"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ChatMsgID       int       `json:"chatMsgID"`
+	TargetUserID    int       `json:"targetUserID"`
+	SenderUserID    int       `json:"senderUserID"`
+	Content         string    `json:"content"`
+	IsAnonymous     bool      `json:"isAnonymous"`
+	ThreadAnonymous bool      `json:"threadAnonymous"`
+	IsRecalled      bool      `json:"isRecalled"`
+	Unread          int       `json:"unread"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
-// 发送消息到对应用户的消息队列
 func sendMsg(chatMsgID, userID int, msg []byte) {
 	chatMsg := ChatMsgResp{}
-	//查看目标用户是否存在链接，不存在直接返回，否则发送消息
 	val, ok := clientMap.Load(userID)
-	//如果不存在表示一定是消息而不是相关用户的获得
 	if err := json.Unmarshal(msg, &chatMsg); err != nil {
 		return
 	}
 	if !ok {
+		// chatMsgID == 0 表示系统推送（如相关联系人列表），并非真实聊天消息，
+		// 离线时不应计入未读，否则会生成 senderUserID=0 的幽灵未读 key，
+		// 导致前端小红点常驻无法清除。
+		if chatMsgID == 0 {
+			return
+		}
 		Chat_EmailAlerter(chatMsg.TargetUserID, "")
 		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
-		unreadKey := util.GenerateUnreadKey(userID, chatMsg.SenderUserID)
+		unreadKey := util.GenerateUnreadKey(userID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)
 		core.MyRedis.Incr(redisCtx, unreadKey)
 		core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(userID), unreadKey)
 		return
 	}
 	node, ok := val.(*ChatNode)
 	if ok {
-		//如果消息接受者用户确实在ws链接中，判断消息接受者用户是否在聊天界面里
-		//如果是聊天信息而不是返回聊天用户列表
 		if chatMsgID != 0 {
-			//检查接受者是否在聊天界面
 			chatMsg.ChatMsgID = chatMsgID
 			redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
-			err := core.MyRedis.Get(redisCtx, util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID)).Err()
-			if err == redis.Nil { //不在聊天界面,添加未读
-				unreadKey := util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID)
+			err := core.MyRedis.Get(redisCtx, util.GenerateChatViewKey(chatMsg.TargetUserID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)).Err()
+			if err == redis.Nil {
+				unreadKey := util.GenerateUnreadKey(chatMsg.TargetUserID, chatMsg.SenderUserID, chatMsg.ThreadAnonymous)
 				resUnread := core.MyRedis.Incr(redisCtx, unreadKey)
 				core.MyRedis.SAdd(redisCtx, util.GenerateUnreadIndexKey(chatMsg.TargetUserID), unreadKey)
 				unread, _ := resUnread.Result()
 				chatMsg.Unread = int(unread)
 				Chat_EmailAlerter(chatMsg.TargetUserID, "")
 			}
+			// 未读 key 用真实 ID 计算完毕后，把匿名发送方 ID 替换为伪 ID 再推送给接收方，
+			// 防止接收方通过 WS 帧里的 senderUserID 反查发送方真实身份。
+			if chatMsg.ThreadAnonymous && chatMsg.IsAnonymous && chatMsg.SenderUserID != userID {
+				chatMsg.SenderUserID = ensureAnonMapping(redisCtx, userID, chatMsg.SenderUserID)
+			}
 			chatMsgByte, _ := json.Marshal(chatMsg)
 			node.DataQueue <- chatMsgByte
 			return
 		}
-		//如果是聊天列表则返回
 		node.DataQueue <- msg
 	}
 }
 
-// 获得当前用户相关聊天的用户
-func GetRelevantUser(userID int) ([]byte, error) {
-	db := common.GetDB()
-	chatMsgs := []model.ChatMsg{}
-	err := db.Where("senderUserID = ? OR targetUserID = ?", userID, userID).
-		Preload("TargetUser").
-		Preload("SenderUser").
-		Find(&chatMsgs).Error
-
+func buildRelevantUserJSON(ctx context.Context, userID int) ([]byte, error) {
+	peers, err := service.Chats.ListRelevantPeers(ctx, userID)
 	if err != nil {
 		return []byte{}, err
 	}
-	type peerState struct {
-		user        model.User
-		lastAt      time.Time
-		lastPreview string
-	}
-	peerStates := map[int]*peerState{}
-	for _, msg := range chatMsgs {
-		if msg.SenderUserID == msg.TargetUserID {
+
+	relevantRespUsers := make([]ChatRespUser, 0, len(peers))
+	for _, peer := range peers {
+		if peer.Peer == nil {
 			continue
 		}
-		var peer model.User
-		var peerID int
-		if msg.SenderUserID == userID {
-			peer = msg.TargetUser
-			peerID = msg.TargetUserID
-		} else {
-			peer = msg.SenderUser
-			peerID = msg.SenderUserID
-		}
-		if peerID == 0 || peerID == userID {
-			continue
-		}
-		if st, ok := peerStates[peerID]; !ok || msg.CreatedAt.After(st.lastAt) {
-			peerStates[peerID] = &peerState{
-				user:        peer,
-				lastAt:      msg.CreatedAt,
-				lastPreview: msg.Content,
-			}
-		}
-	}
-
-	peerIDs := make([]int, 0, len(peerStates))
-	for id := range peerStates {
-		peerIDs = append(peerIDs, id)
-	}
-	sort.Slice(peerIDs, func(i, j int) bool {
-		return peerStates[peerIDs[i]].lastAt.After(peerStates[peerIDs[j]].lastAt)
-	})
-
-	relevantRespUsers := make([]ChatRespUser, 0, len(peerIDs))
-	for _, peerID := range peerIDs {
-		st := peerStates[peerID]
-		relevantUser := st.user
+		relevantUser := peer.Peer
 		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.UserID)).Result()
+		unreadStr, err := core.MyRedis.Get(redisCtx, util.GenerateUnreadKey(userID, relevantUser.ID, peer.ThreadAnonymous)).Result()
 		cancel()
 		unreadNum, _ := strconv.Atoi(unreadStr)
 		if err != nil && err != redis.Nil {
 			return nil, err
 		}
-		preview := st.lastPreview
+		preview := peer.LastMessagePreview
 		if len([]rune(preview)) > 80 {
 			preview = string([]rune(preview)[:80]) + "…"
 		}
+		displayName, displayAvatar := util.ChatPeerDisplay(relevantUser.Name, relevantUser.AvatarURL, peer.ThreadAnonymous, peer.PeerMasked)
+		email := relevantUser.Email
+		identity := relevantUser.Identity
+		displayUserID := relevantUser.ID
+		convKey := chatConversationKey(relevantUser.ID, peer.ThreadAnonymous)
+		if peer.PeerMasked {
+			email = ""
+			identity = ""
+			// 用伪 ID 替换真实 ID，防止接收方通过 JSON 响应反查匿名发送方身份
+			displayUserID = ensureAnonMapping(ctx, userID, relevantUser.ID)
+			convKey = chatConversationKey(displayUserID, peer.ThreadAnonymous)
+		}
 		relevantRespUsers = append(relevantRespUsers, ChatRespUser{
-			UserID:             relevantUser.UserID,
-			Email:              relevantUser.Email,
-			Name:               relevantUser.Name,
-			AvatarURL:          relevantUser.AvatarURL,
-			Identity:           relevantUser.Identity,
+			UserID:             displayUserID,
+			Email:              email,
+			Name:               displayName,
+			AvatarURL:          displayAvatar,
+			Identity:           identity,
 			Score:              relevantUser.Score,
 			UnRead:             unreadNum,
-			LastMessageAt:      st.lastAt.Format(time.RFC3339),
+			LastMessageAt:      peer.LastMessageAt.Format(time.RFC3339),
 			LastMessagePreview: preview,
+			PeerMasked:         peer.PeerMasked,
+			DisplayName:        displayName,
+			DisplayAvatar:      displayAvatar,
+			ThreadAnonymous:    peer.ThreadAnonymous,
+			ConversationKey:    convKey,
 		})
 	}
-	jsonData, err := json.Marshal(struct {
+	return json.Marshal(struct {
 		RelevantUsers []ChatRespUser `json:"relevantUsers"`
 	}{relevantRespUsers})
-	if err != nil {
-		return []byte{}, err
-	}
-	return jsonData, nil
 }
 
-// 用户进入与某人聊天
-//func IntoChatView(c *gin.Context) {
-//
-//	ctx := context.Background()
-//	core.MyRedis.Set()
-//}
+func GetRelevantUser(userID int) ([]byte, error) {
+	return buildRelevantUserJSON(context.Background(), userID)
+}
 
-// 用户退出与某人的聊天界面
 func LeaveChatView(c *gin.Context) {
 	chatQuery := ChatHistoryQuery{}
-	if err := c.ShouldBind(&chatQuery); err != nil {
+	if err := c.ShouldBindQuery(&chatQuery); err != nil {
 		response.Fail(c, gin.H{}, "无效的查询参数")
 		return
 	}
-	//校验是否本人操作
 	ctxUser, ok := c.Get("user")
 	if !ok {
 		response.Fail(c, gin.H{}, "操作失败，请重试")
 		return
 	}
-	currentUser, _ := ctxUser.(model.User)
-	if currentUser.UserID != chatQuery.SenderUserID {
+	currentUser, _ := ctxUser.(*domain.User)
+	if currentUser.ID != chatQuery.SenderUserID {
 		response.Fail(c, gin.H{}, "非法操作")
 		return
 	}
 
-	//	删除redis存储的键值对
 	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
 	defer cancel()
-	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, chatQuery.TargetUserID)
-	err := core.MyRedis.Del(redisCtx, chatViewKey).Err()
-	_ = core.MyRedis.SRem(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err()
-	if err != nil {
+	realPeerID, _ := resolveAnonPeerID(redisCtx, chatQuery.SenderUserID, chatQuery.TargetUserID)
+	chatViewKey := util.GenerateChatViewKey(chatQuery.SenderUserID, realPeerID, chatQuery.ThreadAnonymous)
+	if err := core.MyRedis.Del(redisCtx, chatViewKey).Err(); err != nil {
 		response.Fail(c, gin.H{}, "操作异常")
-	} else {
-		response.Success(c, gin.H{}, "操作成功")
+		return
 	}
+	if err := core.MyRedis.SRem(redisCtx, util.GenerateChatViewIndexKey(chatQuery.SenderUserID), chatViewKey).Err(); err != nil {
+		response.Fail(c, gin.H{}, "操作异常")
+		return
+	}
+	response.Success(c, gin.H{}, "操作成功")
 }
 
 func GetChatNotice(c *gin.Context) {
 	userIDStr := c.Query("userID")
 	userID, err := strconv.Atoi(userIDStr)
 	userFromCtx, ok := c.Get("user")
-	user := userFromCtx.(model.User)
-	if err != nil || userID == 0 || !ok || user.UserID != userID {
+	user := userFromCtx.(*domain.User)
+	if err != nil || userID == 0 || !ok || user.ID != userID {
 		response.Fail(c, gin.H{}, "操作异常")
 		return
 	}
 
-	var totalUnread int // 总的未读数
+	var totalUnread int
 
-	// 使用未读索引集合，避免全库 SCAN
 	redisCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
 	defer cancel()
 	unreadKeys, err := core.MyRedis.SMembers(redisCtx, util.GenerateUnreadIndexKey(userID)).Result()
@@ -521,17 +679,14 @@ func GetChatNotice(c *gin.Context) {
 		}
 	}
 
-	// 返回累加后的未读消息总数
 	response.Success(c, gin.H{
 		"noticeNum": totalUnread,
 	}, "获取未读消息成功")
 }
 
 func Chat_EmailAlerter(receiverID int, msg string) {
-	db := common.GetDB()
-	var receiver model.User
-	db.Where("userID = ?", receiverID).First(&receiver)
-	if receiver.ISEmailNotificationBlocked || receiver.Email == "" {
+	receiver, err := service.Chats.FindUserByID(context.Background(), receiverID)
+	if err != nil || receiver == nil || receiver.ISEmailNotificationBlocked || receiver.Email == "" {
 		return
 	}
 	emailAddr, body := receiver.Email, msg

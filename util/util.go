@@ -5,7 +5,22 @@ import (
 	"encoding/hex"
 	mathRand "math/rand"
 	"time"
+	"unicode/utf8"
 )
+
+const BrowseContentPreviewRunes = 100
+
+// TruncateRunes 按 Unicode 字符数截断字符串（中文算 1 字）。
+func TruncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 || s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxRunes])
+}
 
 // 工具函数，若注册时没有传名字，生成随机字符串
 func RandomString(n int) string {

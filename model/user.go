@@ -22,4 +22,6 @@ type User struct {
 	ISEmailNotificationBlocked bool      `gorm:"column:is_email_notification_blocked;type:bool"`
 	// HideProfilePosts 为 true 时，其他用户查看个人主页不展示其历史发帖（本人仍可见）
 	HideProfilePosts bool `gorm:"column:hide_profile_posts;type:tinyint(1);default:0"`
+	// UserType market=默认；external=外院（Quest 可发帖）。
+	UserType string `gorm:"column:user_type;type:varchar(16);default:market"`
 }

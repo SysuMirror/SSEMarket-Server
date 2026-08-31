@@ -3,12 +3,14 @@ package controller
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"loginTest/api"
-	"loginTest/common"
-	"loginTest/model"
+	"loginTest/apperr"
+	"loginTest/domain"
 	"loginTest/response"
+	"loginTest/service"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -17,7 +19,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jinzhu/gorm"
 )
 
 const (
@@ -117,42 +118,33 @@ type ResumeResponse struct {
 	CreatedAt   string `json:"createdAt"`
 }
 
-func requireLoginUser(c *gin.Context) (model.User, bool) {
+func requireLoginUser(c *gin.Context) (*domain.User, bool) {
 	userID := GetTokenUserID(c)
 	if userID == 0 {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")
-		return model.User{}, false
+		return nil, false
 	}
-	db := common.GetDB()
-	var user model.User
-	db.Where("userID = ?", userID).First(&user)
-	if user.UserID == 0 {
+	u, err := service.Users.GetByID(c.Request.Context(), userID)
+	if err != nil {
 		response.Response(c, http.StatusUnauthorized, 401, nil, "用户不存在")
-		return model.User{}, false
+		return nil, false
 	}
-	return user, true
+	return u, true
 }
 
-func viewerIsOwner(resume model.Resume, viewer model.User) bool {
-	return resume.UserID == viewer.UserID
+func viewerIsOwnerDomain(resume *domain.Resume, viewer *domain.User) bool {
+	return resume.UserID == viewer.ID
 }
 
-func shouldMaskAnonymous(resume model.Resume, viewer model.User) bool {
-	return resume.IsAnonymous && !viewerIsOwner(resume, viewer)
+func shouldMaskAnonymousDomain(resume *domain.Resume, viewer *domain.User) bool {
+	return resume.IsAnonymous && !viewerIsOwnerDomain(resume, viewer)
 }
 
-// anonymousDisplayFileName 对外展示的文件名，避免真实姓名出现在 URL/界面。
-func anonymousDisplayFileName(original string) string {
-	ext := strings.ToLower(filepath.Ext(original))
-	if ext == "" {
-		return "简历文件"
+func downloadDisplayFileNameDomain(resume *domain.Resume, uploader *domain.User) string {
+	displayName := ""
+	if uploader != nil {
+		displayName = strings.TrimSpace(uploader.Name)
 	}
-	return "简历" + ext
-}
-
-// downloadDisplayFileName 下载保存名：{用户名|匿名用户}-简历.ext
-func downloadDisplayFileName(resume model.Resume, uploader model.User) string {
-	displayName := strings.TrimSpace(uploader.Name)
 	if resume.IsAnonymous {
 		displayName = "匿名用户"
 	}
@@ -165,6 +157,15 @@ func downloadDisplayFileName(resume model.Resume, uploader model.User) string {
 		ext = ".pdf"
 	}
 	return displayName + "-简历" + ext
+}
+
+// anonymousDisplayFileName 对外展示的文件名，避免真实姓名出现在 URL/界面。
+func anonymousDisplayFileName(original string) string {
+	ext := strings.ToLower(filepath.Ext(original))
+	if ext == "" {
+		return "简历文件"
+	}
+	return "简历" + ext
 }
 
 func sanitizeDownloadFileSegment(s string) string {
@@ -182,13 +183,16 @@ func sanitizeDownloadFileSegment(s string) string {
 	return out
 }
 
-func resumeToResponse(r model.Resume, uploader model.User, viewer model.User) ResumeResponse {
-	mask := shouldMaskAnonymous(r, viewer)
-	owner := viewerIsOwner(r, viewer)
+func resumeToResponse(r *domain.Resume, uploader *domain.User, viewer *domain.User) ResumeResponse {
+	mask := shouldMaskAnonymousDomain(r, viewer)
+	owner := viewerIsOwnerDomain(r, viewer)
 
-	uploaderName := uploader.Name
-	uploaderID := uploader.UserID
-	// 对外一律不返回真实文件名，避免原始上传名泄露身份或敏感信息
+	uploaderName := ""
+	uploaderID := 0
+	if uploader != nil {
+		uploaderName = uploader.Name
+		uploaderID = uploader.ID
+	}
 	fileName := anonymousDisplayFileName(r.FileName)
 	if mask {
 		uploaderName = "匿名用户"
@@ -200,7 +204,7 @@ func resumeToResponse(r model.Resume, uploader model.User, viewer model.User) Re
 	canPreview := resumeCanPreview(ext)
 
 	return ResumeResponse{
-		ResumeID:    r.ResumeID,
+		ResumeID:    r.ID,
 		UserID:      uploaderID,
 		Uploader:    uploaderName,
 		Title:       r.Title,
@@ -223,8 +227,28 @@ func newResumeCosKey(ext string) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	// 路径不含 userID，避免 COS URL 泄露上传者身份
 	return fmt.Sprintf("%s%s/%d%s", resumeCOSPrefix, hex.EncodeToString(b), time.Now().UnixNano(), ext), nil
+}
+
+func resumeFilePayloadDomain(resume *domain.Resume, uploader *domain.User, inline bool) (gin.H, error) {
+	var fileName string
+	var attachmentName string
+	if inline {
+		fileName = anonymousDisplayFileName(resume.FileName)
+		attachmentName = ""
+	} else {
+		fileName = downloadDisplayFileNameDomain(resume, uploader)
+		attachmentName = fileName
+	}
+	fileURL, err := resumeAccessURL(resume.CosKey, inline, attachmentName)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{
+		"fileURL":    fileURL,
+		"fileName":   fileName,
+		"canPreview": resumeCanPreview(filepath.Ext(resume.FileName)),
+	}, nil
 }
 
 func resumeAccessURL(cosKey string, inline bool, attachmentFilename string) (string, error) {
@@ -241,11 +265,13 @@ func ResumeUpload(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var count int
-	db.Model(&model.Resume{}).Where("userID = ? AND is_delete = ?", user.UserID, false).Count(&count)
-	if count >= resumeMaxPerUser {
-		response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("每人最多上传%d份简历", resumeMaxPerUser))
+	ctx := c.Request.Context()
+	if err := service.Resumes.CanUpload(ctx, user.ID); err != nil {
+		if errors.Is(err, domain.ErrBadRequest) {
+			response.Response(c, http.StatusBadRequest, 400, nil, fmt.Sprintf("每人最多上传%d份简历", resumeMaxPerUser))
+			return
+		}
+		apperr.Write(c, err)
 		return
 	}
 
@@ -309,9 +335,8 @@ func ResumeUpload(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
-	resume := model.Resume{
-		UserID:      user.UserID,
+	resumeID, err := service.Resumes.Create(c.Request.Context(), domain.ResumeCreateInput{
+		UserID:      user.ID,
 		Title:       title,
 		Description: description,
 		FileName:    safeName,
@@ -319,16 +344,14 @@ func ResumeUpload(c *gin.Context) {
 		FileSize:    file.Size,
 		MimeType:    mimeType,
 		IsAnonymous: isAnonymous,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if err := db.Create(&resume).Error; err != nil {
+	})
+	if err != nil {
 		_ = api.FileDelete(cosKey)
-		response.Response(c, http.StatusInternalServerError, 500, nil, "保存失败")
+		apperr.WriteMsg(c, err, "保存失败")
 		return
 	}
 
-	response.Success(c, gin.H{"resumeID": resume.ResumeID}, "简历上传成功")
+	response.Success(c, gin.H{"resumeID": resumeID}, "简历上传成功")
 }
 
 func isAllowedResumeMime(mimeType, ext string) bool {
@@ -370,43 +393,34 @@ func ResumeList(c *gin.Context) {
 		req.Offset = 0
 	}
 
-	db := common.GetDB()
-	query := db.Model(&model.Resume{}).Where("is_delete = ?", false)
-	if req.Searchsort == "my" {
-		query = query.Where("userID = ?", user.UserID)
+	ctx := c.Request.Context()
+	resumes, err := service.Resumes.List(ctx, domain.ResumeFilter{
+		UserID:     user.ID,
+		SearchInfo: req.Searchinfo,
+		SearchSort: req.Searchsort,
+		Limit:      req.Limit,
+		Offset:     req.Offset,
+	})
+	if err != nil {
+		apperr.Write(c, err)
+		return
 	}
-	if req.Searchinfo != "" {
-		like := "%" + req.Searchinfo + "%"
-		query = query.Where("(title LIKE ? OR description LIKE ? OR file_name LIKE ?)", like, like, like)
-	}
-
-	var resumes []model.Resume
-	query.Order("resumeID DESC").Offset(req.Offset).Limit(req.Limit).Find(&resumes)
 
 	userIDs := make([]int, 0, len(resumes))
 	for _, r := range resumes {
 		userIDs = append(userIDs, r.UserID)
 	}
-	userMap := make(map[int]model.User)
-	if len(userIDs) > 0 {
-		var users []model.User
-		db.Where("userID IN (?)", userIDs).Find(&users)
-		for _, u := range users {
-			userMap[u.UserID] = u
-		}
+	userMap, err := service.Resumes.UploadersByIDs(ctx, userIDs)
+	if err != nil {
+		apperr.Write(c, err)
+		return
 	}
 
 	responses := make([]ResumeResponse, 0, len(resumes))
 	for _, r := range resumes {
-		u := userMap[r.UserID]
-		responses = append(responses, resumeToResponse(r, u, user))
+		responses = append(responses, resumeToResponse(r, userMap[r.UserID], user))
 	}
 	c.JSON(http.StatusOK, responses)
-}
-
-func incrementResumeViewNum(db *gorm.DB, resume *model.Resume) {
-	db.Model(resume).UpdateColumn("view_num", gorm.Expr("view_num + ?", 1))
-	resume.ViewNum++
 }
 
 func ResumeDetail(c *gin.Context) {
@@ -421,45 +435,27 @@ func ResumeDetail(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+	ctx := c.Request.Context()
+	resume, err := service.Resumes.Detail(ctx, req.ResumeID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+			return
+		}
+		apperr.Write(c, err)
 		return
 	}
 
-	incrementResumeViewNum(db, &resume)
-
-	var uploader model.User
-	db.Where("userID = ?", resume.UserID).First(&uploader)
-	c.JSON(http.StatusOK, resumeToResponse(resume, uploader, user))
-}
-
-func resumeFilePayload(resume model.Resume, uploader model.User, viewer model.User, inline bool) (gin.H, error) {
-	var fileName string
-	var attachmentName string
-	if inline {
-		fileName = anonymousDisplayFileName(resume.FileName)
-		attachmentName = ""
-	} else {
-		fileName = downloadDisplayFileName(resume, uploader)
-		attachmentName = fileName
-	}
-	fileURL, err := resumeAccessURL(resume.CosKey, inline, attachmentName)
+	uploaderMap, err := service.Resumes.UploadersByIDs(ctx, []int{resume.UserID})
 	if err != nil {
-		return nil, err
+		apperr.Write(c, err)
+		return
 	}
-	return gin.H{
-		"fileURL":    fileURL,
-		"fileName":   fileName,
-		"canPreview": resumeCanPreview(filepath.Ext(resume.FileName)),
-	}, nil
+	c.JSON(http.StatusOK, resumeToResponse(resume, uploaderMap[resume.UserID], user))
 }
 
 func ResumePreview(c *gin.Context) {
-	user, ok := requireLoginUser(c)
-	if !ok {
+	if _, ok := requireLoginUser(c); !ok {
 		return
 	}
 
@@ -469,11 +465,14 @@ func ResumePreview(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+	ctx := c.Request.Context()
+	resume, err := service.Resumes.GetByID(ctx, req.ResumeID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+			return
+		}
+		apperr.Write(c, err)
 		return
 	}
 
@@ -482,9 +481,8 @@ func ResumePreview(c *gin.Context) {
 		return
 	}
 
-	var uploader model.User
-	db.Where("userID = ?", resume.UserID).First(&uploader)
-	payload, err := resumeFilePayload(resume, uploader, user, true)
+	uploaderMap, _ := service.Resumes.UploadersByIDs(ctx, []int{resume.UserID})
+	payload, err := resumeFilePayloadDomain(resume, uploaderMap[resume.UserID], true)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "获取预览链接失败")
 		return
@@ -504,11 +502,13 @@ func ResumePreviewStream(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", resumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+	resume, err := service.Resumes.GetByID(c.Request.Context(), resumeID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+			return
+		}
+		apperr.Write(c, err)
 		return
 	}
 
@@ -525,7 +525,6 @@ func ResumePreviewStream(c *gin.Context) {
 	}
 	defer body.Close()
 
-	// 预览流不携带 filename，避免微信等内置浏览器误判为下载
 	c.Header("Content-Type", resumeContentType(ext, contentType))
 	c.Header("Content-Disposition", "inline")
 	c.Header("Cache-Control", "private, no-store")
@@ -536,8 +535,7 @@ func ResumePreviewStream(c *gin.Context) {
 }
 
 func ResumeDownload(c *gin.Context) {
-	user, ok := requireLoginUser(c)
-	if !ok {
+	if _, ok := requireLoginUser(c); !ok {
 		return
 	}
 
@@ -547,19 +545,23 @@ func ResumeDownload(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+	ctx := c.Request.Context()
+	resume, err := service.Resumes.GetByID(ctx, req.ResumeID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+			return
+		}
+		apperr.Write(c, err)
 		return
 	}
 
-	var uploader model.User
-	db.Where("userID = ?", resume.UserID).First(&uploader)
-
-	db.Model(&resume).UpdateColumn("download_num", gorm.Expr("download_num + ?", 1))
-	payload, err := resumeFilePayload(resume, uploader, user, false)
+	uploaderMap, _ := service.Resumes.UploadersByIDs(ctx, []int{resume.UserID})
+	if err := service.Resumes.RecordDownload(ctx, req.ResumeID); err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	payload, err := resumeFilePayloadDomain(resume, uploaderMap[resume.UserID], false)
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "获取下载链接失败")
 		return
@@ -588,35 +590,27 @@ func ResumeUpdate(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
-		return
-	}
-	if resume.UserID != user.UserID {
-		response.Response(c, http.StatusForbidden, 403, nil, "无权编辑该简历")
-		return
-	}
-
-	now := time.Now()
-	if err := db.Model(&resume).Updates(map[string]interface{}{
-		"title":       title,
-		"description": description,
-		"updated_at":  now,
-	}).Error; err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "保存失败")
+	ctx := c.Request.Context()
+	resume, err := service.Resumes.Update(ctx, domain.ResumeUpdateInput{
+		ResumeID:    req.ResumeID,
+		UserID:      user.ID,
+		Title:       title,
+		Description: description,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusForbidden, 403, nil, "无权编辑该简历")
+		default:
+			apperr.WriteMsg(c, err, "保存失败")
+		}
 		return
 	}
 
-	resume.Title = title
-	resume.Description = description
-	resume.UpdatedAt = now
-
-	var uploader model.User
-	db.Where("userID = ?", resume.UserID).First(&uploader)
-	c.JSON(http.StatusOK, resumeToResponse(resume, uploader, user))
+	uploaderMap, _ := service.Resumes.UploadersByIDs(ctx, []int{resume.UserID})
+	c.JSON(http.StatusOK, resumeToResponse(resume, uploaderMap[resume.UserID], user))
 }
 
 func ResumeDelete(c *gin.Context) {
@@ -631,19 +625,19 @@ func ResumeDelete(c *gin.Context) {
 		return
 	}
 
-	db := common.GetDB()
-	var resume model.Resume
-	db.Where("resumeID = ? AND is_delete = ?", req.ResumeID, false).First(&resume)
-	if resume.ResumeID == 0 {
-		response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
-		return
-	}
-	if resume.UserID != user.UserID {
-		response.Response(c, http.StatusForbidden, 403, nil, "无权删除该简历")
+	cosKey, err := service.Resumes.Delete(c.Request.Context(), req.ResumeID, user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "简历不存在")
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusForbidden, 403, nil, "无权删除该简历")
+		default:
+			apperr.Write(c, err)
+		}
 		return
 	}
 
-	db.Model(&resume).Update("is_delete", true)
-	_ = api.FileDelete(resume.CosKey)
+	_ = api.FileDelete(cosKey)
 	response.Success(c, nil, "简历已删除")
 }

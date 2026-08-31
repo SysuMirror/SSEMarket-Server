@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jinzhu/gorm"
+	"gorm.io/gorm"
 )
 
 // 仅用于从旧表迁移的一次性结构
@@ -39,14 +39,14 @@ func RunRatingMigration(db *gorm.DB) {
 
 	seedOfficialRatingCategories(db)
 
-	var migrated int
+	var migrated int64
 	db.Model(&model.RatingPost{}).Count(&migrated)
 	if migrated > 0 {
 		recountRatingCategoryPosts(db)
 		return
 	}
 
-	var legacyCount int
+	var legacyCount int64
 	db.Model(&model.Post{}).Where("`partition` = ?", "打分").Count(&legacyCount)
 	if legacyCount == 0 {
 		return
@@ -59,7 +59,7 @@ func RunRatingMigration(db *gorm.DB) {
 }
 
 func seedOfficialRatingCategories(db *gorm.DB) {
-	var n int
+	var n int64
 	db.Model(&model.RatingCategory{}).Count(&n)
 	if n > 0 {
 		return

@@ -16,6 +16,7 @@ const (
 	PrefixPostBrowse      = "post:browse:"       // 帖子浏览列表（home/history/save/rating）
 	PrefixProductList     = "product:list:"      // 商品列表（home/个人商品）
 	PrefixPostBrowseCount = "post:browse:count:" // 帖子浏览数独立Key
+	PrefixUserSession     = "user:session:"       // JWT 用户快照缓存
 )
 
 // GetPostBrowseCountKey 生成帖子浏览数缓存Key（适配ShowDetails函数，postID为int）
@@ -67,6 +68,49 @@ func GetProductListKey(userID int, searchsort, searchinfo string) string {
 		searchinfo = "empty"
 	}
 	return PrefixProductList + fmt.Sprintf("%d:%s:%s", userID, searchsort, searchinfo)
+}
+
+// PublicFeedGenKey 公共 Feed 缓存世代号 Redis Key。
+// 失效时 INCR 此 key，所有带 g{gen} 的旧列表 key 自动作废（无需 scan DEL）。
+const PublicFeedGenKey = PrefixPostBrowse + "public:gen"
+
+// GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（旧方案，已由 PublicFeed 取代，保留兼容清理）。
+func GetHomeBrowsePage1Key() string {
+	return PrefixPostBrowse + "home:page1"
+}
+
+// GetPublicFeedCacheKey 生成公共 Feed 列表缓存 Key（不含 userID）。
+//
+// 示例：post:browse:public:g3:home:part:default:ord:default:off:0:lim:15
+// 维度：世代 gen + searchsort + partition + orderBy + offset + limit。
+func GetPublicFeedCacheKey(filter BrowseFeedKeyInput, generation int64) string {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 15
+	}
+	sort := filter.Searchsort
+	if sort == "" {
+		sort = "home"
+	}
+	partition := filter.Partition
+	if partition == "" {
+		partition = "default"
+	}
+	orderBy := filter.OrderBy
+	if orderBy == "" {
+		orderBy = "default"
+	}
+	return fmt.Sprintf("%spublic:g%d:%s:part:%s:ord:%s:off:%d:lim:%d",
+		PrefixPostBrowse, generation, sort, partition, orderBy, filter.Offset, limit)
+}
+
+// BrowseFeedKeyInput 公共 Feed 缓存 key 的筛选维度（刻意不含 ViewerUserID）。
+type BrowseFeedKeyInput struct {
+	Searchsort string
+	Partition  string
+	OrderBy    string
+	Offset     int
+	Limit      int
 }
 
 // GetRandomExpire 随机过期时间（防缓存雪崩）
