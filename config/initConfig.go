@@ -44,6 +44,7 @@ func InitConfig() {
 	_ = viper.BindEnv("sso.token_url", "SSO_TOKEN_URL")
 	_ = viper.BindEnv("sso.userinfo_url", "SSO_USERINFO_URL")
 	_ = viper.BindEnv("sso.redirect_uri", "SSO_REDIRECT_URI")
+	_ = viper.BindEnv("platform.sm2_public_key", "PLATFORM_SM2_PUBLIC_KEY")
 
 	if err := viper.ReadInConfig(); err != nil {
 		panic(err)
