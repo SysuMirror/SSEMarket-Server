@@ -511,7 +511,7 @@ func GetOAuth2AuthRecords(c *gin.Context) {
 func ValidateEmail(c *gin.Context) {
 	var request requestEmail
 	c.Bind(&request)
-	email := request.Email
+	email := strings.ToLower(strings.TrimSpace(request.Email))
 	mode := request.Mode
 	fmt.Println("email = ", email)
 	fmt.Println("mode = ", mode)

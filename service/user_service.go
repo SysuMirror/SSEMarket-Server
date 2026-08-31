@@ -20,6 +20,7 @@ import (
 	"loginTest/util"
 
 	"github.com/brianvoe/gofakeit"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -160,14 +161,21 @@ func (s *userService) issueTokens(ctx context.Context, u *domain.User) (*domain.
 }
 
 func (s *userService) verifyEmailCode(ctx context.Context, email, valiCode string) error {
-	if core.MyRedis == nil {
+	rds := core.MyRedis
+	if rds == nil {
 		return domain.ErrInternal
 	}
 	codeKey := "vcode:" + email
 	failKey := "vcode_fail:" + email
-	correct, err := core.MyRedis.Get(ctx, codeKey).Result()
+	correct, err := rds.Get(ctx, codeKey).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return domain.ErrInternal
+	}
 	if err != nil || correct != valiCode {
-		failCountStr, _ := core.MyRedis.Get(ctx, failKey).Result()
+		failCountStr, failErr := rds.Get(ctx, failKey).Result()
+		if failErr != nil && !errors.Is(failErr, redis.Nil) {
+			return domain.ErrInternal
+		}
 		failCount := 0
 		if failCountStr != "" {
 			if v, convErr := strconv.Atoi(failCountStr); convErr == nil {
@@ -175,9 +183,13 @@ func (s *userService) verifyEmailCode(ctx context.Context, email, valiCode strin
 			}
 		}
 		failCount++
-		_ = core.MyRedis.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute).Err()
+		if err := rds.Set(ctx, failKey, strconv.Itoa(failCount), 5*time.Minute).Err(); err != nil {
+			return domain.ErrInternal
+		}
 		if failCount >= maxValidateFail {
-			_ = core.MyRedis.Del(ctx, codeKey).Err()
+			if err := rds.Del(ctx, codeKey).Err(); err != nil {
+				return domain.ErrInternal
+			}
 		}
 		return domain.ErrUnauthorized
 	}
@@ -300,7 +312,9 @@ func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInpu
 	if in.UserID <= 0 {
 		return nil, domain.ErrUnauthorized
 	}
-	if !strings.Contains(in.NewEmail, "@") {
+	newEmail := strings.ToLower(strings.TrimSpace(in.NewEmail))
+	at := strings.IndexByte(newEmail, '@')
+	if newEmail == "" || at <= 0 || at != strings.LastIndexByte(newEmail, '@') || at == len(newEmail)-1 {
 		return nil, domain.ErrBadRequest
 	}
 
@@ -308,26 +322,28 @@ func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInpu
 	if err != nil {
 		return nil, err
 	}
-	if u.Email == in.NewEmail {
+	if strings.EqualFold(strings.TrimSpace(u.Email), newEmail) {
 		return nil, domain.ErrBadRequest
 	}
 
-	exists, err := s.users.ExistsByEmail(ctx, in.NewEmail)
+	exists, err := s.users.ExistsByEmail(ctx, newEmail)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
 		return nil, domain.ErrConflict
 	}
-	if err := s.verifyEmailCode(ctx, in.NewEmail, in.ValiCode); err != nil {
+	if err := s.verifyEmailCode(ctx, newEmail, in.ValiCode); err != nil {
 		return nil, err
 	}
-	if err := s.users.UpdateEmailByID(ctx, u.ID, in.NewEmail); err != nil {
+	if err := s.users.UpdateEmailByID(ctx, u.ID, newEmail); err != nil {
 		return nil, err
 	}
 
-	s.clearEmailCode(ctx, in.NewEmail)
-	u.Email = in.NewEmail
+	s.clearEmailCode(ctx, newEmail)
+	InvalidateUserSession(ctx, u.ID)
+	InvalidateUserInfo(u.ID)
+	u.Email = newEmail
 	return u, nil
 }
 

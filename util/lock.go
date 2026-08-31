@@ -38,11 +38,17 @@ func NewLock(key string) *Lock {
 
 // TryLock 尝试加锁（SET NX EX）。
 func (l *Lock) TryLock() bool {
+	if core.MyRedis == nil {
+		return false
+	}
 	ok, err := core.MyRedis.SetNX(lockCtx, l.key, l.value, l.expire).Result()
 	return err == nil && ok
 }
 
 // UnLock 仅当 value 匹配时删除，防止释放他人锁。
 func (l *Lock) UnLock() {
+	if core.MyRedis == nil {
+		return
+	}
 	_ = core.MyRedis.Eval(lockCtx, unlockScript, []string{l.key}, l.value).Err()
 }

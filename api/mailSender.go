@@ -36,18 +36,28 @@ func formVcode(ctx string) (string, string) {
 	return ctx, vcode
 }
 
-func saveVcode(vcode, receiver string) {
+func saveVcode(vcode, receiver string) error {
 	rds := core.MyRedis
+	if rds == nil {
+		return errors.New("验证码服务不可用")
+	}
 	ctx := context.Background()
 	codeKey := "vcode:" + receiver
 	failKey := "vcode_fail:" + receiver
 	_, err := rds.Get(ctx, codeKey).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return fmt.Errorf("检查验证码状态失败: %w", err)
+	}
 	if err == nil {
-		rds.Del(ctx, codeKey)
+		if err := rds.Del(ctx, codeKey).Err(); err != nil {
+			return err
+		}
 	}
 	// 重置失败次数
-	rds.Del(ctx, failKey)
-	rds.Set(ctx, codeKey, vcode, 5*time.Minute)
+	if err := rds.Del(ctx, failKey).Err(); err != nil {
+		return err
+	}
+	return rds.Set(ctx, codeKey, vcode, 5*time.Minute).Err()
 }
 
 func SendEmail(receiver string, status int, msg string) error {
@@ -62,6 +72,9 @@ func SendEmail(receiver string, status int, msg string) error {
 	text := ""
 	if status == 0 {
 		rds := core.MyRedis
+		if rds == nil {
+			return errors.New("验证码服务不可用")
+		}
 		ctx := context.Background()
 		codeKey := "vcode:" + receiver
 		_, err := rds.Get(ctx, codeKey).Result()
@@ -77,7 +90,9 @@ func SendEmail(receiver string, status int, msg string) error {
 		e.Subject = config.ValidateTitle
 		text = config.ValidateText
 		text, vcode := formVcode(text)
-		saveVcode(vcode, receiver)
+		if err := saveVcode(vcode, receiver); err != nil {
+			return fmt.Errorf("保存验证码失败: %w", err)
+		}
 		e.HTML = []byte(text)
 	} else if status == 1 {
 		e.Subject = config.CommentTitle

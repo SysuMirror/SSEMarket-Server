@@ -42,33 +42,41 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 		profile.L2TTL = 30 * time.Minute
 	}
 
-	if data, err := core.LocalCache.Get(key); err == nil {
-		if cv, ok := decodeValue[T](data); ok {
-			if isLogicValid(cv) {
-				observability.RecordCacheAccess("l1", profile.Name, true)
-				return cv.Data, nil
-			}
-			if profile.LogicalExpire {
-				observability.RecordCacheAccess("l1", profile.Name, true)
-				refreshAsync(m, ctx, key, loader, profile)
-				return cv.Data, nil
+	if core.LocalCache != nil {
+		if data, err := core.LocalCache.Get(key); err == nil {
+			if cv, ok := decodeValue[T](data); ok {
+				if isLogicValid(cv) {
+					observability.RecordCacheAccess("l1", profile.Name, true)
+					return cv.Data, nil
+				}
+				if profile.LogicalExpire {
+					observability.RecordCacheAccess("l1", profile.Name, true)
+					refreshAsync(m, ctx, key, loader, profile)
+					return cv.Data, nil
+				}
 			}
 		}
 	}
 	observability.RecordCacheAccess("l1", profile.Name, false)
 
-	if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
-		if cv, ok := decodeValue[T](redisData); ok {
-			if isLogicValid(cv) {
-				observability.RecordCacheAccess("l2", profile.Name, true)
-				_ = core.LocalCache.Set(key, redisData)
-				return cv.Data, nil
-			}
-			if profile.LogicalExpire {
-				observability.RecordCacheAccess("l2", profile.Name, true)
-				_ = core.LocalCache.Set(key, redisData)
-				refreshAsync(m, ctx, key, loader, profile)
-				return cv.Data, nil
+	if core.MyRedis != nil {
+		if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
+			if cv, ok := decodeValue[T](redisData); ok {
+				if isLogicValid(cv) {
+					observability.RecordCacheAccess("l2", profile.Name, true)
+					if core.LocalCache != nil {
+						_ = core.LocalCache.Set(key, redisData)
+					}
+					return cv.Data, nil
+				}
+				if profile.LogicalExpire {
+					observability.RecordCacheAccess("l2", profile.Name, true)
+					if core.LocalCache != nil {
+						_ = core.LocalCache.Set(key, redisData)
+					}
+					refreshAsync(m, ctx, key, loader, profile)
+					return cv.Data, nil
+				}
 			}
 		}
 	}
@@ -76,31 +84,39 @@ func getAside[T any](m *Manager, ctx context.Context, key string, loader func() 
 
 	// 防击穿：singleflight 合并进程内并发回源；Redis 互斥锁供多实例部署时跨进程互斥。
 	lock := util.NewLock("lock:" + key)
-	acquired := lock.TryLock()
+	acquired := core.MyRedis != nil && lock.TryLock()
 	if !acquired {
 		time.Sleep(50 * time.Millisecond)
-		if data, err := core.LocalCache.Get(key); err == nil {
-			if cv, ok := decodeValue[T](data); ok && (isLogicValid(cv) || profile.LogicalExpire) {
-				if profile.LogicalExpire && !isLogicValid(cv) {
-					refreshAsync(m, ctx, key, loader, profile)
+		if core.LocalCache != nil {
+			if data, err := core.LocalCache.Get(key); err == nil {
+				if cv, ok := decodeValue[T](data); ok && (isLogicValid(cv) || profile.LogicalExpire) {
+					if profile.LogicalExpire && !isLogicValid(cv) {
+						refreshAsync(m, ctx, key, loader, profile)
+					}
+					return cv.Data, nil
 				}
-				return cv.Data, nil
 			}
 		}
-		if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
-			if cv, ok := decodeValue[T](redisData); ok && (isLogicValid(cv) || profile.LogicalExpire) {
-				_ = core.LocalCache.Set(key, redisData)
-				if profile.LogicalExpire && !isLogicValid(cv) {
-					refreshAsync(m, ctx, key, loader, profile)
+		if core.MyRedis != nil {
+			if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
+				if cv, ok := decodeValue[T](redisData); ok && (isLogicValid(cv) || profile.LogicalExpire) {
+					if core.LocalCache != nil {
+						_ = core.LocalCache.Set(key, redisData)
+					}
+					if profile.LogicalExpire && !isLogicValid(cv) {
+						refreshAsync(m, ctx, key, loader, profile)
+					}
+					return cv.Data, nil
 				}
-				return cv.Data, nil
 			}
 		}
 	} else {
 		defer lock.UnLock()
 		if redisData, err := core.MyRedis.Get(ctx, key).Bytes(); err == nil {
 			if cv, ok := decodeValue[T](redisData); ok && isLogicValid(cv) {
-				_ = core.LocalCache.Set(key, redisData)
+				if core.LocalCache != nil {
+					_ = core.LocalCache.Set(key, redisData)
+				}
 				return cv.Data, nil
 			}
 		}
@@ -147,8 +163,12 @@ func setBothLevels[T any](ctx context.Context, key string, data T, profile Profi
 	if err != nil {
 		return
 	}
-	_ = core.MyRedis.Set(ctx, key, raw, util.GetRandomExpire(profile.L2TTL)).Err()
-	_ = core.LocalCache.Set(key, raw)
+	if core.MyRedis != nil {
+		_ = core.MyRedis.Set(ctx, key, raw, util.GetRandomExpire(profile.L2TTL)).Err()
+	}
+	if core.LocalCache != nil {
+		_ = core.LocalCache.Set(key, raw)
+	}
 }
 
 // Invalidate 删除 L1 + L2 缓存。
@@ -158,8 +178,12 @@ func Invalidate(keys ...string) {
 	}
 	ctx := context.Background()
 	for _, key := range keys {
-		core.LocalCache.Delete(key)
-		core.MyRedis.Del(ctx, key)
+		if core.LocalCache != nil {
+			core.LocalCache.Delete(key)
+		}
+		if core.MyRedis != nil {
+			_ = core.MyRedis.Del(ctx, key).Err()
+		}
 		log.Printf("[cache] invalidated key=%s", key)
 	}
 }
