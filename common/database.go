@@ -42,6 +42,7 @@ func InitDB() *gorm.DB {
 	log.Printf("[db] pool max_open=%d max_idle=%d conn_max_lifetime=%s", maxOpen, maxIdle, connLifetime)
 
 	db.AutoMigrate(&model.User{})
+	db.AutoMigrate(&model.UsedEmail{})
 	db.AutoMigrate(&model.Post{})
 	db.AutoMigrate(&model.Plike{})
 	db.AutoMigrate(&model.Psave{})

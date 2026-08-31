@@ -11,6 +11,7 @@ import (
 	"loginTest/repository"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type userRepository struct {
@@ -154,8 +155,47 @@ func (r *userRepository) SoftDeleteAccount(ctx context.Context, userID int) erro
 	}).Error
 }
 
-func (r *userRepository) UpdateEmailByID(ctx context.Context, userID int, email string) error {
-	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("email", email).Error
+func (r *userRepository) UpdateEmailWithHistory(ctx context.Context, userID int, oldEmail, newEmail string) error {
+	return r.session(ctx).Transaction(func(tx *gorm.DB) error {
+		// 锁住用户行，避免同一用户的并发改邮箱产生重复历史记录或覆盖更新。
+		var current model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("userID = ?", userID).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(current.Email), strings.TrimSpace(oldEmail)) {
+			return domain.ErrConflict
+		}
+
+		historyEmail := strings.ToLower(strings.TrimSpace(oldEmail))
+		if historyEmail != "" {
+			var history model.UsedEmail
+			err := tx.Where("userID = ? AND email = ?", userID, historyEmail).First(&history).Error
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				if err := tx.Create(&model.UsedEmail{
+					UserID:  userID,
+					Email:   historyEmail,
+					Created: time.Now(),
+				}).Error; err != nil {
+					return err
+				}
+			case err != nil:
+				return err
+			}
+		}
+
+		result := tx.Model(&model.User{}).Where("userID = ?", userID).Update("email", newEmail)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrNotFound
+		}
+		return nil
+	})
 }
 
 func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedPassword string) error {

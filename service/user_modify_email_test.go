@@ -32,8 +32,10 @@ type modifyEmailRepository struct {
 	existsErr  error
 	updateErr  error
 	updateID   int
+	updateOld  string
 	updateMail string
 	updateN    int
+	history    []string
 }
 
 func (r *modifyEmailRepository) FindByID(context.Context, int) (*domain.User, error) {
@@ -50,10 +52,14 @@ func (r *modifyEmailRepository) ExistsByEmail(context.Context, string) (bool, er
 	return r.exists, r.existsErr
 }
 
-func (r *modifyEmailRepository) UpdateEmailByID(_ context.Context, userID int, email string) error {
+func (r *modifyEmailRepository) UpdateEmailWithHistory(_ context.Context, userID int, oldEmail, email string) error {
 	r.updateN++
 	r.updateID = userID
+	r.updateOld = oldEmail
 	r.updateMail = email
+	if r.updateErr == nil && strings.TrimSpace(oldEmail) != "" {
+		r.history = append(r.history, strings.ToLower(strings.TrimSpace(oldEmail)))
+	}
 	return r.updateErr
 }
 
@@ -194,7 +200,7 @@ func TestModifyEmailRejectsInvalidInputBeforeRedis(t *testing.T) {
 				t.Fatalf("ModifyEmail error = %v, want %v", err, tt.want)
 			}
 			if repo.updateN != 0 {
-				t.Fatalf("UpdateEmailByID called %d times", repo.updateN)
+				t.Fatalf("UpdateEmailWithHistory called %d times", repo.updateN)
 			}
 		})
 	}
@@ -242,7 +248,7 @@ func TestModifyEmailRedisUnavailable(t *testing.T) {
 		t.Fatalf("Redis-unavailable error = %v, want ErrInternal", err)
 	}
 	if repo.updateN != 0 {
-		t.Fatalf("UpdateEmailByID called %d times", repo.updateN)
+		t.Fatalf("UpdateEmailWithHistory called %d times", repo.updateN)
 	}
 }
 
@@ -257,7 +263,7 @@ func TestModifyEmailRejectsExistingEmailAndBadCode(t *testing.T) {
 		t.Fatalf("existing email error = %v, want ErrConflict", err)
 	}
 	if repo.updateN != 0 {
-		t.Fatalf("UpdateEmailByID called %d times for existing email", repo.updateN)
+		t.Fatalf("UpdateEmailWithHistory called %d times for existing email", repo.updateN)
 	}
 
 	repo.exists = false
@@ -277,7 +283,7 @@ func TestModifyEmailRejectsExistingEmailAndBadCode(t *testing.T) {
 		t.Fatal("verification code remains after five failed attempts")
 	}
 	if repo.updateN != 0 {
-		t.Fatalf("UpdateEmailByID called %d times for bad code", repo.updateN)
+		t.Fatalf("UpdateEmailWithHistory called %d times for bad code", repo.updateN)
 	}
 }
 
@@ -299,8 +305,11 @@ func TestModifyEmailSuccessNormalizesAndInvalidatesCaches(t *testing.T) {
 	if got != user || got.Email != "new@example.com" {
 		t.Fatalf("returned user = %+v, want normalized email", got)
 	}
-	if repo.updateN != 1 || repo.updateID != 7 || repo.updateMail != "new@example.com" {
-		t.Fatalf("update = (%d, %d, %q), want (1, 7, new@example.com)", repo.updateN, repo.updateID, repo.updateMail)
+	if repo.updateN != 1 || repo.updateID != 7 || repo.updateOld != "old@example.com" || repo.updateMail != "new@example.com" {
+		t.Fatalf("update = (%d, %d, %q, %q), want (1, 7, old@example.com, new@example.com)", repo.updateN, repo.updateID, repo.updateOld, repo.updateMail)
+	}
+	if len(repo.history) != 1 || repo.history[0] != "old@example.com" {
+		t.Fatalf("history = %v, want [old@example.com]", repo.history)
 	}
 
 	store.mu.Lock()
@@ -330,11 +339,14 @@ func TestModifyEmailDatabaseUpdateFailureKeepsVerificationCode(t *testing.T) {
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, updateErr) {
-		t.Fatalf("UpdateEmailByID error = %v, want %v", err, updateErr)
+		t.Fatalf("UpdateEmailWithHistory error = %v, want %v", err, updateErr)
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if _, ok := store.values["vcode:new@example.com"]; !ok {
 		t.Fatal("verification code was cleared after database update failure")
+	}
+	if len(repo.history) != 0 {
+		t.Fatalf("history = %v, want no history after update failure", repo.history)
 	}
 }

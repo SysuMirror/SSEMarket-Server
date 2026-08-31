@@ -336,7 +336,7 @@ func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInpu
 	if err := s.verifyEmailCode(ctx, newEmail, in.ValiCode); err != nil {
 		return nil, err
 	}
-	if err := s.users.UpdateEmailByID(ctx, u.ID, newEmail); err != nil {
+	if err := s.users.UpdateEmailWithHistory(ctx, u.ID, u.Email, newEmail); err != nil {
 		return nil, err
 	}
 
