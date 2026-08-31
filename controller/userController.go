@@ -298,6 +298,8 @@ func ModifyEmail(c *gin.Context) {
 			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "新邮箱不符合要求或与原邮箱相同")
 		case errors.Is(err, domain.ErrConflict):
 			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱已存在")
+		case errors.Is(err, domain.ErrEmailUsed):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "不可使用曾用邮箱")
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
 		case errors.Is(err, domain.ErrStale):
@@ -831,27 +833,27 @@ func GetStatistics(c *gin.Context) {
 		Score:     stats.MaxSayUser.Score,
 	}
 	statistics := gin.H{
-		"name":             stats.Name,
-		"intro":            stats.Intro,
-		"score":            stats.Score,
-		"avatarUrl":        stats.AvatarURL,
-		"durationTime":     stats.DurationTime,
-		"totalPostCnt":     stats.TotalPostCnt,
-		"totalPostLikeNum": stats.TotalPostLikeNum,
-		"thisYearPostCnt":  stats.ThisYearPostCnt,
-		"thisYearLikeNum":  stats.ThisYearLikeNum,
-		"maxLikeNum":       stats.MaxLikeNum,
-		"maxBrowseNum":     stats.MaxBrowseNum,
-		"maxCommentNum":    stats.MaxCommentNum,
-		"pCommentCnt":      stats.PCommentCnt,
-		"pCommentLikeNum":  stats.PCommentLikeNum,
-		"ccommentCnt":      stats.CcommentCnt,
-		"ccommentLikeNum":  stats.CcommentLikeNum,
-		"beSavedCount":     stats.BeSavedCount,
-		"beCommentedCount": stats.BeCommentedCount,
-		"repliedCount":     stats.RepliedCount,
-		"savedCount":       stats.SavedCount,
-		"chatCount":        stats.ChatCount,
+		"name":              stats.Name,
+		"intro":             stats.Intro,
+		"score":             stats.Score,
+		"avatarUrl":         stats.AvatarURL,
+		"durationTime":      stats.DurationTime,
+		"totalPostCnt":      stats.TotalPostCnt,
+		"totalPostLikeNum":  stats.TotalPostLikeNum,
+		"thisYearPostCnt":   stats.ThisYearPostCnt,
+		"thisYearLikeNum":   stats.ThisYearLikeNum,
+		"maxLikeNum":        stats.MaxLikeNum,
+		"maxBrowseNum":      stats.MaxBrowseNum,
+		"maxCommentNum":     stats.MaxCommentNum,
+		"pCommentCnt":       stats.PCommentCnt,
+		"pCommentLikeNum":   stats.PCommentLikeNum,
+		"ccommentCnt":       stats.CcommentCnt,
+		"ccommentLikeNum":   stats.CcommentLikeNum,
+		"beSavedCount":      stats.BeSavedCount,
+		"beCommentedCount":  stats.BeCommentedCount,
+		"repliedCount":      stats.RepliedCount,
+		"savedCount":        stats.SavedCount,
+		"chatCount":         stats.ChatCount,
 		"relevantRespUsers": relevantRespUsers,
 		"maxSayUser":        maxSayUser,
 		"maxSayUserCnt":     stats.MaxSayUserCnt,

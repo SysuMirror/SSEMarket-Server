@@ -87,6 +87,15 @@ func (r *userRepository) ExistsByPhone(ctx context.Context, phone string) (bool,
 	return n > 0, err
 }
 
+// ExistsUsedEmail 判断邮箱是否在该用户的历史曾用邮箱中。
+func (r *userRepository) ExistsUsedEmail(ctx context.Context, userID int, email string) (bool, error) {
+	var n int64
+	err := r.session(ctx).Model(&model.UsedEmail{}).
+		Where("userID = ? AND email = ?", userID, email).
+		Count(&n).Error
+	return n > 0, err
+}
+
 func (r *userRepository) Create(ctx context.Context, name, phone, email, hashedPassword string) (*domain.User, error) {
 	user := model.User{
 		Name:     name,
@@ -149,10 +158,10 @@ func (r *userRepository) Update(ctx context.Context, u *domain.User) error {
 
 func (r *userRepository) SoftDeleteAccount(ctx context.Context, userID int) error {
 	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Updates(map[string]interface{}{
-		"name":       "用户已注销",
-		"phone":      "0",
-		"email":      "",
-		"AvatarURL":  "",
+		"name":      "用户已注销",
+		"phone":     "0",
+		"email":     "",
+		"AvatarURL": "",
 	}).Error
 }
 
@@ -518,7 +527,7 @@ func (r *userRepository) ListUserAPITokens(ctx context.Context, userID, offset, 
 			Scopes:     rec.Scopes,
 			LastUsedAt: rec.LastUsedAt,
 			IsActive:   rec.IsActive,
-			CreatedAt:   rec.CreatedAt,
+			CreatedAt:  rec.CreatedAt,
 		})
 	}
 	return out, nil

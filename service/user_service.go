@@ -336,6 +336,13 @@ func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInpu
 	if exists {
 		return nil, domain.ErrConflict
 	}
+	used, err := s.users.ExistsUsedEmail(ctx, u.ID, newEmail)
+	if err != nil {
+		return nil, err
+	}
+	if used {
+		return nil, domain.ErrEmailUsed
+	}
 	if err := s.verifyEmailCode(ctx, newEmail, in.ValiCode); err != nil {
 		return nil, err
 	}
@@ -722,10 +729,10 @@ var apiTokenScopes = []domain.UserAPITokenScope{
 }
 
 const (
-	apiTokenPrefix       = "sk_xq_"     // token 明文前缀，便于识别
-	apiTokenRandomLen    = 32           // 随机部分字节数；hex 后 64 字符
-	apiTokenMaxPerUser   = 10           // 每个用户最多 10 个活跃 PAT
-	apiTokenPrefixShow   = 8            // 前缀展示长度（含 sk_xq_）
+	apiTokenPrefix       = "sk_xq_" // token 明文前缀，便于识别
+	apiTokenRandomLen    = 32       // 随机部分字节数；hex 后 64 字符
+	apiTokenMaxPerUser   = 10       // 每个用户最多 10 个活跃 PAT
+	apiTokenPrefixShow   = 8        // 前缀展示长度（含 sk_xq_）
 	apiTokenDefaultPage  = 1
 	apiTokenDefaultLimit = 20
 )

@@ -30,6 +30,8 @@ type modifyEmailRepository struct {
 	findErr    error
 	exists     bool
 	existsErr  error
+	usedEmail  bool
+	usedErr    error
 	updateErr  error
 	updateID   int
 	updateOld  string
@@ -50,6 +52,10 @@ func (r *modifyEmailRepository) FindByID(context.Context, int) (*domain.User, er
 
 func (r *modifyEmailRepository) ExistsByEmail(context.Context, string) (bool, error) {
 	return r.exists, r.existsErr
+}
+
+func (r *modifyEmailRepository) ExistsUsedEmail(context.Context, int, string) (bool, error) {
+	return r.usedEmail, r.usedErr
 }
 
 func (r *modifyEmailRepository) UpdateEmailWithHistory(_ context.Context, userID int, oldEmail, email string) error {
@@ -235,6 +241,15 @@ func TestModifyEmailPropagatesRepositoryErrors(t *testing.T) {
 	if !errors.Is(err, existsErr) {
 		t.Fatalf("ExistsByEmail error = %v, want %v", err, existsErr)
 	}
+
+	usedErr := errors.New("used failed")
+	repo = &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}, usedErr: usedErr}
+	_, err = service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
+	})
+	if !errors.Is(err, usedErr) {
+		t.Fatalf("ExistsUsedEmail error = %v, want %v", err, usedErr)
+	}
 }
 
 func TestModifyEmailRedisUnavailable(t *testing.T) {
@@ -285,6 +300,22 @@ func TestModifyEmailRejectsExistingEmailAndBadCode(t *testing.T) {
 	}
 	if repo.updateN != 0 {
 		t.Fatalf("UpdateEmailWithHistory called %d times for bad code", repo.updateN)
+	}
+}
+
+func TestModifyEmailRejectsPreviouslyUsedEmail(t *testing.T) {
+	repo := &modifyEmailRepository{
+		user:      &domain.User{ID: 7, Email: "current@example.com"},
+		usedEmail: true,
+	}
+	_, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+		UserID: 7, NewEmail: "former@example.com", ValiCode: "123456",
+	})
+	if !errors.Is(err, domain.ErrEmailUsed) {
+		t.Fatalf("previously used email error = %v, want ErrEmailUsed", err)
+	}
+	if repo.updateN != 0 {
+		t.Fatalf("UpdateEmailWithHistory called %d times for previously used email", repo.updateN)
 	}
 }
 
