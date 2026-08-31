@@ -19,6 +19,7 @@ type UserRepository interface {
 	Create(ctx context.Context, name, phone, email, hashedPassword string) (*domain.User, error)
 	Update(ctx context.Context, u *domain.User) error
 	SoftDeleteAccount(ctx context.Context, userID int) error
+	UpdateEmailByID(ctx context.Context, userID int, email string) error
 	UpdatePassword(ctx context.Context, userID int, hashedPassword string) error
 	UpdateAvatarURL(ctx context.Context, userID int, avatarURL string) error
 	ToggleEmailNotificationBlocked(ctx context.Context, userID int) error

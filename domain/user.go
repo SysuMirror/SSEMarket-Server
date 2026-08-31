@@ -33,6 +33,14 @@ type ModifyPasswordInput struct {
 	ValiCode string
 }
 
+// ModifyEmailInput 修改邮箱入参。
+// UserID 来自登录态，服务层不会信任客户端传入的旧邮箱。
+type ModifyEmailInput struct {
+	UserID   int
+	NewEmail string
+	ValiCode string
+}
+
 // UpdateUserInput 更新用户信息入参。
 type UpdateUserInput struct {
 	UserID           int

@@ -296,6 +296,41 @@ func (s *userService) ModifyPassword(ctx context.Context, in domain.ModifyPasswo
 	return u, nil
 }
 
+func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInput) (*domain.User, error) {
+	if in.UserID <= 0 {
+		return nil, domain.ErrUnauthorized
+	}
+	if !strings.Contains(in.NewEmail, "@") {
+		return nil, domain.ErrBadRequest
+	}
+
+	u, err := s.users.FindByID(ctx, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if u.Email == in.NewEmail {
+		return nil, domain.ErrBadRequest
+	}
+
+	exists, err := s.users.ExistsByEmail(ctx, in.NewEmail)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, domain.ErrConflict
+	}
+	if err := s.verifyEmailCode(ctx, in.NewEmail, in.ValiCode); err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateEmailByID(ctx, u.ID, in.NewEmail); err != nil {
+		return nil, err
+	}
+
+	s.clearEmailCode(ctx, in.NewEmail)
+	u.Email = in.NewEmail
+	return u, nil
+}
+
 func (s *userService) CheckOAuth2App(ctx context.Context, appID string) (*domain.OAuth2App, error) {
 	return s.users.FindActiveOAuth2App(ctx, appID)
 }

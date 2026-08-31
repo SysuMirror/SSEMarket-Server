@@ -47,6 +47,7 @@ type UserService interface {
 	IdentityValidate(ctx context.Context, email, valiCode string) error
 	RefreshToken(ctx context.Context, refreshToken string) (*domain.AuthTokens, error)
 	ModifyPassword(ctx context.Context, in domain.ModifyPasswordInput) (*domain.User, error)
+	ModifyEmail(ctx context.Context, in domain.ModifyEmailInput) (*domain.User, error)
 	CheckOAuth2App(ctx context.Context, appID string) (*domain.OAuth2App, error)
 	AuthorizeOAuth2App(ctx context.Context, in domain.OAuth2AuthorizeInput) (string, error)
 	GetTokenByOAuth2(ctx context.Context, in domain.OAuth2TokenInput) (*domain.OAuth2TokenResult, error)

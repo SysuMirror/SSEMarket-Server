@@ -154,6 +154,10 @@ func (r *userRepository) SoftDeleteAccount(ctx context.Context, userID int) erro
 	}).Error
 }
 
+func (r *userRepository) UpdateEmailByID(ctx context.Context, userID int, email string) error {
+	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("email", email).Error
+}
+
 func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedPassword string) error {
 	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("password", hashedPassword).Error
 }
