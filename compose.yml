@@ -249,6 +249,7 @@ services:
       - 443:443
     volumes:
       - /root/SSE_Market/nginx_proxy/nginx.conf:/etc/nginx/custom.conf
+      - /root/SSE_Market/nginx_proxy/sdpy-deploy.conf:/etc/nginx/sdpy-deploy.conf:ro
       - /root/SSE_Market/certbot/www:/var/www/certbot
       - /root/SSE_Market/Nginx:/etc/letsencrypt/
       - /root/SSE_Market/sse_market_mobile/dist:/usr/share/nginx/mb
@@ -264,6 +265,7 @@ services:
       - /root/SSE_Market/iWiki/web:/usr/share/nginx/iwiki
       - /root/SSE_Market/sse/ces/web/dist:/usr/share/nginx/ces
       - /root/SSE_Market/sse-sdpy/web:/usr/share/nginx/sdpy:ro
+      - /root/SSE_Market/sse-sdpy/web-deploy:/usr/share/nginx/sdpy-deploy:ro
       - /root/SSE_Market/sse-sdpy/api/data/nginx/modules.conf:/etc/nginx/sdpy-modules.conf:ro
       - /root/SSE_Market/sse-sdpy/api/data/nginx/modules-hosts.conf:/etc/nginx/sdpy-modules-hosts.conf:ro
   # certbot 不在 compose 中常驻；续期见 /root/SSE_Market/certbot-renew.sh

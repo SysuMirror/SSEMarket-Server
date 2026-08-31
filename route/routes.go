@@ -143,10 +143,6 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/quest/updateStatus", controller.QuestUpdateStatus)
 	auth.GET("/api/auth/quest/me", controller.QuestMe)
 	auth.GET("/api/auth/quest/chatPeers", controller.QuestChatPeers)
-	auth.GET("/api/auth/quest/levelRules", controller.QuestLevelRules)
-	auth.POST("/api/auth/quest/order/accept", controller.QuestOrderAccept)
-	auth.POST("/api/auth/quest/order/submitComplete", controller.QuestOrderSubmitComplete)
-	auth.POST("/api/auth/quest/order/confirmComplete", controller.QuestOrderConfirmComplete)
 
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
 	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)
@@ -217,6 +213,12 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/admin/blog/posts", controller.AdminSaveBlogPost)
 	adminAuth.DELETE("/api/auth/admin/blog/posts/:filename", controller.AdminDeleteBlogPost)
 	adminAuth.POST("/api/auth/admin/blog/publish", controller.AdminPublishBlog)
+
+	// 工作台站点：平台中转（x-model-authorization 验签）专用，供集市开发者平台模块调用
+	openPlatform := r.Group("")
+	openPlatform.Use(middleware.PlatformAuthMiddleware())
+	openPlatform.POST("/api/open/workbench/apps", controller.OpenWorkbenchAppCreate)
+	openPlatform.GET("/api/open/workbench/apps", controller.OpenWorkbenchAppList)
 
 	return r
 }

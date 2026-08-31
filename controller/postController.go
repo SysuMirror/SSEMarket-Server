@@ -62,10 +62,6 @@ func Post(c *gin.Context) {
 	tagList := requestPostMsg.TagList
 	tags := strings.Split(tagList, "|")
 
-	if len(userTelephone) == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "返回的手机号为空")
-		return
-	}
 	if len(title) == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "标题不能为空")
 		return
@@ -87,13 +83,8 @@ func Post(c *gin.Context) {
 		return
 	}
 
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
-		return
-	}
-	if user.Phone != userTelephone {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -220,19 +211,6 @@ type BrowseMeg struct {
 	Limit         int    `json:"limit"`  // 默认 15；>15 时不走公共 Feed 缓存
 	Offset        int    `json:"offset"` // 0~150 且 limit≤15 时可命中公共 Feed 缓存
 	PostType      string `json:"postType"`
-}
-
-// viewerFromAuth 从 JWT 中间件注入的上下文取当前用户（以 userID 为准，不用手机号）
-func viewerFromAuth(c *gin.Context) (*domain.User, bool) {
-	value, exists := c.Get("user")
-	if !exists {
-		return nil, false
-	}
-	user, ok := value.(*domain.User)
-	if !ok || user.ID == 0 {
-		return nil, false
-	}
-	return user, true
 }
 
 // Browse 帖子列表接口（POST /api/browse 或 /loadtest/browse）。
@@ -636,12 +614,8 @@ func ToggleWatch(c *gin.Context) {
 	c.Bind(&req)
 	postID := int(req.PostID)
 
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	if user.Phone != req.UserTelephone {
+	user, ok := requireViewerLegacyPhone(c, req.UserTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -673,16 +647,12 @@ func UpdateLike(c *gin.Context) {
 	userTelephone := requestLikeMsg.UserTelephone
 	postID := int(requestLikeMsg.PostID)
 
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	if user.Phone != userTelephone {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	err = service.Posts.ToggleLike(c.Request.Context(), user.ID, postID)
+	err := service.Posts.ToggleLike(c.Request.Context(), user.ID, postID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			response.Response(c, http.StatusNotFound, 404, nil, "帖子不存在")
@@ -707,8 +677,8 @@ func UpdateBrowseNum(c *gin.Context) {
 	userTelephone := requestBrowseMsg.UserTelephone
 	postID := int(requestBrowseMsg.PostID)
 
-	user, err := service.Users.GetByID(c.Request.Context(), GetTokenUserID(c))
-	if err != nil || user == nil || user.ID == 0 || user.Phone != userTelephone {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		return
 	}
 	_ = service.Posts.RecordBrowse(c.Request.Context(), user.ID, postID)
@@ -760,16 +730,12 @@ func SubmitReport(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "举报内容不能为空")
 		return
 	}
-	tokenUserID := GetTokenUserID(c)
-	user, err := service.Users.GetByID(c.Request.Context(), tokenUserID)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	if user.Phone != reportmsg.UserTelephone {
+	user, ok := requireViewerLegacyPhone(c, reportmsg.UserTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
-	err = service.Posts.SubmitReport(c.Request.Context(), domain.SubmitReportInput{
+	err := service.Posts.SubmitReport(c.Request.Context(), domain.SubmitReportInput{
 		TargetID:   int(reportmsg.TargetID),
 		TargetType: reportmsg.Targettype,
 		UserID:     user.ID,

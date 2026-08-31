@@ -25,12 +25,7 @@ func postToDomain(p *model.Post) *domain.Post {
 		Tag:         p.Tag,
 		PostKind:    p.PostKind,
 		QuotePrice:  p.QuotePrice,
-		PriceType:   p.PriceType,
-		QuotePriceMin: p.QuotePriceMin,
-		QuotePriceMax: p.QuotePriceMax,
 		QuestStatus: p.QuestStatus,
-		QuestDeadline: p.QuestDeadline,
-		QuestAttachments: derefString(p.QuestAttachments),
 		IsPrivate:   p.IsPrivate,
 		IsAnonymous: p.IsAnonymous,
 		IsPinned:        p.IsPinned,
@@ -226,33 +221,7 @@ func postToModel(p *domain.Post) model.Post {
 		Tag:        p.Tag,
 		IsPrivate:  p.IsPrivate,
 		IsAnonymous: p.IsAnonymous,
-		// Quest 字段：空附件必须是 nil（SQL NULL），不能是 ""
-		PostKind:         p.PostKind,
-		QuotePrice:       p.QuotePrice,
-		PriceType:        p.PriceType,
-		QuotePriceMin:    p.QuotePriceMin,
-		QuotePriceMax:    p.QuotePriceMax,
-		QuestStatus:      p.QuestStatus,
-		QuestDeadline:    p.QuestDeadline,
-		QuestAttachments: stringPtrIfNonEmpty(p.QuestAttachments),
-		IsPinned:         p.IsPinned,
-		PinnedAt:         p.PinnedAt,
-		PinnedExpiresAt:  p.PinnedExpiresAt,
 	}
-}
-
-func derefString(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-func stringPtrIfNonEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 func pcommentToDomain(p *model.Pcomment) *domain.Pcomment {

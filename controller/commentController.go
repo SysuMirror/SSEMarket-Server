@@ -218,12 +218,8 @@ func PostPcomment(c *gin.Context) {
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), msg.UserTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, msg.UserTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -320,12 +316,8 @@ func PostCcomment(c *gin.Context) {
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), msg.UserTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, msg.UserTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -372,17 +364,13 @@ func UpdatePcommentLike(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 
-	if len(userTelephone) == 0 || pcommentID == 0 {
+	if pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -406,17 +394,13 @@ func UpdatePcommentDeny(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	pcommentID := requestMsg.PcommentID
 
-	if len(userTelephone) == 0 || pcommentID == 0 {
+	if pcommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -445,17 +429,13 @@ func UpdateCcommentLike(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
 
-	if len(userTelephone) == 0 || ccommentID == 0 {
+	if ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}
@@ -479,17 +459,13 @@ func UpdateCcommentDeny(c *gin.Context) {
 	userTelephone := requestMsg.UserTelephone
 	ccommentID := requestMsg.CcommentID
 
-	if len(userTelephone) == 0 || ccommentID == 0 {
+	if ccommentID == 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数有误")
 		return
 	}
 
-	user, err := service.Comments.FindUserByPhone(c.Request.Context(), userTelephone)
-	if err != nil || user == nil || user.ID == 0 {
-		return
-	}
-	tokenUserID := GetTokenUserID(c)
-	if tokenUserID != user.ID {
+	user, ok := requireViewerLegacyPhone(c, userTelephone)
+	if !ok {
 		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
 		return
 	}

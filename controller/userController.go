@@ -711,6 +711,10 @@ func GetInfo(c *gin.Context) {
 	}
 	var req getInfoReq
 	c.Bind(&req)
+	if req.UserID <= 0 && !util.IsQueryablePhone(req.Phone) {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数无效")
+		return
+	}
 	user, err := service.Users.GetInfo(c.Request.Context(), req.Phone, req.UserID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

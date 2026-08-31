@@ -22,12 +22,7 @@ type Post struct {
 	Tag        string
 	PostKind   string
 	QuotePrice *float64
-	PriceType  string
-	QuotePriceMin *float64
-	QuotePriceMax *float64
 	QuestStatus string
-	QuestDeadline *time.Time
-	QuestAttachments string
 	IsPrivate   bool
 	IsAnonymous bool
 	IsPinned         bool

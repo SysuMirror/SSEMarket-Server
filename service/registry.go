@@ -8,21 +8,22 @@ import (
 
 // 全局 Service 实例，由 InitServices 注入。
 var (
-	Posts    PostService
-	Users    UserService
-	Comments CommentService
-	Ranks    RankService
-	Chats    ChatService
-	Ratings  RatingService
-	Shops    ShopService
-	Resumes  ResumeService
-	Notices  NoticeService
-	Admins   AdminService
-	Sues     SueService
-	Votes     VoteService
-	Lotteries LotteryService
-	Sso       SsoService
-	Quest     QuestService
+	Posts         PostService
+	Users         UserService
+	Comments      CommentService
+	Ranks         RankService
+	Chats         ChatService
+	Ratings       RatingService
+	Shops         ShopService
+	Resumes       ResumeService
+	Notices       NoticeService
+	Admins        AdminService
+	WorkbenchApps WorkbenchAppService
+	Sues          SueService
+	Votes         VoteService
+	Lotteries     LotteryService
+	Sso           SsoService
+	Quest         QuestService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -51,6 +52,7 @@ func InitServices(db *gorm.DB) {
 	Resumes = NewResumeService(resumeRepo)
 	Notices = NewNoticeService(noticeRepo)
 	Admins = NewAdminService(adminRepo)
+	WorkbenchApps = NewWorkbenchAppService(gormrepo.NewWorkbenchAppRepository(db))
 	Sues = NewSueService(sueRepo)
 	Votes = NewVoteService(voteRepo, postRepo, Ranks)
 	Lotteries = NewLotteryService(lotteryRepo, postRepo)
