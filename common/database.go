@@ -42,6 +42,7 @@ func InitDB() *gorm.DB {
 	log.Printf("[db] pool max_open=%d max_idle=%d conn_max_lifetime=%s", maxOpen, maxIdle, connLifetime)
 
 	db.AutoMigrate(&model.User{})
+	ensureUserEmailUniqueIndex(db)
 	db.AutoMigrate(&model.UsedEmail{})
 	db.AutoMigrate(&model.Post{})
 	db.AutoMigrate(&model.Plike{})
@@ -147,6 +148,37 @@ func ensureChatMsgRecalledColumn(db *gorm.DB) {
 		`).Error; err != nil {
 			log.Printf("[chat] ensure isRecalled column: %v", err)
 		}
+	}
+}
+
+func ensureUserEmailUniqueIndex(db *gorm.DB) {
+	var count int64
+	db.Raw(`
+		SELECT COUNT(1) FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'users'
+		  AND index_name = 'idx_users_email'
+	`).Scan(&count)
+	if count > 0 {
+		return
+	}
+	// 历史数据若存在重复邮箱则跳过创建，避免启动失败；由事务内二次校验兜底。
+	var dup int64
+	db.Raw(`
+		SELECT COUNT(1) FROM (
+			SELECT email FROM users
+			WHERE email <> ''
+			GROUP BY email HAVING COUNT(*) > 1
+		) AS dups
+	`).Scan(&dup)
+	if dup > 0 {
+		log.Printf("[db] users 存在 %d 组重复邮箱，跳过唯一索引创建", dup)
+		return
+	}
+	if err := db.Exec(`
+		ALTER TABLE users ADD UNIQUE INDEX idx_users_email (email)
+	`).Error; err != nil {
+		log.Printf("[db] ensure unique index idx_users_email: %v", err)
 	}
 }
 

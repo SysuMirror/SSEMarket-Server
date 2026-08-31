@@ -317,6 +317,9 @@ func (s *userService) ModifyEmail(ctx context.Context, in domain.ModifyEmailInpu
 	if newEmail == "" || at <= 0 || at != strings.LastIndexByte(newEmail, '@') || at == len(newEmail)-1 {
 		return nil, domain.ErrBadRequest
 	}
+	if len(newEmail) > 255 {
+		return nil, domain.ErrBadRequest
+	}
 
 	u, err := s.users.FindByID(ctx, in.UserID)
 	if err != nil {

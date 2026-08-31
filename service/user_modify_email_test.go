@@ -192,6 +192,7 @@ func TestModifyEmailRejectsInvalidInputBeforeRedis(t *testing.T) {
 		{name: "multiple at signs", in: domain.ModifyEmailInput{UserID: 7, NewEmail: "new@@example.com"}, want: domain.ErrBadRequest},
 		{name: "missing domain", in: domain.ModifyEmailInput{UserID: 7, NewEmail: "new@"}, want: domain.ErrBadRequest},
 		{name: "same email", in: domain.ModifyEmailInput{UserID: 7, NewEmail: " OLD@example.com "}, want: domain.ErrBadRequest},
+		{name: "overlong email", in: domain.ModifyEmailInput{UserID: 7, NewEmail: strings.Repeat("a", 250) + "@example.com"}, want: domain.ErrBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

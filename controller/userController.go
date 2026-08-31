@@ -300,6 +300,8 @@ func ModifyEmail(c *gin.Context) {
 			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "该邮箱已存在")
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
+		case errors.Is(err, domain.ErrStale):
+			response.Response(c, http.StatusConflict, 409, nil, "账号信息已变更，请刷新后重试")
 		case errors.Is(err, domain.ErrNotFound):
 			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到该用户")
 		default:

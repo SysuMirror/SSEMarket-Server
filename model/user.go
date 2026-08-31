@@ -6,7 +6,7 @@ import "time"
 type User struct {
 	UserID   int    `gorm:"primary_key;column:userID"`
 	Phone    string `gorm:"column:phone;type:char(20)" `
-	Email    string `gorm:"column:email;type:varchar(255)"`
+	Email    string `gorm:"column:email;type:varchar(255);uniqueIndex:idx_users_email"`
 	Password string `gorm:"column:password;type:varchar(255)" json:"-"`
 	Name     string `gorm:"column:name;type:varchar(50)"`
 	//Num       int       `gorm:"column:num;type:int"`

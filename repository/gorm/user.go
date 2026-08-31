@@ -10,6 +10,7 @@ import (
 	"loginTest/model"
 	"loginTest/repository"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -157,6 +158,18 @@ func (r *userRepository) SoftDeleteAccount(ctx context.Context, userID int) erro
 
 func (r *userRepository) UpdateEmailWithHistory(ctx context.Context, userID int, oldEmail, newEmail string) error {
 	return r.session(ctx).Transaction(func(tx *gorm.DB) error {
+		// 事务内二次校验目标邮箱是否被其他用户占用：
+		// 唯一索引 idx_users_email 兜底并发窗口，此处只为返回友好错误。
+		var taken int64
+		if err := tx.Model(&model.User{}).
+			Where("email = ? AND userID <> ?", newEmail, userID).
+			Count(&taken).Error; err != nil {
+			return err
+		}
+		if taken > 0 {
+			return domain.ErrConflict
+		}
+
 		// 锁住用户行，避免同一用户的并发改邮箱产生重复历史记录或覆盖更新。
 		var current model.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("userID = ?", userID).First(&current).Error; err != nil {
@@ -166,7 +179,7 @@ func (r *userRepository) UpdateEmailWithHistory(ctx context.Context, userID int,
 			return err
 		}
 		if !strings.EqualFold(strings.TrimSpace(current.Email), strings.TrimSpace(oldEmail)) {
-			return domain.ErrConflict
+			return domain.ErrStale
 		}
 
 		historyEmail := strings.ToLower(strings.TrimSpace(oldEmail))
@@ -189,6 +202,9 @@ func (r *userRepository) UpdateEmailWithHistory(ctx context.Context, userID int,
 
 		result := tx.Model(&model.User{}).Where("userID = ?", userID).Update("email", newEmail)
 		if result.Error != nil {
+			if isDuplicateKeyError(result.Error) {
+				return domain.ErrConflict
+			}
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
@@ -196,6 +212,12 @@ func (r *userRepository) UpdateEmailWithHistory(ctx context.Context, userID int,
 		}
 		return nil
 	})
+}
+
+// isDuplicateKeyError 判断 MySQL 唯一键冲突（错误码 1062）。
+func isDuplicateKeyError(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == 1062
 }
 
 func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedPassword string) error {

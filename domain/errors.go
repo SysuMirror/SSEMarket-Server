@@ -9,6 +9,7 @@ var (
 	ErrBadRequest       = errors.New("bad request")
 	ErrConflict         = errors.New("conflict")
 	ErrInternal         = errors.New("internal error")
+	ErrStale            = errors.New("stale data")
 	ErrTokenExpired     = errors.New("token expired")
 	ErrTooManyRequests  = errors.New("too many requests")
 )
