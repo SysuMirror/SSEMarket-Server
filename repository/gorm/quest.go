@@ -2,7 +2,6 @@ package gormrepo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ func (r *questRepository) session(ctx context.Context) *gorm.DB {
 }
 
 func questEffectiveStatusSQL() string {
-	return `CASE WHEN quest_status IS NOT NULL AND quest_status != '' THEN quest_status WHEN post_kind = 'bounty' THEN 'open' ELSE 'open' END`
+	return `CASE WHEN quest_status IS NOT NULL AND quest_status != '' THEN quest_status WHEN post_kind = 'bounty' THEN 'in_progress' ELSE 'open' END`
 }
 
 func (r *questRepository) baseQuestQuery(ctx context.Context, filter domain.QuestListFilter) *gorm.DB {
@@ -111,38 +110,21 @@ func (r *questRepository) GetQuestPost(ctx context.Context, postID int) (*domain
 
 func (r *questRepository) CreateQuestPost(ctx context.Context, in domain.QuestPostCreateInput) (*domain.Post, error) {
 	now := time.Now()
-	priceType := in.PriceType
-	if priceType == "" {
-		priceType = domain.QuestPriceNegotiable
-	}
-	attJSON := ""
-	if len(in.Attachments) > 0 {
-		b, err := json.Marshal(in.Attachments)
-		if err != nil {
-			return nil, err
-		}
-		attJSON = string(b)
-	}
-	var attPtr *string
-	if attJSON != "" {
-		attPtr = &attJSON
+	status := domain.QuestStatusOpen
+	if in.PostKind == domain.QuestPostKindBounty {
+		status = domain.QuestStatusInProgress
 	}
 	row := model.Post{
-		UserID:           in.UserID,
-		Partition:        domain.QuestPartitionHome,
-		Title:            in.Title,
-		Ptext:            in.Content,
-		PostKind:         in.PostKind,
-		QuotePrice:       in.QuotePrice,
-		PriceType:        priceType,
-		QuotePriceMin:    in.QuotePriceMin,
-		QuotePriceMax:    in.QuotePriceMax,
-		QuestStatus:      domain.QuestStatusOpen,
-		QuestDeadline:    in.Deadline,
-		QuestAttachments: attPtr,
-		PostTime:         now,
-		Tag:              "",
-		IsPrivate:        false,
+		UserID:      in.UserID,
+		Partition:   domain.QuestPartitionHome,
+		Title:       in.Title,
+		Ptext:       in.Content,
+		PostKind:    in.PostKind,
+		QuotePrice:  in.QuotePrice,
+		QuestStatus: status,
+		PostTime:    now,
+		Tag:         "",
+		IsPrivate:   false,
 	}
 	if err := r.session(ctx).Create(&row).Error; err != nil {
 		return nil, err
@@ -150,24 +132,7 @@ func (r *questRepository) CreateQuestPost(ctx context.Context, in domain.QuestPo
 	return postToDomain(&row), nil
 }
 
-func (r *questRepository) UpdateQuestStatus(ctx context.Context, postID int, status string) error {
-	if !domain.IsValidQuestStatus(status) {
-		return domain.ErrBadRequest
-	}
-	res := r.session(ctx).Model(&model.Post{}).
-		Where("postID = ? AND post_kind IN ?", postID,
-			[]string{domain.QuestPostKindBounty, domain.QuestPostKindInquiry}).
-		Update("quest_status", status)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return domain.ErrNotFound
-	}
-	return nil
-}
-
-func (r *questRepository) UpdateQuestStatusByAuthor(ctx context.Context, postID, userID int, status string) error {
+func (r *questRepository) UpdateQuestStatus(ctx context.Context, postID, userID int, status string) error {
 	if !domain.IsValidQuestStatus(status) {
 		return domain.ErrBadRequest
 	}
@@ -182,70 +147,4 @@ func (r *questRepository) UpdateQuestStatusByAuthor(ctx context.Context, postID,
 		return domain.ErrNotFound
 	}
 	return nil
-}
-
-func questOrderToDomain(m *model.QuestOrder) *domain.QuestOrder {
-	if m == nil {
-		return nil
-	}
-	return &domain.QuestOrder{
-		ID:          m.OrderID,
-		PostID:      m.PostID,
-		PublisherID: m.PublisherID,
-		WorkerID:    m.WorkerID,
-		Status:      m.Status,
-		AcceptedAt:  m.AcceptedAt,
-		SubmittedAt: m.SubmittedAt,
-		CompletedAt: m.CompletedAt,
-		CancelledAt: m.CancelledAt,
-		SubmitNote:  m.SubmitNote,
-		CreatedAt:   m.CreatedAt,
-		UpdatedAt:   m.UpdatedAt,
-	}
-}
-
-func questOrderToModel(o *domain.QuestOrder) model.QuestOrder {
-	if o == nil {
-		return model.QuestOrder{}
-	}
-	return model.QuestOrder{
-		OrderID:     o.ID,
-		PostID:      o.PostID,
-		PublisherID: o.PublisherID,
-		WorkerID:    o.WorkerID,
-		Status:      o.Status,
-		AcceptedAt:  o.AcceptedAt,
-		SubmittedAt: o.SubmittedAt,
-		CompletedAt: o.CompletedAt,
-		CancelledAt: o.CancelledAt,
-		SubmitNote:  o.SubmitNote,
-		CreatedAt:   o.CreatedAt,
-		UpdatedAt:   o.UpdatedAt,
-	}
-}
-
-func (r *questRepository) GetOrderByPostID(ctx context.Context, postID int) (*domain.QuestOrder, error) {
-	var row model.QuestOrder
-	err := r.session(ctx).Where("post_id = ?", postID).First(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return questOrderToDomain(&row), nil
-}
-
-func (r *questRepository) CreateOrder(ctx context.Context, order *domain.QuestOrder) error {
-	m := questOrderToModel(order)
-	if err := r.session(ctx).Create(&m).Error; err != nil {
-		return err
-	}
-	order.ID = m.OrderID
-	return nil
-}
-
-func (r *questRepository) UpdateOrder(ctx context.Context, order *domain.QuestOrder) error {
-	m := questOrderToModel(order)
-	return r.session(ctx).Save(&m).Error
 }

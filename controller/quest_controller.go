@@ -7,8 +7,6 @@ import (
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,47 +23,19 @@ type questListReq struct {
 }
 
 type questCreateReq struct {
-	Title           string                  `json:"title"`
-	Content         string                  `json:"content"`
-	PostKind        string                  `json:"postKind"`
-	PriceType       string                  `json:"priceType"`
-	QuotePrice      *float64                `json:"quotePrice"`
-	QuotePriceMin   *float64                `json:"quotePriceMin"`
-	QuotePriceMax   *float64                `json:"quotePriceMax"`
-	Deadline        string                  `json:"deadline"`
-	Attachments     []domain.QuestAttachment `json:"attachments"`
+	Title      string   `json:"title"`
+	Content    string   `json:"content"`
+	PostKind   string   `json:"postKind"`
+	QuotePrice *float64 `json:"quotePrice"`
 }
 
 type questDetailReq struct {
 	PostID int `json:"postID"`
 }
 
-type questOrderReq struct {
-	PostID     int    `json:"postID"`
-	SubmitNote string `json:"submitNote"`
-}
-
 type questStatusReq struct {
 	PostID int    `json:"postID"`
 	Status string `json:"status"`
-}
-
-func parseQuestDeadline(s string) (*time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t, err = time.ParseInLocation("2006-01-02T15:04:05", s, time.Local)
-	}
-	if err != nil {
-		t, err = time.ParseInLocation("2006-01-02", s, time.Local)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &t, nil
 }
 
 func QuestList(c *gin.Context) {
@@ -125,22 +95,12 @@ func QuestCreate(c *gin.Context) {
 		return
 	}
 	userID := GetTokenUserID(c)
-	deadline, err := parseQuestDeadline(req.Deadline)
-	if err != nil {
-		response.Fail(c, gin.H{}, "截止时间格式无效")
-		return
-	}
 	item, err := service.Quest.Create(c.Request.Context(), domain.QuestPostCreateInput{
-		UserID:        userID,
-		Title:         req.Title,
-		Content:       req.Content,
-		PostKind:      req.PostKind,
-		PriceType:     req.PriceType,
-		QuotePrice:    req.QuotePrice,
-		QuotePriceMin: req.QuotePriceMin,
-		QuotePriceMax: req.QuotePriceMax,
-		Deadline:      deadline,
-		Attachments:   req.Attachments,
+		UserID:     userID,
+		Title:      req.Title,
+		Content:    req.Content,
+		PostKind:   req.PostKind,
+		QuotePrice: req.QuotePrice,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
@@ -217,77 +177,4 @@ func QuestChatPeers(c *gin.Context) {
 		})
 	}
 	response.Success(c, gin.H{"peers": out}, "ok")
-}
-
-func QuestLevelRules(c *gin.Context) {
-	info, err := service.Quest.LevelRules(c.Request.Context(), GetTokenUserID(c))
-	if err != nil {
-		apperr.WriteMsg(c, err, "获取等级规则失败")
-		return
-	}
-	response.Success(c, gin.H{"level": info}, "ok")
-}
-
-func QuestOrderAccept(c *gin.Context) {
-	var req questOrderReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.PostID <= 0 {
-		response.Fail(c, gin.H{}, "无效的请求参数")
-		return
-	}
-	order, err := service.Quest.AcceptOrder(c.Request.Context(), req.PostID, GetTokenUserID(c))
-	if err != nil {
-		if errors.Is(err, domain.ErrBadRequest) {
-			response.Fail(c, gin.H{}, "当前帖子不可接单")
-			return
-		}
-		if errors.Is(err, domain.ErrForbidden) {
-			response.Response(c, http.StatusForbidden, 403, gin.H{}, "无权操作")
-			return
-		}
-		apperr.WriteMsg(c, err, "接单失败")
-		return
-	}
-	response.Success(c, gin.H{"order": order}, "接单成功")
-}
-
-func QuestOrderSubmitComplete(c *gin.Context) {
-	var req questOrderReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.PostID <= 0 {
-		response.Fail(c, gin.H{}, "无效的请求参数")
-		return
-	}
-	if err := service.Quest.SubmitComplete(c.Request.Context(), req.PostID, GetTokenUserID(c), req.SubmitNote); err != nil {
-		if errors.Is(err, domain.ErrBadRequest) {
-			response.Fail(c, gin.H{}, "当前状态不可提交完成")
-			return
-		}
-		if errors.Is(err, domain.ErrForbidden) {
-			response.Response(c, http.StatusForbidden, 403, gin.H{}, "仅接单者可提交完成")
-			return
-		}
-		apperr.WriteMsg(c, err, "提交失败")
-		return
-	}
-	response.Success(c, gin.H{}, "已提交，等待发布者确认")
-}
-
-func QuestOrderConfirmComplete(c *gin.Context) {
-	var req questOrderReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.PostID <= 0 {
-		response.Fail(c, gin.H{}, "无效的请求参数")
-		return
-	}
-	if err := service.Quest.ConfirmComplete(c.Request.Context(), req.PostID, GetTokenUserID(c)); err != nil {
-		if errors.Is(err, domain.ErrBadRequest) {
-			response.Fail(c, gin.H{}, "当前状态不可确认完成")
-			return
-		}
-		if errors.Is(err, domain.ErrForbidden) {
-			response.Response(c, http.StatusForbidden, 403, gin.H{}, "仅发布者可确认完成")
-			return
-		}
-		apperr.WriteMsg(c, err, "确认失败")
-		return
-	}
-	response.Success(c, gin.H{}, "任务已完结")
 }
