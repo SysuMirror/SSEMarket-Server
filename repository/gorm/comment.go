@@ -8,6 +8,7 @@ import (
 	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/repository"
+	"loginTest/util"
 
 	"gorm.io/gorm"
 )
@@ -313,6 +314,10 @@ func (r *commentRepository) UsersByIDs(ctx context.Context, ids []int) (map[int]
 }
 
 func (r *commentRepository) FindUserByPhone(ctx context.Context, phone string) (*domain.User, error) {
+	phone = util.NormalizePhone(phone)
+	if !util.IsQueryablePhone(phone) {
+		return nil, domain.ErrBadRequest
+	}
 	var u model.User
 	err := r.session(ctx).Where("phone = ?", phone).First(&u).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

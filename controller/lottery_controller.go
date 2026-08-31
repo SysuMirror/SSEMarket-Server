@@ -44,10 +44,6 @@ func LotteryCreate(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "用户不存在")
 		return
 	}
-	if user.Phone != req.UserTelephone {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "权限不足")
-		return
-	}
 	if user.BanEnd.After(time.Now()) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "你尚处于禁言状态中，不得发帖")
 		return
@@ -104,7 +100,7 @@ func LotteryDetail(c *gin.Context) {
 		return
 	}
 	viewerID := 0
-	if user, ok := viewerFromAuth(c); ok && user.Phone == req.UserTelephone {
+	if user, ok := viewerFromAuth(c); ok {
 		viewerID = user.ID
 	}
 	detail, err := service.Lotteries.GetDetail(c.Request.Context(), req.PostID, viewerID)

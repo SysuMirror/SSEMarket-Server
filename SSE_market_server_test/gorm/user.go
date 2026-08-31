@@ -3,11 +3,14 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/repository"
+	"loginTest/util"
 
 	"gorm.io/gorm"
 )
@@ -49,6 +52,10 @@ func (r *userRepository) FindByEmail(ctx context.Context, email string) (*domain
 }
 
 func (r *userRepository) FindByPhone(ctx context.Context, phone string) (*domain.User, error) {
+	phone = util.NormalizePhone(phone)
+	if !util.IsQueryablePhone(phone) {
+		return nil, domain.ErrBadRequest
+	}
 	var user model.User
 	err := r.session(ctx).Where("phone = ?", phone).First(&user).Error
 	if err != nil {
@@ -129,7 +136,16 @@ func (r *userRepository) UseCDKey(ctx context.Context, content string) error {
 
 func (r *userRepository) FindByPhoneOrID(ctx context.Context, phone string, userID int) (*domain.User, error) {
 	var user model.User
-	err := r.session(ctx).Where("phone = ? or userID = ?", phone, userID).First(&user).Error
+	var err error
+	phone = strings.TrimSpace(phone)
+	switch {
+	case userID > 0:
+		err = r.session(ctx).Where("userID = ?", userID).First(&user).Error
+	case util.IsQueryablePhone(phone):
+		err = r.session(ctx).Where("phone = ?", util.NormalizePhone(phone)).First(&user).Error
+	default:
+		return nil, domain.ErrBadRequest
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
