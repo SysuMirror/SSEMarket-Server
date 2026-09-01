@@ -123,6 +123,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getNoticeNum", controller.GetNoticeNum)
 	auth.PATCH("api/auth/readNotice/:noticeID", controller.ReadNotice)
 	noauth.POST("/api/auth/modifyPassword", controller.ModifyPassword)
+	noauth.GET("/api/auth/workbench/apps", controller.WorkbenchAppPublicList)
 	noauth.POST("/api/auth/validateEmail", controller.ValidateEmail)
 	auth.POST("/api/auth/modifyEmail", controller.ModifyEmail)
 	auth.POST("/api/auth/identityValidate", controller.IdentityValidate)

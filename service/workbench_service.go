@@ -32,36 +32,45 @@ const (
 	workbenchAppTargetMaxLen = 500
 )
 
+// WorkbenchValidationError 参数校验失败错误，携带面向调用方的具体文案。
+// 控制器据此返回 400 + msg，而不是笼统的 500。
+type WorkbenchValidationError struct{ msg string }
+
+func (e *WorkbenchValidationError) Error() string { return e.msg }
+
+// ErrWorkbenchValidation 供 errors.As 判定的基准错误。
+var ErrWorkbenchValidation = &WorkbenchValidationError{}
+
 func validateWorkbenchAppInput(in *domain.WorkbenchAppCreateInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" {
-		return errors.New("应用名称不能为空")
+		return &WorkbenchValidationError{"name 不能为空"}
 	}
 	if utf8.RuneCountInString(in.Name) > workbenchAppNameMaxRunes {
-		return errors.New("应用名称不能超过 20 字符")
+		return &WorkbenchValidationError{"name 不能超过 20 字符"}
 	}
 	in.Icon = strings.TrimSpace(in.Icon)
 	if in.Icon == "" {
-		return errors.New("图标不能为空")
+		return &WorkbenchValidationError{"icon 不能为空（Iconify 名称，如 tabler:search）"}
 	}
 	in.TargetType = strings.ToLower(strings.TrimSpace(in.TargetType))
 	switch in.TargetType {
 	case "route":
 		in.Target = strings.TrimSpace(in.Target)
 		if !strings.HasPrefix(in.Target, "/") {
-			return errors.New("站内路由必须以 / 开头")
+			return &WorkbenchValidationError{"targetType=route 时 target 必须以 / 开头"}
 		}
 	case "link":
 		in.Target = strings.TrimSpace(in.Target)
 		u, err := url.Parse(in.Target)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return errors.New("站外链接必须是合法的 http(s) 地址")
+			return &WorkbenchValidationError{"targetType=link 时 target 必须是合法的 http(s) 地址"}
 		}
 	default:
-		return errors.New("targetType 必须为 route 或 link")
+		return &WorkbenchValidationError{"targetType 必须为 route 或 link"}
 	}
 	if utf8.RuneCountInString(in.Target) > workbenchAppTargetMaxLen {
-		return errors.New("跳转地址过长")
+		return &WorkbenchValidationError{"target 过长（上限 500 字符）"}
 	}
 	in.GroupName = strings.TrimSpace(in.GroupName)
 	if in.GroupName == "" {
@@ -69,7 +78,7 @@ func validateWorkbenchAppInput(in *domain.WorkbenchAppCreateInput) error {
 	}
 	in.InvokerSlug = strings.TrimSpace(in.InvokerSlug)
 	if utf8.RuneCountInString(in.InvokerSlug) > 100 {
-		return errors.New("调用方标识过长")
+		return &WorkbenchValidationError{"invoker 标识过长"}
 	}
 	return nil
 }

@@ -41,6 +41,9 @@ func (r *questRepository) baseQuestQuery(ctx context.Context, filter domain.Ques
 	status := strings.TrimSpace(filter.Status)
 	if status != "" && status != "all" && domain.IsValidQuestStatus(status) {
 		q = q.Where(questEffectiveStatusSQL()+" = ?", status)
+	} else {
+		// 大厅默认不展示已取消；删除帖走 DeletePost，不再用 cancelled 占位
+		q = q.Where(questEffectiveStatusSQL()+" <> ?", domain.QuestStatusCancelled)
 	}
 	if kw := strings.TrimSpace(filter.Keyword); kw != "" {
 		like := "%" + kw + "%"
