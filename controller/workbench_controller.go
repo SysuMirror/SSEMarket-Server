@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"loginTest/domain"
+	"loginTest/observability"
 	"loginTest/response"
 	"loginTest/service"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 )
 
 // WorkbenchAppCreateMsg 平台中转「添加工作台站点」请求体。
@@ -96,12 +98,15 @@ func OpenWorkbenchAppCreate(c *gin.Context) {
 		InvokerSlug: platformInvoker(c),
 	})
 	if err != nil {
+		var validationErr *service.WorkbenchValidationError
 		switch {
+		case errors.As(err, &validationErr):
+			response.Response(c, http.StatusBadRequest, 400, nil, validationErr.Error())
 		case errors.Is(err, domain.ErrConflict):
 			response.Response(c, http.StatusConflict, 409, nil, "该站点名称已存在")
-		case errors.Is(err, domain.ErrBadRequest):
-			response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 		default:
+			log.Errorf("[workbench] 创建站点失败: %v (invoker=%s, request_id=%s)",
+				err, platformInvoker(c), observability.RequestIDFromGin(c))
 			response.Response(c, http.StatusInternalServerError, 500, nil, "创建失败")
 		}
 		return
@@ -112,6 +117,21 @@ func OpenWorkbenchAppCreate(c *gin.Context) {
 // OpenWorkbenchAppList GET /api/open/workbench/apps
 // 平台中转查询当前可见站点列表（同样要求平台验签）。
 func OpenWorkbenchAppList(c *gin.Context) {
+	list, err := service.WorkbenchApps.ListVisible(c.Request.Context())
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "查询失败")
+		return
+	}
+	out := make([]WorkbenchAppResponse, 0, len(list))
+	for _, app := range list {
+		out = append(out, workbenchAppToResponse(app))
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// WorkbenchAppPublicList GET /api/auth/workbench/apps
+// 工作台页用的公开列表（游客可访问，noauth 分组），仅返回可见站点。
+func WorkbenchAppPublicList(c *gin.Context) {
 	list, err := service.WorkbenchApps.ListVisible(c.Request.Context())
 	if err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "查询失败")
