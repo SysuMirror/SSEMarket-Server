@@ -117,3 +117,16 @@ func SendEmail(receiver string, status int, msg string) error {
 	fmt.Println("Send Successfully")
 	return nil
 }
+
+// SendPlainEmail 发送纯文本邮件(系统报警等内部用途,不走通知模板)。
+func SendPlainEmail(receiver, subject, body string) error {
+	e := email.NewEmail()
+	senderString := config.Sender
+	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)
+	e.From = senderString
+	e.To = []string{receiver}
+	e.Subject = subject
+	e.Text = []byte(body)
+	auth := smtp.PlainAuth("", config.EmailUsername, config.Password, config.Host)
+	return e.SendWithTLS(config.Addr, auth, &tls.Config{ServerName: config.Host})
+}

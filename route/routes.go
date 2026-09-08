@@ -57,7 +57,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/rating/comment/like", controller.RatingCommentLike)
 
 	noauth.POST("/api/auth/register", controller.Register)
-	noauth.POST("/api/auth/login", controller.Login)
+	noauth.POST("/api/auth/login", middleware.LoginRateLimit(), controller.Login)
 	noauth.POST("/api/auth/refresh", controller.RefreshToken)
 
 	// SSO 单点登录（UniSSO）—— 公共入口 + 回调 + 登录/绑定提交
@@ -178,7 +178,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/deleteUser", controller.DeleteUser)
 	adminAuth.POST("/api/auth/deleteAdmin", controller.DeleteAdmin)
 	adminAuth.POST("/api/auth/showUsers", controller.ShowFilterUsers)
-	r.POST("/api/auth/adminLogin", controller.AdminLogin)
+	r.POST("/api/auth/adminLogin", middleware.LoginRateLimit(), controller.AdminLogin)
 	adminAuth.GET("/api/auth/admininfo", controller.AdminInfo)
 	adminAuth.GET("/api/auth/getSues", controller.GetSues)
 	adminAuth.POST("/api/auth/noViolation", controller.NoViolation)
