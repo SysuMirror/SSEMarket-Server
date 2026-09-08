@@ -172,7 +172,7 @@ func (r *userRepository) FindByPhoneOrID(ctx context.Context, phone string, user
 
 func (r *userRepository) Update(ctx context.Context, u *domain.User) error {
 	m := userToModel(u)
-	return r.session(ctx).Save(&m).Error
+	return r.session(ctx).Omit("password").Save(&m).Error
 }
 
 func (r *userRepository) SoftDeleteAccount(ctx context.Context, userID int) error {
