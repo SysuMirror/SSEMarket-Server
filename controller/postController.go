@@ -110,6 +110,9 @@ func Post(c *gin.Context) {
 		// Pinned 字段缺失
 		Pinned: requestPostMsg.Pinned,
 	})
+	if err == nil && createdPost != nil {
+		RagNotify("upsert", "post", createdPost.ID)
+	}
 	if err != nil {
 		var pinAfter *domain.PinAfterCreateError
 		if errors.As(err, &pinAfter) {
@@ -118,6 +121,7 @@ func Post(c *gin.Context) {
 			// 入延迟归档队列（1h 后由 server-task 消费；若 1h 内删除则由 DeletePost 取消）
 			// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
 			if createdPost != nil && createdPost.ID != 0 {
+			RagNotify("upsert", "post", createdPost.ID)
 				// if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
 				// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
 				// }
@@ -143,7 +147,12 @@ func Post(c *gin.Context) {
 		// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
 		// }
 	}
-	response.Response(c, http.StatusOK, 200, nil, "发帖成功")
+	// 发帖自动生成AI解读:返回新帖ID供前端触发预生成(2026-09-08)
+	respData := gin.H{"postID": 0}
+	if createdPost != nil {
+		respData = gin.H{"postID": createdPost.ID}
+	}
+	response.Response(c, http.StatusOK, 200, respData, "发帖成功")
 }
 
 type PostResponse struct {
@@ -565,6 +574,11 @@ func UpdatePostPrivacy(c *gin.Context) {
 		apperr.WriteMsg(c, err, "更新失败")
 		return
 	}
+	if req.IsPrivate {
+		RagNotify("delete", "post", int(req.PostID))
+	} else {
+		RagNotify("upsert", "post", int(req.PostID))
+	}
 	response.Success(c, gin.H{"isPrivate": req.IsPrivate}, "更新成功")
 }
 
@@ -707,6 +721,7 @@ func DeletePost(c *gin.Context) {
 		apperr.WriteMsg(c, err, "删除失败")
 		return
 	}
+	RagNotify("delete", "post", postID)
 	// 1h 内删除帖子：从延迟队列移除该帖子的入队消息（避免触发对已删除帖子的归档）
 	if postID != 0 {
 		if err := mq.CancelPost(c.Request.Context(), postID); err != nil {
@@ -944,13 +959,6 @@ func UploadPhotos(c *gin.Context) {
 	if err != nil {
 		log.Printf("[UploadPhotos] SaveUploadedFile failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败"})
-		return
-	}
-
-	_, err = api.UploadImage("/src/images/uploads/"+filename, filepath)
-	if err != nil {
-		log.Printf("[UploadPhotos] COS UploadImage failed: path=%s err=%v", filepath, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "原图保存失败" + err.Error()})
 		return
 	}
 
