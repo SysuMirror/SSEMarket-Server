@@ -190,7 +190,7 @@ func main() {
 	}
 	r.Use(middleware.PrometheusMetrics())
 	r.Use(middleware.LoggerToFile())
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	r.GET("/metrics", middleware.MetricsGuard(gin.WrapH(promhttp.Handler())))
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
 	registerPprofRoutes(r)
