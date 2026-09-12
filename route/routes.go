@@ -65,6 +65,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	noauth.GET("/api/sso/callback", controller.SsoCallback)
 	noauth.POST("/api/sso/exchange", controller.SsoExchange)
 	noauth.POST("/api/sso/bind", controller.SsoBind)
+	noauth.POST("/api/sso/mirror/provision", controller.MirrorProvision)
 	// SSO 已登录态：发起绑定 / 查询状态 / 解绑
 	auth.POST("/api/sso/bind/start", controller.SsoBindStart)
 	auth.GET("/api/sso/status", controller.SsoStatus)
@@ -169,6 +170,16 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/resume/update", controller.ResumeUpdate)
 	auth.POST("/api/auth/resume/delete", controller.ResumeDelete)
 
+	//音乐板块
+	auth.POST("/api/auth/uploadMusic", controller.UploadMusic)
+	auth.POST("/api/auth/publishMusic", controller.PublishMusic)
+	auth.POST("/api/auth/getMusicList", controller.GetMusicList)
+	auth.POST("/api/auth/deleteMusic", controller.DeleteMusic)
+	auth.POST("/api/auth/musicPlayed", controller.MusicPlayed)
+	//音频/封面走 <audio> 媒体请求带不了 Authorization 头，所以挂 noauth（与公开的 /uploads 一致）
+	noauth.GET("/api/music/file/:musicID", controller.MusicFile)
+	noauth.GET("/api/music/cover/:musicID", controller.MusicCover)
+
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
 	adminAuth.Use(middleware.AuthMiddleware_admin())
@@ -220,6 +231,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	openPlatform.Use(middleware.PlatformAuthMiddleware())
 	openPlatform.POST("/api/open/workbench/apps", controller.OpenWorkbenchAppCreate)
 	openPlatform.GET("/api/open/workbench/apps", controller.OpenWorkbenchAppList)
+	// 平台中转建号（同款 SM2 验签；免验证码/CDKey）
+	openPlatform.POST("/api/open/users", controller.OpenUserCreate)
 
 	return r
 }

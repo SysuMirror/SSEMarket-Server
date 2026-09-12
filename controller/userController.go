@@ -585,7 +585,7 @@ func UploadAvatar(c *gin.Context) {
 	}
 
 	// 对图像进行压缩处理
-	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	resizedImage := imaging.Thumbnail(img, 400, 400, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
 	// 服务器本地备份
@@ -658,7 +658,7 @@ func UpdateAvatar(c *gin.Context) {
 	}
 
 	// 对图像进行压缩处理
-	resizedImage := imaging.Thumbnail(img, 100, 100, imaging.Lanczos)
+	resizedImage := imaging.Thumbnail(img, 400, 400, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
 	// 服务器本地备份

@@ -21,14 +21,17 @@ import (
 
 // 平台中转调用鉴权（x-model-authorization）：
 // 集市开发者平台经 /api/open/invoke/:apiId 转发请求时，用平台 SM2 私钥对
-// "{slug}\n{ts}\n{nonce}" 签名（slug 固定 __platform__，hash:true，非 DER），
-// 头格式为 base64url(slug).base64url(ts).base64url(nonce).base64url(sign hex)。
-// 验签通过即证明请求必然来自平台代理；真实调用方由 x-invoker-module 头携带。
+// "{slug}\n{ts}\n{nonce}\n{queryTime}" 签名（slug 固定 __platform__，hash:true，非 DER），
+// 头格式为 base64url(slug).base64url(ts).base64url(nonce).base64url(sign raw 64B)。
+// 调用时间经 x-model-query-time 头独立携带并参与签名。验签通过即证明请求必然来自平台代理；
+// 真实调用方由 x-invoker-module 头携带。
 const (
-	PlatformSignerSlug       = "__platform__"
-	PlatformInvokerHeader    = "x-invoker-module"
-	PlatformAuthHeaderName   = "x-model-authorization"
-	platformAuthMaxClockSkew = 5 * time.Minute
+	PlatformSignerSlug         = "__platform__"
+	PlatformInvokerHeader      = "x-invoker-module"
+	PlatformAuthHeaderName     = "x-model-authorization"
+	PlatformQueryTimeHeader    = "x-model-query-time"
+	platformAuthMaxClockSkew   = 5 * time.Minute
+	platformAuthMaxQueryCount  = int64(platformAuthMaxClockSkew / time.Millisecond)
 )
 
 // defaultSM2UID SM2 默认用户标识（与 sm-crypto 生成 ZA 时的默认值一致）。
@@ -107,8 +110,9 @@ func unb64u(s string) ([]byte, error) {
 }
 
 // VerifyPlatformAuth 解析并校验平台签发的认证 token。
-// 返回 (是否通过, 失败原因)。任一环节失败即拒绝。
-func VerifyPlatformAuth(header string) (bool, string) {
+// 签名串：{slug}\n{ts}\n{nonce}\n{queryTime}（四段，queryTime 取 x-model-query-time 头）。
+// 兼容旧三段串（无 queryTime）。返回 (是否通过, 失败原因)。任一环节失败即拒绝。
+func VerifyPlatformAuth(header, queryTimeHeader string) (bool, string) {
 	pub, ok := platformPublicKey()
 	if !ok {
 		return false, "平台公钥未加载"
@@ -150,7 +154,26 @@ func VerifyPlatformAuth(header string) (bool, string) {
 	if len(signBytes) != 64 {
 		return false, "签名长度错误（期望 64 字节 r||s，实际 " + strconv.Itoa(len(signBytes)) + " 字节，可能为 DER 编码）"
 	}
+	queryTime := strings.TrimSpace(queryTimeHeader)
+	if queryTime != "" {
+		qt, qerr := strconv.ParseInt(queryTime, 10, 64)
+		if qerr != nil {
+			return false, "x-model-query-time 不是合法毫秒时间戳（收到: " + truncateForLog(queryTime) + "）"
+		}
+		qtSkew := time.Since(time.UnixMilli(qt))
+		if qtSkew > platformAuthMaxClockSkew || -qtSkew > platformAuthMaxClockSkew {
+			return false, "调用时间 queryTime 超出 ±5 分钟窗口（偏差 " + qtSkew.Truncate(time.Second).String() + "）"
+		}
+		// queryTime 与 ts 偏差需 ≤5 分钟
+		if d := ts - qt; d > int64(platformAuthMaxClockSkew/time.Millisecond) || -d > int64(platformAuthMaxClockSkew/time.Millisecond) {
+			return false, "调用时间与签名时间戳不一致（疑似挪用 token）"
+		}
+	}
+	// 对齐文档：签名串包含 queryTime；若调用方带 x-model-query-time 则拼四段，否则退回旧三段。
 	payload := string(slugBytes) + "\n" + string(tsBytes) + "\n" + string(nonceBytes)
+	if queryTime != "" {
+		payload = payload + "\n" + queryTime
+	}
 	r := new(big.Int).SetBytes(signBytes[:32])
 	s := new(big.Int).SetBytes(signBytes[32:])
 	// 平台 sm-crypto doSignature({hash:true, der:false})：
@@ -183,7 +206,7 @@ func PlatformAuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		ok, reason := VerifyPlatformAuth(header)
+		ok, reason := VerifyPlatformAuth(header, c.GetHeader(PlatformQueryTimeHeader))
 		if !ok {
 			logReject(c, reason)
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "平台验签失败: " + reason})

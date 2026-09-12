@@ -109,3 +109,5 @@ require (
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+require github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8

@@ -62,6 +62,8 @@ func Copy() {
 		log.Println("备份成功:", backupFile)
 	})
 	_, _ = c.AddFunc("@every 1h", controller.CalculateAndSaveScores)
+	// 清理放弃发布留下的音乐草稿（未发布且超过24小时）
+	_, _ = c.AddFunc("@every 24h", controller.CleanUnpublishedMusic)
 	c.Start()
 }
 

@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 
 	"loginTest/apperr"
+	"loginTest/config"
 	"loginTest/domain"
 	"loginTest/response"
 	"loginTest/service"
@@ -24,6 +26,53 @@ func ssoAuthUser(c *gin.Context) *domain.User {
 		return nil
 	}
 	return u
+}
+
+// MirrorProvision 只接受 Mirror 服务端密钥；邮箱已在 UniSSO 侧完成验证。
+func MirrorProvision(c *gin.Context) {
+	expected := config.SsoClientSecret()
+	provided := c.GetHeader("X-Unisso-Trust")
+	if expected == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "镜像服务未授权")
+		return
+	}
+
+	var req struct {
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
+		return
+	}
+
+	user, tokens, err := service.Users.MirrorProvision(c.Request.Context(), service.MirrorProvisionInput{
+		Name:     req.Name,
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		var validationErr *service.WorkbenchValidationError
+		if errors.As(err, &validationErr) {
+			response.Response(c, http.StatusBadRequest, 400, nil, validationErr.Error())
+			return
+		}
+		apperr.WriteMsg(c, err, "镜像账号处理失败")
+		return
+	}
+
+	resp := gin.H{
+		"user": gin.H{
+			"userID": user.ID,
+			"name":   user.Name,
+			"email":  user.Email,
+			"phone":  user.Phone,
+		},
+		"token":         tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
+	}
+	response.Success(c, resp, "账号已就绪")
 }
 
 // SsoLogin GET /api/sso/login —— 未登录入口，302 到 UniSSO authorize。

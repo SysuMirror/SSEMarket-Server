@@ -89,7 +89,8 @@ func sm2SignDigest(priv *sm2.PrivateKey, eBytes []byte) []byte {
 }
 
 // verifyServerSide 与 middleware/platform_auth.go 保持一致的验签逻辑
-func verifyServerSide(pub *sm2.PublicKey, header string) bool {
+// 支持四段签名串（含 queryTime）与旧三段（无 queryTime）两种。
+func verifyServerSide(pub *sm2.PublicKey, header, queryTime string) bool {
 	parts := strings.Split(strings.TrimSpace(header), ".")
 	if len(parts) != 4 {
 		return false
@@ -118,6 +119,9 @@ func verifyServerSide(pub *sm2.PublicKey, header string) bool {
 		return false
 	}
 	payload := string(slug) + "\n" + string(tsB) + "\n" + string(nonceB)
+	if qt := strings.TrimSpace(queryTime); qt != "" {
+		payload = payload + "\n" + qt
+	}
 	r := new(big.Int).SetBytes(signB[:32])
 	s := new(big.Int).SetBytes(signB[32:])
 	if sm2.Verify(pub, sm3.Sm3Sum([]byte(payload)), r, s) {
@@ -136,21 +140,26 @@ func main() {
 
 	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	nonce := "testnonce123"
-	payload := "__platform__\n" + ts + "\n" + nonce
 
 	cases := []struct {
 		name  string
+		query string
 		sigFn func(*sm2.PrivateKey, string) []byte
 	}{
-		{"sm-crypto hash:true 无 publicKey(纯SM3摘要)", signRawHash},
-		{"标准 SM2 含 ZA(uid)", signStandard},
+		{"sm-crypto hash:true 无 publicKey(纯SM3摘要) 四段", ts, signRawHash},
+		{"标准 SM2 含 ZA(uid) 四段", ts, signStandard},
+		{"旧三段兼容（不带 queryTime）", "", signRawHash},
 	}
 
 	failed := false
 	for _, tc := range cases {
+		payload := "__platform__\n" + ts + "\n" + nonce
+		if tc.query != "" {
+			payload = payload + "\n" + tc.query
+		}
 		sig := tc.sigFn(priv, payload)
 		header := b64u("__platform__") + "." + b64u(ts) + "." + b64u(nonce) + "." + base64.RawURLEncoding.EncodeToString(sig)
-		ok := verifyServerSide(pub, header)
+		ok := verifyServerSide(pub, header, tc.query)
 		fmt.Printf("[%s] 验签: %v\n", tc.name, pass(ok))
 		if !ok {
 			failed = true
@@ -160,7 +169,7 @@ func main() {
 	// 伪造 slug（用真私钥签、但 slug 是攻击者）必须失败
 	badSlugPayload := "attacker\n" + ts + "\n" + nonce
 	badSlugHeader := b64u("attacker") + "." + b64u(ts) + "." + b64u(nonce) + "." + base64.RawURLEncoding.EncodeToString(signRawHash(priv, badSlugPayload))
-	ok := !verifyServerSide(pub, badSlugHeader)
+	ok := !verifyServerSide(pub, badSlugHeader, "")
 	fmt.Printf("[%s] 验签(应为 false): %v\n", "伪造 slug", pass(ok))
 	if !ok {
 		failed = true
@@ -170,8 +179,19 @@ func main() {
 	futureTS := strconv.FormatInt(time.Now().Add(30*time.Minute).UnixMilli(), 10)
 	tamperPayload := "__platform__\n" + futureTS + "\n" + nonce
 	tamperHeader := b64u("__platform__") + "." + b64u(futureTS) + "." + b64u(nonce) + "." + base64.RawURLEncoding.EncodeToString(signRawHash(priv, tamperPayload))
-	ok = !verifyServerSide(pub, tamperHeader)
+	ok = !verifyServerSide(pub, tamperHeader, "")
 	fmt.Printf("[%s] 验签(应为 false): %v\n", "超时时间戳", pass(ok))
+	if !ok {
+		failed = true
+	}
+
+	// 篡改 queryTime（签名用A，头里却是B）必须失败
+	qtA := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	qtB := strconv.FormatInt(time.Now().Add(5*time.Minute).UnixMilli(), 10)
+	mismatchPayload := "__platform__\n" + ts + "\n" + nonce + "\n" + qtA
+	mismatchHeader := b64u("__platform__") + "." + b64u(ts) + "." + b64u(nonce) + "." + base64.RawURLEncoding.EncodeToString(signRawHash(priv, mismatchPayload))
+	ok = !verifyServerSide(pub, mismatchHeader, qtB)
+	fmt.Printf("[%s] 验签(应为 false): %v\n", "queryTime 与签名不一致", pass(ok))
 	if !ok {
 		failed = true
 	}

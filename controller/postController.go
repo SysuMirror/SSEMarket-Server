@@ -980,7 +980,7 @@ func UploadPhotos(c *gin.Context) {
 	}
 
 	// 对图像进行缩略图处理
-	resizedImage := imaging.Thumbnail(img, 200, 200, imaging.Lanczos)
+	resizedImage := imaging.Fit(img, 1920, 1920, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
 	resizedPath := "public/resized/" + filename
 	if err := os.MkdirAll("public/resized", 0o755); err != nil {

@@ -22,6 +22,49 @@
 | - | ---- | ---- | ---- | ---- |
 | 1 | POST | `/api/open/workbench/apps` | 平台验签 | 添加工作台站点 |
 | 2 | GET  | `/api/open/workbench/apps` | 平台验签 | 查询可见站点列表 |
+| 3 | POST | `/api/open/users` | 平台验签 | 注册用户（平台建号，免验证码/CDKey） |
+
+### 2.1.1 POST /api/open/users —— 平台建号
+
+鉴权与工作台接口**完全一致**（`x-model-authorization` + `x-model-query-time`，见 §2.2）。
+
+**请求体**（JSON）：
+
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `email` | string | ✅ | 用户邮箱，全库唯一 |
+| `password` | string | ✅ | 明文密码，≥6 位（经平台内网中转） |
+| `name` | string | ❌ | 昵称，缺省随机英文昵称 |
+| `phone` | string | ❌ | 11 位手机号，缺省随机生成 |
+
+**响应**（200）：
+
+```json
+{
+  "code": 200,
+  "data": {
+    "user": {
+      "userID": 1305,
+      "name": "zhangsan",
+      "email": "zhangsan@example.com",
+      "phone": "13800138000",
+      "accessToken": "eyJhbGciOi...",
+      "refreshToken": "eyJhbGciOi..."
+    }
+  },
+  "msg": "用户已创建"
+}
+```
+
+**错误**：
+
+| HTTP | 场景 |
+| ---- | ---- |
+| 400 | `email 不合法` / `password 不能少于 6 位` / `phone 必须为 11 位数字` / `该邮箱已存在` / `该手机号已存在` |
+| 401 | 平台验签失败（同 §2.2 各失败原因） |
+| 500 | 数据库异常等系统错误 |
+
+**平台侧登记**：在开发者平台「模块管理 → 对外 API」登记 `POST /api/open/users`（上游地址 `http://server:8080/api/open/users`，方法 POST），经 `/api/open/invoke/:apiId` 中转调用即可。
 
 ### 2.2 鉴权方式（平台中转验签）
 
@@ -29,7 +72,8 @@
 
 | 请求头 | 含义 |
 |--------|------|
-| `x-model-authorization` | 平台 SM2 私钥签发的 token：`base64url(slug).base64url(ts).base64url(nonce).base64url(sign)`，slug 固定 `__platform__`，签名串 `"{slug}\n{ts}\n{nonce}"`（SM3 摘要，非 DER，64 字节 r\|\|s） |
+| `x-model-authorization` | 平台 SM2 私钥签发的 token：`base64url(slug).base64url(ts).base64url(nonce).base64url(sign)`，slug 固定 `__platform__`，签名串 `"{slug}\n{ts}\n{nonce}\n{queryTime}"`（SM3 摘要，非 DER，64 字节 r\|\|s），queryTime 取 `x-model-query-time` 头 |
+| `x-model-query-time` | 平台签发调用时间（毫秒时间戳），与签名串第 4 段一致（±5 分钟窗口）；缺失时回退旧三段的兼容校验 |
 | `x-invoker-module` | 真实调用方模块 slug（明文，落库 `invoker_slug` 字段） |
 
 服务端中间件 `middleware.PlatformAuthMiddleware()` 校验：
@@ -37,8 +81,9 @@
 1. 头存在且为四段 base64url
 2. slug 必须为 `__platform__`
 3. `ts` 与服务器偏差 ≤ 5 分钟
-4. SM2 验签通过（平台公钥，`hash:true, der:false` 语义；同时兼容"纯 SM3 摘要"与"标准 ZA(uid)"两种签名形态）
-5. nonce 非空（平台每次转发重新签发保证一次性）
+4. 若带 `x-model-query-time`：其为毫秒时间戳、与服务器偏差 ≤ 5 分钟、且与 `ts` 偏差 ≤ 5 分钟；签名串按四段 `{slug}\n{ts}\n{nonce}\n{queryTime}` 验签
+5. SM2 验签通过（平台公钥，`hash:true, der:false` 语义；同时兼容"纯 SM3 摘要"与"标准 ZA(uid)"两种签名形态；未带 queryTime 时回退旧三段 `{slug}\n{ts}\n{nonce}`）
+6. nonce 非空（平台每次转发重新签发保证一次性）
 
 验签通过后 `x-invoker-module` 才被信任并写入 `ctx`，控制器取出作为 `InvokerSlug` 落库（`source = platform`）。
 

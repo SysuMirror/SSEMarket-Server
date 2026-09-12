@@ -1,14 +1,18 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/spf13/viper"
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -42,12 +46,82 @@ func getClient() (*cos.Client, string) {
 	}), args
 }
 
-func UploadImage(filepath string, localpath string) (string, error) {
-	client, args := getClient()
-	_, _, err := client.Object.Upload(
-		context.Background(), filepath, localpath, nil,
-	)
-	return args + filepath, err
+func UploadImage(_ string, localpath string) (string, error) {
+	uploadURL := viper.GetString("imagebed.upload_url")
+	if uploadURL == "" {
+		uploadURL = "https://image.ssemarket.cn/api/upload"
+	}
+	token := viper.GetString("imagebed.token")
+
+	file, err := os.Open(localpath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filepath.Base(localpath))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, uploadURL, body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("imagebed upload failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("imagebed upload response parse failed: %w", err)
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("imagebed upload returned code=%d message=%s", result.Code, result.Message)
+	}
+	if len(result.Data) == 0 || result.Data[0].URL == "" {
+		return "", fmt.Errorf("imagebed upload response missing url")
+	}
+
+	newURL := result.Data[0].URL
+	if strings.HasPrefix(newURL, "/") {
+		base := viper.GetString("imagebed.public_base")
+		if base == "" {
+			base = "https://image.ssemarket.cn"
+		}
+		newURL = strings.TrimRight(base, "/") + newURL
+	}
+	return newURL, nil
 }
 func AddFolder(key string) error {
 	client, _ := getClient()

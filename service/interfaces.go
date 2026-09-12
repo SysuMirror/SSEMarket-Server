@@ -71,6 +71,10 @@ type UserService interface {
 	// IssueTokensForUser 为已存在用户发放令牌（SSO 登录/绑定路径复用，
 	// 与邮箱密码登录产物完全一致：JWT + refresh token 落库）。
 	IssueTokensForUser(ctx context.Context, userID int) (*domain.AuthTokens, error)
+	// PlatformCreateUser 平台中转建号（SM2 验签通过后调用，免验证码/CDKey）。
+	PlatformCreateUser(ctx context.Context, in PlatformCreateUserInput) (*domain.User, *domain.AuthTokens, error)
+	// MirrorProvision 为已通过 UniSSO 验证的邮箱提供映射账号；已存在则直接发令牌。
+	MirrorProvision(ctx context.Context, in MirrorProvisionInput) (*domain.User, *domain.AuthTokens, error)
 }
 
 // SsoService UniSSO 单点登录服务。

@@ -47,18 +47,24 @@ const PLATFORM = 'https://developer.ssemarket.cn'
 function buildModelAuthorization() {
   const ts = String(Date.now())
   const nonce = Math.random().toString(36).slice(2, 12)
-  const payload = `${SLUG}\n${ts}\n${nonce}`
+  const queryTime = String(Date.now())        // 调用时间，参与签名并随 x-model-query-time 头传递
+  const payload = `${SLUG}\n${ts}\n${nonce}\n${queryTime}`
   const sign = sm2.doSignature(payload, PRIVATE_KEY, { hash: true, der: false })
   const b64u = (s) => Buffer.from(s, 'utf8').toString('base64url')
-  return `${b64u(SLUG)}.${b64u(ts)}.${b64u(nonce)}.${b64u(sign)}`
+  return {
+    token: `${b64u(SLUG)}.${b64u(ts)}.${b64u(nonce)}.${b64u(sign)}`,
+    queryTime,
+  }
 }
 
 // 添加工作台站点（apiId 换成平台登记后生成的 ID）
 async function addWorkbenchApp() {
+  const auth = buildModelAuthorization()
   const res = await fetch(`${PLATFORM}/api/open/invoke/42`, {
     method: 'POST',
     headers: {
-      'x-model-Authorization': buildModelAuthorization(),
+      'x-model-Authorization': auth.token,
+      'x-model-query-time': auth.queryTime,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
@@ -90,20 +96,24 @@ addWorkbenchApp()
 
 ```bash
 # 1. 生成平台签名 token（需要 PLATFORM_SM2_PRIVATE_KEY）
-TOKEN=$(node -e "
+AUTH=$(node -e "
 const sm2 = require('sm-crypto').sm2
 const PRIV = process.env.PLATFORM_SM2_PRIVATE_KEY
 const ts = String(Date.now())
 const nonce = Math.random().toString(36).slice(2, 12)
-const payload = '__platform__\n' + ts + '\n' + nonce
+const queryTime = String(Date.now())
+const payload = '__platform__\n' + ts + '\n' + nonce + '\n' + queryTime
 const sign = sm2.doSignature(payload, PRIV, { hash: true, der: false })
 const b64u = (s) => Buffer.from(s, 'utf8').toString('base64url')
-console.log([b64u('__platform__'), b64u(ts), b64u(nonce), b64u(sign)].join('.'))
+console.log(JSON.stringify({token:[b64u('__platform__'), b64u(ts), b64u(nonce), b64u(sign)].join('.'), queryTime}))
 ")
+TOKEN=$(echo "$AUTH" | jq -r .token)
+QUERY_TIME=$(echo "$AUTH" | jq -r .queryTime)
 
 # 2. 添加站点
 curl -X POST http://127.0.0.1:8080/api/open/workbench/apps \
   -H "x-model-authorization: $TOKEN" \
+  -H "x-model-query-time: $QUERY_TIME" \
   -H "x-invoker-module: my-service" \
   -H "content-type: application/json" \
   -d '{

@@ -139,6 +139,104 @@ func (s *userService) IssueTokensForUser(ctx context.Context, userID int) (*doma
 	return s.issueTokens(ctx, u)
 }
 
+// PlatformCreateUserInput 平台中转建号入参（跳过邮箱验证码与 CDKey）。
+type PlatformCreateUserInput struct {
+	Name     string
+	Email    string
+	Password string
+	Phone    string
+}
+
+type MirrorProvisionInput struct {
+	Name     string
+	Email    string
+	Password string
+}
+
+// MirrorProvision 供 Mirror 服务端在 UniSSO 验证后调用：已有映射账号直接复用。
+func (s *userService) MirrorProvision(ctx context.Context, in MirrorProvisionInput) (*domain.User, *domain.AuthTokens, error) {
+	email := strings.TrimSpace(strings.ToLower(in.Email))
+	if !strings.Contains(email, "@") || len(in.Password) < 6 {
+		return nil, nil, &WorkbenchValidationError{"email 或 password 不合法"}
+	}
+
+	if u, _, err := s.users.FindAuthByEmail(ctx, email); err == nil {
+		tokens, err := s.issueTokens(ctx, u)
+		if err != nil {
+			return nil, nil, err
+		}
+		return u, tokens, nil
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, nil, err
+	}
+
+	return s.PlatformCreateUser(ctx, PlatformCreateUserInput{
+		Name:     in.Name,
+		Email:    email,
+		Password: in.Password,
+	})
+}
+
+// PlatformCreateUser 平台（SM2 验签通过的中转请求）创建用户。
+// 与 Register 的差异：不需要邮箱验证码、不需要 CDKey；其余校验（邮箱/手机/密码）保持一致。
+// 返回创建的用户（含 userID）与登录令牌（可直接使用）。
+func (s *userService) PlatformCreateUser(ctx context.Context, in PlatformCreateUserInput) (*domain.User, *domain.AuthTokens, error) {
+	email := strings.TrimSpace(in.Email)
+	password := in.Password
+	name := strings.TrimSpace(in.Name)
+	phone := strings.TrimSpace(in.Phone)
+
+	if !strings.Contains(email, "@") {
+		return nil, nil, &WorkbenchValidationError{"email 不合法"}
+	}
+	if len(password) < 6 {
+		return nil, nil, &WorkbenchValidationError{"password 不能少于 6 位"}
+	}
+	if name == "" {
+		name = gofakeit.Name()
+	}
+	if phone == "" {
+		for {
+			phone = util.GenerateRandomDigits(11)
+			ok, err := s.users.ExistsByPhone(ctx, phone)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ok {
+				break
+			}
+		}
+	} else {
+		phone = util.NormalizePhone(phone)
+		if len(phone) != 11 {
+			return nil, nil, &WorkbenchValidationError{"phone 必须为 11 位数字"}
+		}
+		if ok, err := s.users.ExistsByPhone(ctx, phone); err == nil && ok {
+			return nil, nil, &WorkbenchValidationError{"该手机号已存在"}
+		}
+	}
+	if ok, err := s.users.ExistsByEmail(ctx, email); err != nil {
+		return nil, nil, err
+	} else if ok {
+		return nil, nil, &WorkbenchValidationError{"该邮箱已存在"}
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, nil, domain.ErrInternal
+	}
+	u, err := s.users.Create(ctx, name, phone, email, string(hashed))
+	if err != nil {
+		return nil, nil, err
+	}
+	tokens, err := s.issueTokens(ctx, u)
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Printf("[platform] 平台建号成功: userID=%d email=%s invoker 记录于 access log", u.ID, email)
+	return u, tokens, nil
+}
+
 func (s *userService) issueTokens(ctx context.Context, u *domain.User) (*domain.AuthTokens, error) {
 	access, err := common.ReleaseToken(*u)
 	if err != nil {
