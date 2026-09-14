@@ -100,6 +100,7 @@ func LoggerToFile() gin.HandlerFunc {
 			"client_ip":    clientIP,
 			"req_method":   reqMethod,
 			"req_uri":      reqUri,
+			"route_tpl":    c.FullPath(), // gin 路由模板（如 /api/auth/postDetail/:id）——opsagent 指纹归一化的事实源
 		}
 		if reqID := observability.RequestIDFromGin(c); reqID != "" {
 			fields["request_id"] = reqID
