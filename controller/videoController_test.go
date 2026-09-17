@@ -1,0 +1,31 @@
+package controller
+
+import "testing"
+
+func TestParseVideoSource(t *testing.T) {
+	st, url, bvid, page, err := ParseVideoSource("auto", "https://www.bilibili.com/video/BV1P1421U775/")
+	if err != nil || st != "bilibili" || url != "https://www.bilibili.com/video/BV1P1421U775/" || bvid != "BV1P1421U775" || page != url {
+		t.Fatalf("bilibili parse: %q %q %q %q %v", st, url, bvid, page, err)
+	}
+
+	st, url, bvid, page, err = ParseVideoSource("mp4", "https://ssemarket.cn/videos/a.mp4")
+	if err != nil || st != "mp4" || url != "https://ssemarket.cn/videos/a.mp4" || bvid != "" || page != "" {
+		t.Fatalf("mp4 parse: %q %q %q %q %v", st, url, bvid, page, err)
+	}
+
+	st, _, _, _, err = ParseVideoSource("hls", "https://ssemarket.cn/videos/master.m3u8")
+	if err != nil || st != "hls" {
+		t.Fatalf("hls parse: %q %v", st, err)
+	}
+
+	for _, tc := range []struct{ kind, raw string }{
+		{"auto", "http://ssemarket.cn/a.mp4"},
+		{"auto", "https://evil.example/a.mp4"},
+		{"bilibili", "https://evil.example/video/BV12345678/"},
+		{"hls", "https://ssemarket.cn/a.mp4"},
+	} {
+		if _, _, _, _, err := ParseVideoSource(tc.kind, tc.raw); err == nil {
+			t.Fatalf("expected rejection for %s %s", tc.kind, tc.raw)
+		}
+	}
+}
