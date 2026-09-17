@@ -80,6 +80,7 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.Resume{})
 	db.AutoMigrate(&model.WorkbenchApp{})
 	db.AutoMigrate(&model.Music{})
+	db.AutoMigrate(&model.Video{})
 	RunRatingMigration(db)
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
 
