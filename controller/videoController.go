@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"loginTest/common"
+	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/response"
 )
@@ -100,8 +101,11 @@ func adminFromVideoContext(c *gin.Context) (*model.Admin, bool) {
 	if !exists {
 		return nil, false
 	}
-	admin, ok := value.(*model.Admin)
-	return admin, ok && admin.AdminID != 0
+	admin, ok := value.(*domain.Admin)
+	if !ok {
+		return nil, false
+	}
+	return &model.Admin{AdminID: admin.ID}, admin.ID != 0
 }
 
 func normalizeVideoStatus(status string) string {

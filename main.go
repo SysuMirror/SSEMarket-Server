@@ -14,8 +14,8 @@ import (
 	"loginTest/middleware"
 	"loginTest/observability"
 	"loginTest/pin"
-	"loginTest/route"
 	gormrepo "loginTest/repository/gorm"
+	"loginTest/route"
 	"loginTest/service"
 	"net/http"
 	"net/http/pprof"
@@ -193,6 +193,7 @@ func main() {
 	r.GET("/metrics", middleware.MetricsGuard(gin.WrapH(promhttp.Handler())))
 	r.StaticFS("/uploads", http.Dir("./public/uploads"))
 	r.StaticFS("/resized", http.Dir("./public/resized"))
+	r.Static("/media/videos", "./public/videos")
 	registerPprofRoutes(r)
 	route.CollectRoute(r)
 	go heat.StartHeat()

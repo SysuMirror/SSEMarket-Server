@@ -226,6 +226,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.GET("/api/auth/admin/oauth/records", controller.AdminListOAuthRecords)
 	adminAuth.GET("/api/auth/admin/videos", controller.AdminListVideos)
 	adminAuth.POST("/api/auth/admin/videos", controller.AdminCreateVideo)
+	adminAuth.POST("/api/auth/admin/videos/upload", controller.AdminUploadVideo)
 	adminAuth.GET("/api/auth/admin/videos/:videoID", controller.AdminGetVideo)
 	adminAuth.PUT("/api/auth/admin/videos/:videoID", controller.AdminUpdateVideo)
 	adminAuth.DELETE("/api/auth/admin/videos/:videoID", controller.AdminDeleteVideo)
