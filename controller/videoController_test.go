@@ -1,6 +1,12 @@
 package controller
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+
+	"loginTest/model"
+)
 
 func TestParseVideoSource(t *testing.T) {
 	st, url, bvid, page, err := ParseVideoSource("auto", "https://www.bilibili.com/video/BV1P1421U775/")
@@ -26,6 +32,23 @@ func TestParseVideoSource(t *testing.T) {
 	} {
 		if _, _, _, _, err := ParseVideoSource(tc.kind, tc.raw); err == nil {
 			t.Fatalf("expected rejection for %s %s", tc.kind, tc.raw)
+		}
+	}
+}
+
+func TestPublicVideoOmitsPrivateFields(t *testing.T) {
+	b, err := json.Marshal(publicVideo(model.Video{
+		VideoID: 1, Title: "t", Description: "d", CoverURL: "https://ssemarket.cn/c.jpg",
+		SourceType: "mp4", SourceURL: "https://ssemarket.cn/a.mp4", DurationSec: 10,
+		StorageKey: "videos/1/original.mp4", PlaybackKey: "videos/1/hls/master.m3u8",
+		TranscodeError: "boom",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"adminID", "storageKey", "playbackKey", "transcodeError"} {
+		if bytes.Contains(b, []byte(forbidden)) {
+			t.Fatalf("public response contains %s", forbidden)
 		}
 	}
 }

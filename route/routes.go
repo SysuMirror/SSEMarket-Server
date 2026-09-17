@@ -181,6 +181,9 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	//音频/封面走 <audio> 媒体请求带不了 Authorization 头，所以挂 noauth（与公开的 /uploads 一致）
 	noauth.GET("/api/music/file/:musicID", controller.MusicFile)
 	noauth.GET("/api/music/cover/:musicID", controller.MusicCover)
+	noauth.GET("/api/auth/videos", controller.PublicVideoList)
+	noauth.GET("/api/auth/videos/:videoID", controller.PublicVideoDetail)
+	noauth.POST("/api/auth/videos/:videoID/played", controller.RecordVideoPlayed)
 
 	// 给管理员设置一个新的路由分组
 	adminAuth := r.Group("")
@@ -221,6 +224,12 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.PUT("/api/auth/admin/oauth/apps/:appId", controller.AdminUpdateOAuthApp)
 	adminAuth.DELETE("/api/auth/admin/oauth/apps/:appId", controller.AdminDeleteOAuthApp)
 	adminAuth.GET("/api/auth/admin/oauth/records", controller.AdminListOAuthRecords)
+	adminAuth.GET("/api/auth/admin/videos", controller.AdminListVideos)
+	adminAuth.POST("/api/auth/admin/videos", controller.AdminCreateVideo)
+	adminAuth.GET("/api/auth/admin/videos/:videoID", controller.AdminGetVideo)
+	adminAuth.PUT("/api/auth/admin/videos/:videoID", controller.AdminUpdateVideo)
+	adminAuth.DELETE("/api/auth/admin/videos/:videoID", controller.AdminDeleteVideo)
+	adminAuth.POST("/api/auth/admin/videos/parse-source", controller.AdminParseVideoSource)
 
 	adminAuth.GET("/api/auth/admin/blog/posts", controller.AdminListBlogPosts)
 	adminAuth.GET("/api/auth/admin/blog/posts/:filename", controller.AdminGetBlogPost)
