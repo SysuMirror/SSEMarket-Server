@@ -324,19 +324,49 @@ func AdminUploadVideo(c *gin.Context) {
 		coverURL = videoMediaURL(key, "poster.jpg")
 	}
 	now := time.Now()
+	video := uploadedVideoModel(
+		admin.AdminID,
+		result,
+		title,
+		strings.TrimSpace(c.PostForm("description")),
+		coverURL,
+		status,
+		sortWeight,
+		key,
+		filepath.Base(fileHeader.Filename),
+		now,
+	)
+
+	if err := common.GetDB().Create(&video).Error; err != nil {
+		_ = os.RemoveAll(outputDir)
+		response.Fail(c, nil, "保存视频记录失败")
+		return
+	}
+
+	response.Success(c, gin.H{"video": video}, "上传成功")
+}
+
+func uploadedVideoModel(
+	adminID int,
+	result hlsTranscodeResult,
+	title, description, coverURL, status string,
+	sortWeight int,
+	key, originalFileName string,
+	now time.Time,
+) model.Video {
 	video := model.Video{
-		AdminID:          admin.AdminID,
+		AdminID:          adminID,
 		Title:            truncateStr(title, 120),
-		Description:      truncateStr(strings.TrimSpace(c.PostForm("description")), 2000),
+		Description:      truncateStr(description, 2000),
 		CoverURL:         truncateStr(coverURL, 2048),
 		SourceType:       "hls",
 		SourceURL:        videoMediaURL(key, "master.m3u8"),
 		Status:           status,
 		SortWeight:       sortWeight,
-		PublishedAt:      nil,
 		StorageKey:       filepath.ToSlash(key),
 		PlaybackKey:      filepath.ToSlash(filepath.Join(key, "master.m3u8")),
-		OriginalFileName: truncateStr(filepath.Base(fileHeader.Filename), 255),
+		OriginalFileName: truncateStr(originalFileName, 255),
+		DurationSec:      result.DurationSec,
 		FileSizeBytes:    result.FileSizeBytes,
 		Width:            result.Width,
 		Height:           result.Height,
@@ -347,12 +377,5 @@ func AdminUploadVideo(c *gin.Context) {
 	if status == model.VideoStatusPublished {
 		video.PublishedAt = &now
 	}
-
-	if err := common.GetDB().Create(&video).Error; err != nil {
-		_ = os.RemoveAll(outputDir)
-		response.Fail(c, nil, "保存视频记录失败")
-		return
-	}
-
-	response.Success(c, gin.H{"video": video}, "上传成功")
+	return video
 }
