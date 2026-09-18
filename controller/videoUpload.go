@@ -130,6 +130,14 @@ func videoScaleFilter() string {
 	return "scale='if(lte(iw,ih),min(720,iw),-2)':'if(gt(iw,ih),min(720,ih),-2)'"
 }
 
+func videoEncoderArgs() []string {
+	return []string{
+		"-c:v", "libx264", "-preset", "veryfast",
+		"-b:v", "1M", "-maxrate", "1M", "-bufsize", "2M",
+		"-pix_fmt", "yuv420p",
+	}
+}
+
 func runFFmpeg(args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -159,17 +167,19 @@ func transcodeVideoToHLS(input, outputDir string) (hlsTranscodeResult, error) {
 
 	playlist := filepath.Join(outputDir, "master.m3u8")
 	segment := filepath.Join(outputDir, "segment_%04d.ts")
-	err := runFFmpeg(
+	ffmpegArgs := []string{
 		"-i", input,
 		"-vf", videoScaleFilter(),
-		"-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-		"-maxrate", "2M", "-bufsize", "4M", "-pix_fmt", "yuv420p",
+	}
+	ffmpegArgs = append(ffmpegArgs, videoEncoderArgs()...)
+	ffmpegArgs = append(ffmpegArgs,
 		"-c:a", "aac", "-b:a", "128k", "-ac", "2",
 		"-force_key_frames", "expr:gte(t,n_forced*4)",
 		"-f", "hls", "-hls_time", "4", "-hls_list_size", "0",
 		"-hls_playlist_type", "vod", "-hls_flags", "independent_segments",
 		"-hls_segment_filename", segment, playlist,
 	)
+	err := runFFmpeg(ffmpegArgs...)
 	if err == nil {
 		err = makeVideoPoster(input, filepath.Join(outputDir, "poster.jpg"))
 	}
