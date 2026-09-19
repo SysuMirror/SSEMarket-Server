@@ -15,6 +15,7 @@ const (
 type Video struct {
 	VideoID         int64          `gorm:"primaryKey;autoIncrement;column:videoID"`
 	AdminID         int            `gorm:"index:idx_videos_admin;column:adminID"`
+	MediaAssetID    int64          `gorm:"column:media_asset_id;default:0"`
 	Title           string         `gorm:"column:title;type:varchar(120);not null"`
 	Description     string         `gorm:"column:description;type:varchar(2000);default:''"`
 	CoverURL        string         `gorm:"column:cover_url;type:varchar(2048);default:''"`

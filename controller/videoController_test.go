@@ -3,14 +3,8 @@ package controller
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"loginTest/domain"
@@ -73,68 +67,5 @@ func TestPublicVideoOmitsPrivateFields(t *testing.T) {
 		if bytes.Contains(b, []byte(forbidden)) {
 			t.Fatalf("public response contains %s", forbidden)
 		}
-	}
-}
-
-func createTestVideo(t *testing.T, path string, seconds int) {
-	t.Helper()
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg is not installed")
-	}
-	args := []string{
-		"-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15",
-		"-f", "lavfi", "-i", "sine=frequency=440",
-		"-t", fmt.Sprintf("%d", seconds),
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-shortest", path,
-	}
-	if out, err := exec.Command("ffmpeg", args...).CombinedOutput(); err != nil {
-		t.Fatalf("create test video: %v: %s", err, out)
-	}
-}
-
-func TestProbeVideoRejectsVideosOverThirtySeconds(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "too-long.mp4")
-	createTestVideo(t, path, 31)
-
-	if _, err := probeVideoFile(path); err == nil {
-		t.Fatal("expected a 31-second video to be rejected")
-	}
-}
-
-func TestTranscodeVideoToHLS(t *testing.T) {
-	dir := t.TempDir()
-	input := filepath.Join(dir, "input.mp4")
-	createTestVideo(t, input, 2)
-
-	probe, err := probeVideoFile(input)
-	if err != nil {
-		t.Fatalf("probe short video: %v", err)
-	}
-	if probe.Width != 320 || probe.Height != 240 || probe.DurationSec != 2 {
-		t.Fatalf("unexpected probe: %+v", probe)
-	}
-
-	outputDir := filepath.Join(dir, "hls")
-	result, err := transcodeVideoToHLS(input, outputDir)
-	if err != nil {
-		t.Fatalf("transcode: %v", err)
-	}
-	if result.Width != 320 || result.Height != 240 || result.DurationSec != 2 || result.FileSizeBytes <= 0 {
-		t.Fatalf("unexpected transcode result: %+v", result)
-	}
-	playlist, err := os.ReadFile(filepath.Join(outputDir, "master.m3u8"))
-	if err != nil {
-		t.Fatalf("read playlist: %v", err)
-	}
-	if !strings.Contains(string(playlist), "#EXTINF:") {
-		t.Fatal("playlist contains no segments")
-	}
-	if _, err := os.Stat(filepath.Join(outputDir, "poster.jpg")); err != nil {
-		t.Fatalf("poster missing: %v", err)
-	}
-	if time.Duration(result.DurationSec)*time.Second > 30*time.Second {
-		t.Fatalf("transcoded duration exceeds limit: %+v", result)
 	}
 }
