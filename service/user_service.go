@@ -263,6 +263,7 @@ func (s *userService) verifyEmailCode(ctx context.Context, email, valiCode strin
 	if rds == nil {
 		return domain.ErrInternal
 	}
+	email = strings.ToLower(strings.TrimSpace(email))
 	codeKey := "vcode:" + email
 	failKey := "vcode_fail:" + email
 	correct, err := rds.Get(ctx, codeKey).Result()
@@ -298,6 +299,7 @@ func (s *userService) clearEmailCode(ctx context.Context, email string) {
 	if core.MyRedis == nil {
 		return
 	}
+	email = strings.ToLower(strings.TrimSpace(email))
 	_ = core.MyRedis.Del(ctx, "vcode:"+email, "vcode_fail:"+email).Err()
 }
 

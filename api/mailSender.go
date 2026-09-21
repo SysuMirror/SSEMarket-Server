@@ -42,6 +42,7 @@ func saveVcode(vcode, receiver string) error {
 		return errors.New("验证码服务不可用")
 	}
 	ctx := context.Background()
+	receiver = strings.ToLower(strings.TrimSpace(receiver))
 	codeKey := "vcode:" + receiver
 	failKey := "vcode_fail:" + receiver
 	_, err := rds.Get(ctx, codeKey).Result()
@@ -76,6 +77,7 @@ func SendEmail(receiver string, status int, msg string) error {
 			return errors.New("验证码服务不可用")
 		}
 		ctx := context.Background()
+		receiver = strings.ToLower(strings.TrimSpace(receiver))
 		codeKey := "vcode:" + receiver
 		_, err := rds.Get(ctx, codeKey).Result()
 		// 如果 err == nil，说明找到了验证码（key存在），说明验证码还未过期
