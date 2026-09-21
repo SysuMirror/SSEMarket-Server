@@ -20,7 +20,6 @@ func Decrypt(password string) string {
 	key := "16bit secret key"
 	e := password
 	d := AesSimpleDecrypt(e, key)
-	fmt.Println("解密后：", d)
 	return d
 }
 
