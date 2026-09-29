@@ -1253,3 +1253,23 @@ func GetTitle(c *gin.Context) {
 	}
 
 }
+
+// UploadAttachmentCredential 返回文档附件上传所需的短期凭证与 tus 端点，供前端直连图床断点续传。
+// 前端拿到凭证后用 tus-js-client 直连 endpoint 分片上传，本接口不接收文件流。
+func UploadAttachmentCredential(c *gin.Context) {
+	if ssoAuthUser(c) == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录"})
+		return
+	}
+	token, expiresIn, endpoint, err := api.RequestUploadCredential()
+	if err != nil {
+		log.Printf("[UploadAttachmentCredential] request imagebed credential failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取上传凭证失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"token":      token,
+		"expires_in": expiresIn,
+		"endpoint":   endpoint,
+	})
+}

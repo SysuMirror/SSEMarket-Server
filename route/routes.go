@@ -134,6 +134,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/fileDelete", controller.DeleteFile)
 	auth.POST("/api/auth/folderDelete", controller.DeleteFolder)
 	auth.POST("/api/auth/uploadFile", controller.TeachUpload)
+	auth.POST("/api/auth/uploadAttachment/credential", controller.UploadAttachmentCredential)
 	auth.POST("/api/auth/addFolder", controller.AddFolder)
 	auth.POST("/api/auth/getObjectUrl", controller.GetObjectUrl)
 	auth.POST("/api/auth/changeEmailPush", controller.ChangeEmailPushStatus)

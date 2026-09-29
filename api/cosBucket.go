@@ -319,3 +319,53 @@ func GetPresignedURL(key string, expire time.Duration, inline bool, attachmentFi
 	}
 	return presigned.String(), nil
 }
+
+// RequestUploadCredential 向图床换取一张短期上传凭证（前端直连 tus 用）。
+// 凭证由主站长效 imgb_ token 换取，返回 token、有效期（秒）与 tus 上传端点。
+func RequestUploadCredential() (token string, expiresIn int, endpoint string, err error) {
+	base := viper.GetString("imagebed.public_base")
+	if base == "" {
+		base = "https://image.ssemarket.cn"
+	}
+	base = strings.TrimRight(base, "/")
+
+	req, err := http.NewRequest(http.MethodPost, base+"/api/upload/credential", nil)
+	if err != nil {
+		return "", 0, "", err
+	}
+	if t := viper.GetString("imagebed.token"); t != "" {
+		req.Header.Set("Authorization", "Bearer "+t)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", 0, "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", 0, "", fmt.Errorf("imagebed credential failed: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Token     string `json:"token"`
+			ExpiresIn int    `json:"expires_in"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", 0, "", fmt.Errorf("imagebed credential response parse failed: %w", err)
+	}
+	if result.Code != 0 || result.Data.Token == "" {
+		return "", 0, "", fmt.Errorf("imagebed credential returned code=%d message=%s", result.Code, result.Message)
+	}
+
+	return result.Data.Token, result.Data.ExpiresIn, base + "/api/upload/resumable/", nil
+}
