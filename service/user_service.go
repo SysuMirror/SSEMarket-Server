@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -696,9 +697,15 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 				totalLikeNum += likeNum
 			}
 		}
-		sueCount, _ := s.users.CountSuccessfulSuesByUser(ctx, user.ID)
+		browseBonus := 0
+		postBrowseNums, err := s.users.ListPostBrowseNumsByUserID(ctx, user.ID)
+		if err == nil {
+			for _, n := range postBrowseNums {
+				browseBonus += int(math.Ceil(float64(n) * 0.005))
+			}
+		}
 		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum +
-			int(psaveCount)*3 + int(commentedCount+repliedCount)*2 + int(sueCount)*20 - user.PunishNum*20
+			int(psaveCount)*3 + int(commentedCount+repliedCount)*2 + browseBonus
 		_ = s.users.UpdateScore(ctx, user.ID, totalScore)
 	}
 	log.Println("Score updated")

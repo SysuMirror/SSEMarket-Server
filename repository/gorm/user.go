@@ -673,13 +673,11 @@ func (r *userRepository) GetCcommentLikeNum(ctx context.Context, ccommentID int)
 	return likeNum, nil
 }
 
-func (r *userRepository) CountSuccessfulSuesByUser(ctx context.Context, userID int) (int64, error) {
-	var count int64
-	err := r.session(ctx).Model(&model.Sue{}).
-		Where("status = ? AND finish = ? AND userID = ?", " ok", 1, userID).
-		Select("DISTINCT targettype, targetID").
-		Count(&count).Error
-	return count, err
+// ListPostBrowseNumsByUserID 返回该用户每帖浏览量,供积分公式逐帖 CEIL(browse*0.005) 使用。
+func (r *userRepository) ListPostBrowseNumsByUserID(ctx context.Context, userID int) ([]int, error) {
+	var nums []int
+	err := r.session(ctx).Model(&model.Post{}).Where("userID = ?", userID).Pluck("browse_num", &nums).Error
+	return nums, err
 }
 
 func (r *userRepository) ListPostSummariesByUserID(ctx context.Context, userID int) ([]domain.PostSummary, error) {
