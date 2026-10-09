@@ -62,6 +62,7 @@ type UserRepository interface {
 	ListCcommentIDsByUserID(ctx context.Context, userID int) ([]int, error)
 	GetCcommentLikeNum(ctx context.Context, ccommentID int) (int, error)
 	ListPostBrowseNumsByUserID(ctx context.Context, userID int) ([]int, error)
+	CountPvotesByPostIDs(ctx context.Context, postIDs []int) (int64, error)
 
 	ListPostSummariesByUserID(ctx context.Context, userID int) ([]domain.PostSummary, error)
 	CountPsavesByUserID(ctx context.Context, userID int) (int64, error)

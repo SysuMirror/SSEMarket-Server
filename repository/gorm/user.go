@@ -673,11 +673,20 @@ func (r *userRepository) GetCcommentLikeNum(ctx context.Context, ccommentID int)
 	return likeNum, nil
 }
 
-// ListPostBrowseNumsByUserID 返回该用户每帖浏览量,供积分公式逐帖 CEIL(browse*0.005) 使用。
+// ListPostBrowseNumsByUserID 返回该用户每帖浏览量,供积分公式逐帖 CEIL(browse*0.01) 使用。
 func (r *userRepository) ListPostBrowseNumsByUserID(ctx context.Context, userID int) ([]int, error) {
 	var nums []int
 	err := r.session(ctx).Model(&model.Post{}).Where("userID = ?", userID).Pluck("browse_num", &nums).Error
 	return nums, err
+}
+
+func (r *userRepository) CountPvotesByPostIDs(ctx context.Context, postIDs []int) (int64, error) {
+	if len(postIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.session(ctx).Model(&model.Pvote{}).Where("postID IN (?)", postIDs).Count(&count).Error
+	return count, err
 }
 
 func (r *userRepository) ListPostSummariesByUserID(ctx context.Context, userID int) ([]domain.PostSummary, error) {
