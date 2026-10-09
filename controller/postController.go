@@ -161,6 +161,7 @@ type PostResponse struct {
 	UserID        int
 	UserName      string
 	UserScore     int
+	UserTitle     string
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -200,12 +201,12 @@ type HotCommentResponse struct {
 
 // anonymizeAuthor 对匿名帖的作者信息脱敏：匿名帖对所有查看者（含作者本人）脱敏作者信息，
 // 但返回 isOwner 标志让前端能管理自己的帖子。
-func anonymizeAuthor(isAnonymous bool, viewerUserID, authorUserID int, name, phone, avatar, identity string, score int) (string, string, string, string, int, int, bool) {
+func anonymizeAuthor(isAnonymous bool, viewerUserID, authorUserID int, name, phone, avatar, identity, title string, score int) (string, string, string, string, string, int, int, bool) {
 	isOwner := viewerUserID == authorUserID
 	if !isAnonymous {
-		return name, phone, avatar, identity, score, authorUserID, isOwner
+		return name, phone, avatar, identity, title, score, authorUserID, isOwner
 	}
-	return "匿名用户", "", "", "", 0, 0, isOwner
+	return "匿名用户", "", "", "", "", 0, 0, isOwner
 }
 
 type BrowseMeg struct {
@@ -348,15 +349,15 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 	if p == nil {
 		return PostResponse{}
 	}
-	name, phone, avatar, identity, score := "", "", "", "", 0
+	name, phone, avatar, identity, title, score := "", "", "", "", "", 0
 	authorID := 0
 	var isOwner bool
 	if a != nil {
-		name, phone, avatar, identity, score = a.Name, a.Phone, a.AvatarURL, a.Identity, a.Score
+		name, phone, avatar, identity, title, score = a.Name, a.Phone, a.AvatarURL, a.Identity, a.CustomTitle, a.Score
 		authorID = a.ID
 	}
 	// 匿名帖对所有查看者脱敏作者信息，但返回 isOwner 标志
-	name, phone, avatar, identity, score, authorID, isOwner = anonymizeAuthor(p.IsAnonymous, viewerUserID, authorID, name, phone, avatar, identity, score)
+	name, phone, avatar, identity, title, score, authorID, isOwner = anonymizeAuthor(p.IsAnonymous, viewerUserID, authorID, name, phone, avatar, identity, title, score)
 
 	// 从 Content 中提取 markdown 图片 URL，填充到 Photos（兼容新版帖子无 Photos 字段的情况）
 	photos := p.Photos
@@ -370,6 +371,7 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		UserID:        authorID,
 		UserName:      name,
 		UserScore:     score,
+		UserTitle:     title,
 		UserTelephone: phone,
 		UserAvatar:    avatar,
 		UserIdentity:  identity,
@@ -776,6 +778,7 @@ type PostDetailsResponse struct {
 	UserID        uint
 	UserName      string
 	UserScore     int
+	UserTitle     string
 	UserTelephone string
 	UserAvatar    string
 	UserIdentity  string
@@ -901,19 +904,20 @@ func ShowDetails(c *gin.Context) {
 
 func postDetailToResponse(d *domain.PostDetail, viewerUserID int) PostDetailsResponse {
 	p, u := d.Post, d.Author
-	name, phone, avatar, identity, score := "", "", "", "", 0
+	name, phone, avatar, identity, title, score := "", "", "", "", "", 0
 	userID := 0
 	if u != nil {
-		name, phone, avatar, identity, score = u.Name, u.Phone, u.AvatarURL, u.Identity, u.Score
+		name, phone, avatar, identity, title, score = u.Name, u.Phone, u.AvatarURL, u.Identity, u.CustomTitle, u.Score
 		userID = u.ID
 	}
 	// 匿名帖对所有查看者脱敏作者信息，但返回 isOwner 标志
-	name, phone, avatar, identity, score, userID, isOwner := anonymizeAuthor(p.IsAnonymous, viewerUserID, userID, name, phone, avatar, identity, score)
+	name, phone, avatar, identity, title, score, userID, isOwner := anonymizeAuthor(p.IsAnonymous, viewerUserID, userID, name, phone, avatar, identity, title, score)
 	return PostDetailsResponse{
 		PostID:        uint(p.ID),
 		UserID:        uint(userID),
 		UserName:      name,
 		UserScore:     score,
+		UserTitle:     title,
 		UserTelephone: phone,
 		UserAvatar:    avatar,
 		UserIdentity:  identity,

@@ -12,6 +12,7 @@ type User struct {
 	AvatarURL                  string
 	Identity                   string
 	Score                      int
+	CustomTitle                string
 	BanEnd                     time.Time
 	PunishNum                  int
 	HideProfilePosts           bool

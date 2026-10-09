@@ -248,6 +248,11 @@ func isDuplicateKeyError(err error) bool {
 	return errors.As(err, &me) && me.Number == 1062
 }
 
+// 定点更新,不走全字段 Save(users.banend 为 NULL 的行全字段写回会被严格模式拒绝)
+func (r *userRepository) UpdateCustomTitle(ctx context.Context, userID int, title string) error {
+	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("custom_title", title).Error
+}
+
 func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedPassword string) error {
 	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("password", hashedPassword).Error
 }

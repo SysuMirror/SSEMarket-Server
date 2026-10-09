@@ -34,9 +34,10 @@ type UserCacheItem struct {
 	UserID    uint   `json:"user_id"`
 	Name      string `json:"name"`
 	Phone     string `json:"phone"`
-	Score     int    `json:"score"`
-	AvatarURL string `json:"avatar_url"`
-	Identity  string `json:"identity"`
+	Score       int    `json:"score"`
+	AvatarURL   string `json:"avatar_url"`
+	Identity    string `json:"identity"`
+	CustomTitle string `json:"custom_title"`
 }
 
 // ---------------------------------------------------------------------------------
@@ -64,12 +65,13 @@ func (d *PostDetailCacheDTO) ConvertFromModel(post model.Post, user model.User) 
 
 	// 转换用户信息
 	d.User = UserCacheItem{
-		UserID:    uint(user.UserID),
-		Name:      user.Name,
-		Phone:     user.Phone,
-		Score:     user.Score,
-		AvatarURL: user.AvatarURL,
-		Identity:  user.Identity,
+		UserID:      uint(user.UserID),
+		Name:        user.Name,
+		Phone:       user.Phone,
+		Score:       user.Score,
+		AvatarURL:   user.AvatarURL,
+		Identity:    user.Identity,
+		CustomTitle: user.CustomTitle,
 	}
 }
 
@@ -102,12 +104,13 @@ func (d *PostDetailCacheDTO) ConvertToModel() (model.Post, model.User) {
 
 	// 组装 User model
 	user := model.User{
-		UserID:    int(d.User.UserID),
-		Name:      d.User.Name,
-		Phone:     d.User.Phone,
-		Score:     d.User.Score,
-		AvatarURL: d.User.AvatarURL,
-		Identity:  d.User.Identity,
+		UserID:      int(d.User.UserID),
+		Name:        d.User.Name,
+		Phone:       d.User.Phone,
+		Score:       d.User.Score,
+		AvatarURL:   d.User.AvatarURL,
+		Identity:    d.User.Identity,
+		CustomTitle: d.User.CustomTitle,
 	}
 
 	return post, user

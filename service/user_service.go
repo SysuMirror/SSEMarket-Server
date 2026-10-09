@@ -625,6 +625,28 @@ func (s *userService) UpdateUserInfo(ctx context.Context, in domain.UpdateUserIn
 	return nil
 }
 
+// SetCustomTitle 满级(Lv8, score>=5000)用户自定义称号;1~12 字符(rune 计),自动 trim。
+func (s *userService) SetCustomTitle(ctx context.Context, userID int, title string) error {
+	title = strings.TrimSpace(title)
+	runes := []rune(title)
+	if len(runes) == 0 || len(runes) > 12 {
+		return domain.ErrBadRequest
+	}
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.Score < 5000 {
+		return domain.ErrForbidden
+	}
+	if err := s.users.UpdateCustomTitle(ctx, userID, title); err != nil {
+		return err
+	}
+	InvalidateUserSession(ctx, u.ID)
+	InvalidateUserInfo(u.ID)
+	return nil
+}
+
 func (s *userService) ToggleEmailNotification(ctx context.Context, userID int) error {
 	return s.users.ToggleEmailNotificationBlocked(ctx, userID)
 }

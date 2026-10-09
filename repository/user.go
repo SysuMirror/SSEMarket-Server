@@ -22,6 +22,7 @@ type UserRepository interface {
 	UpdateEmailWithHistory(ctx context.Context, userID int, oldEmail, newEmail string) error
 	ExistsUsedEmail(ctx context.Context, userID int, email string) (bool, error)
 	UpdatePassword(ctx context.Context, userID int, hashedPassword string) error
+	UpdateCustomTitle(ctx context.Context, userID int, title string) error
 	UpdateAvatarURL(ctx context.Context, userID int, avatarURL string) error
 	ToggleEmailNotificationBlocked(ctx context.Context, userID int) error
 	UpdateScore(ctx context.Context, userID int, score int) error

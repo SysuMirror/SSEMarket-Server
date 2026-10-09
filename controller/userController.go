@@ -734,6 +734,7 @@ func GetInfo(c *gin.Context) {
 		"punishnum":        user.PunishNum,
 		"avatarURL":        user.AvatarURL,
 		"hideProfilePosts": user.HideProfilePosts,
+		"customTitle":      user.CustomTitle,
 	}
 	tokenUserID := GetTokenUserID(c)
 	if tokenUserID != 0 && tokenUserID == user.ID {
@@ -782,6 +783,30 @@ func UpdateUserInfo(c *gin.Context) {
 		return
 	}
 	response.Response(c, http.StatusOK, 200, nil, "用户信息更新成功")
+}
+
+func SetCustomTitle(c *gin.Context) {
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.Bind(&req); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数解析错误")
+		return
+	}
+	if err := service.Users.SetCustomTitle(c.Request.Context(), GetTokenUserID(c), req.Title); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrForbidden):
+			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "达到 Lv8(5000 经验)后才能自定义称号")
+		case errors.Is(err, domain.ErrBadRequest):
+			response.Response(c, http.StatusBadRequest, 400, nil, "称号需为 1~12 个字符")
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
+		default:
+			response.Response(c, http.StatusInternalServerError, 500, nil, "数据库错误")
+		}
+		return
+	}
+	response.Response(c, http.StatusOK, 200, nil, "称号设置成功")
 }
 
 func CalculateAndSaveScores() {

@@ -650,11 +650,12 @@ func postToDomainFromModel(p model.Post) *domain.Post {
 
 func userToDomainFromModel(u model.User) *domain.User {
 	return &domain.User{
-		ID:        u.UserID,
-		Phone:     u.Phone,
-		Name:      u.Name,
-		Score:     u.Score,
-		AvatarURL: u.AvatarURL,
-		Identity:  u.Identity,
+		ID:          u.UserID,
+		Phone:       u.Phone,
+		Name:        u.Name,
+		Score:       u.Score,
+		AvatarURL:   u.AvatarURL,
+		Identity:    u.Identity,
+		CustomTitle: u.CustomTitle,
 	}
 }

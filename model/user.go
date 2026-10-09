@@ -17,6 +17,8 @@ type User struct {
 	AvatarURL                  string    `gorm:"column:avatar_url;type:varchar(255)"`
 	Identity                   string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
 	Score                      int       `gorm:"column:score;type:int;default:0"`
+	// CustomTitle 满级(Lv8, score>=5000)用户自定义称号;空=未自定义,对外显示用户名
+	CustomTitle                string    `gorm:"column:custom_title;type:varchar(32)"`
 	ReceivedLikeNum            int       `gorm:"column:received_like_num;type:int;default:0"`
 	ReceivedVoteNum            int       `gorm:"column:received_vote_num;type:int;default:0"`
 	ISEmailNotificationBlocked bool      `gorm:"column:is_email_notification_blocked;type:bool"`
