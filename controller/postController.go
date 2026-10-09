@@ -215,7 +215,7 @@ type BrowseMeg struct {
 	Searchinfo    string `json:"searchinfo"`
 	Tag           string `json:"tag"`
 	Searchsort    string `json:"searchsort"` // home | history | save | rating
-	OrderBy       string `json:"orderBy"`    // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc
+	OrderBy       string `json:"orderBy"`    // time_desc|time_asc|like_desc|like_asc|comment_desc|comment_asc|browse_desc|browse_asc
 	TimeFrom      string `json:"timeFrom"`
 	TimeTo        string `json:"timeTo"`
 	Limit         int    `json:"limit"`  // 默认 15；>15 时不走公共 Feed 缓存
