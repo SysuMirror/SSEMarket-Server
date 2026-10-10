@@ -707,7 +707,11 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 		pvoteCount, _ := s.users.CountPvotesByPostIDs(ctx, postIDs)
 		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum +
 			int(psaveCount)*3 + int(pvoteCount)*3 + int(commentedCount+repliedCount)*2 + browseBonus
-		_ = s.users.UpdateScore(ctx, user.ID, totalScore)
+		if totalScore != user.Score {
+			// 分数落库后同步失效用户信息缓存,否则页面等级最长滞后 1h+ 才更新
+			_ = s.users.UpdateScore(ctx, user.ID, totalScore)
+			InvalidateUserInfo(user.ID)
+		}
 	}
 	log.Println("Score updated")
 }
