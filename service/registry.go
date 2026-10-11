@@ -25,6 +25,7 @@ var (
 	Sso           SsoService
 	Quest         QuestService
 	Novels        NovelService
+	NovelPoints   NovelPointsService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -65,5 +66,7 @@ func InitServices(db *gorm.DB) {
 	Quest = NewQuestService(questRepo, postRepo, userRepo)
 
 	novelRepo := gormrepo.NewNovelRepository(db)
-	Novels = NewNovelService(novelRepo)
+	ledgerRepo := gormrepo.NewLedgerRepository(db)
+	NovelPoints = NewNovelPointsService(ledgerRepo, novelRepo)
+	Novels = NewNovelService(novelRepo, NovelPoints)
 }

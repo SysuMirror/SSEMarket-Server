@@ -21,16 +21,17 @@ const (
 	novelChapterMaxRunes  = 50000
 	novelAuthorNoteMax    = 1000
 	novelCommentMaxRunes  = 500
-	novelChapterLimit     = 200
 	novelCoverURLMaxRunes = 500
 )
 
 type novelService struct {
 	novels repository.NovelRepository
+	// points 积分/经验发放；允许为 nil（单测与未开通积分的场景），所有调用都做了 nil 判断。
+	points NovelPointsService
 }
 
-func NewNovelService(novels repository.NovelRepository) NovelService {
-	return &novelService{novels: novels}
+func NewNovelService(novels repository.NovelRepository, points NovelPointsService) NovelService {
+	return &novelService{novels: novels, points: points}
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,7 @@ func (s *novelService) GetNovelDetail(ctx context.Context, novelID, viewerID int
 	}
 	_ = s.novels.IncrNovelRead(ctx, novelID)
 	novel.ReadNum++
+	s.grantReaderUV(ctx, novel, viewerID)
 
 	author, err := s.novels.FindUserByID(ctx, novel.UserID)
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -254,6 +256,7 @@ func (s *novelService) GetChapterDetail(ctx context.Context, chapterID, viewerID
 		paragraphs = append(paragraphs, domain.NovelParagraph{
 			Index:      i,
 			Text:       text,
+			ImageURL:   domain.NovelParagraphImage(text),
 			CommentNum: counts[i],
 		})
 	}
@@ -262,6 +265,7 @@ func (s *novelService) GetChapterDetail(ctx context.Context, chapterID, viewerID
 	if novel, err := s.novels.FindNovelByID(ctx, chapter.NovelID); err == nil {
 		detail.NovelTitle = novel.Title
 		detail.AuthorName = novel.AuthorName
+		s.grantReaderUV(ctx, novel, viewerID)
 	}
 	if prev, err := s.novels.FindAdjacentChapter(ctx, chapter.NovelID, chapter.ChapterNum, false); err != nil {
 		return nil, err
@@ -299,13 +303,7 @@ func (s *novelService) CreateChapter(ctx context.Context, in domain.NovelChapter
 	if utf8.RuneCountInString(note) > novelAuthorNoteMax {
 		return nil, domain.ErrBadRequest
 	}
-	total, err := s.novels.CountChapters(ctx, in.NovelID)
-	if err != nil {
-		return nil, err
-	}
-	if total >= novelChapterLimit {
-		return nil, domain.ErrNovelChapterLimit
-	}
+	// 章节数不设上限。
 	maxNum, err := s.novels.MaxChapterNum(ctx, in.NovelID)
 	if err != nil {
 		return nil, err
@@ -317,8 +315,9 @@ func (s *novelService) CreateChapter(ctx context.Context, in domain.NovelChapter
 		Title:      title,
 		Content:    in.Content,
 		AuthorNote: note,
-		WordNum:    domain.NovelWordCount(in.Content),
-		CreatedAt:  time.Now(),
+		// 图片段落不计入字数（图片链接不是「写了多少字」）。
+		WordNum:   domain.NovelContentWordCount(in.Content),
+		CreatedAt: time.Now(),
 	}
 	if err := s.novels.CreateChapter(ctx, chapter); err != nil {
 		return nil, err
@@ -326,6 +325,11 @@ func (s *novelService) CreateChapter(ctx context.Context, in domain.NovelChapter
 	_ = s.novels.IncrNovelChapterCount(ctx, in.NovelID)
 	_ = s.novels.AddNovelWordNum(ctx, in.NovelID, chapter.WordNum)
 	_ = s.novels.UpdateNovelLatest(ctx, in.NovelID, chapter.ID, chapter.Title, chapter.CreatedAt)
+	// 作者积分：章节更新 +2 积分（每日限 5 章），写作字数里程碑每满 5000 字 +1 积分。
+	if s.points != nil {
+		_, _ = s.points.GrantChapterPublish(ctx, novel.UserID, in.NovelID, chapter.ID)
+		_, _ = s.points.SettleWritingWords(ctx, novel.UserID, in.NovelID, chapter.WordNum)
+	}
 	return chapter, nil
 }
 
@@ -451,6 +455,10 @@ func (s *novelService) CreateComment(ctx context.Context, in domain.NovelComment
 	if chapterID > 0 {
 		_ = s.novels.IncrChapterComment(ctx, chapterID, 1)
 	}
+	// 读者经验：发表评论 +2 经验（每条首次计入，单用户单日上限防灌水）。
+	if s.points != nil {
+		_, _ = s.points.GrantCommentExp(ctx, in.UserID, in.NovelID, comment.ID)
+	}
 	return comment, author, nil
 }
 
@@ -473,10 +481,25 @@ func (s *novelService) DeleteComment(ctx context.Context, commentID, userID int)
 }
 
 func (s *novelService) ToggleCommentLike(ctx context.Context, commentID, userID int) error {
-	if _, err := s.novels.FindCommentByID(ctx, commentID); err != nil {
+	comment, err := s.novels.FindCommentByID(ctx, commentID)
+	if err != nil {
 		return err
 	}
-	return s.novels.ToggleCommentLike(ctx, commentID, userID)
+	// 先记下当前是否已点赞：只有「新点赞」才给经验；取消点赞不回收（流水只增不减）。
+	// 即便这里读到的是旧值，发放侧的幂等键也保证同一人同一评论只会计一次。
+	alreadyLiked := false
+	if s.points != nil && comment.UserID != userID {
+		if set, err := s.novels.CommentLikedSet(ctx, userID, []int{commentID}); err == nil {
+			alreadyLiked = set[commentID]
+		}
+	}
+	if err := s.novels.ToggleCommentLike(ctx, commentID, userID); err != nil {
+		return err
+	}
+	if s.points != nil && !alreadyLiked {
+		_, _ = s.points.GrantCommentLikeExp(ctx, comment.UserID, comment.NovelID, commentID, userID)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -484,10 +507,19 @@ func (s *novelService) ToggleCommentLike(ctx context.Context, commentID, userID 
 // ---------------------------------------------------------------------------
 
 func (s *novelService) ToggleShelf(ctx context.Context, novelID, userID int) (bool, error) {
-	if _, err := s.novels.FindNovelByID(ctx, novelID); err != nil {
+	novel, err := s.novels.FindNovelByID(ctx, novelID)
+	if err != nil {
 		return false, err
 	}
-	return s.novels.ToggleShelf(ctx, novelID, userID)
+	added, err := s.novels.ToggleShelf(ctx, novelID, userID)
+	if err != nil {
+		return false, err
+	}
+	// 作者积分：被加入书架每人 +5 积分（同人同书仅首次计入，移出再加不重复给）。
+	if added && s.points != nil {
+		_, _ = s.points.GrantShelfAdd(ctx, novel.UserID, novelID, userID)
+	}
+	return added, nil
 }
 
 func (s *novelService) IsOnShelf(ctx context.Context, novelID, userID int) (bool, error) {
@@ -522,7 +554,7 @@ func (s *novelService) ReportProgress(ctx context.Context, in domain.NovelProgre
 	if percent > 100 {
 		percent = 100
 	}
-	return s.novels.UpsertProgress(ctx, &domain.NovelProgress{
+	if err := s.novels.UpsertProgress(ctx, &domain.NovelProgress{
 		NovelID:        in.NovelID,
 		UserID:         in.UserID,
 		ChapterID:      chapter.ID,
@@ -530,7 +562,23 @@ func (s *novelService) ReportProgress(ctx context.Context, in domain.NovelProgre
 		ParagraphIndex: in.ParagraphIndex,
 		Percent:        percent,
 		UpdatedAt:      time.Now(),
-	})
+	}); err != nil {
+		return err
+	}
+	// 读者经验：阅读心跳秒数累计，每满 1 小时 +1 经验（游标幂等，重复上报不会重复发）。
+	if s.points != nil && in.ReadSeconds > 0 {
+		_, _ = s.points.SettleReadTime(ctx, in.UserID, in.NovelID, in.ReadSeconds)
+	}
+	return nil
+}
+
+// grantReaderUV 读者第一次进入这本书（详情页或任一章节）时给作者 +0.1 积分。
+// 按本独立、UV 去重、作者自己阅读不计。
+func (s *novelService) grantReaderUV(ctx context.Context, novel *domain.Novel, viewerID int) {
+	if s.points == nil || novel == nil || viewerID <= 0 || viewerID == novel.UserID {
+		return
+	}
+	_, _ = s.points.GrantReaderUV(ctx, novel.UserID, novel.ID, viewerID)
 }
 
 func (s *novelService) GetProgress(ctx context.Context, novelID, userID int) (*domain.NovelProgress, error) {

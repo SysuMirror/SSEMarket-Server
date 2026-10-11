@@ -7,6 +7,7 @@ import (
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -93,6 +94,20 @@ type NovelProgressMsg struct {
 	ChapterID      int     `json:"chapterID"`
 	ParagraphIndex int     `json:"paragraphIndex"`
 	Percent        float64 `json:"percent"`
+	// ReadSeconds 本次心跳新增的阅读秒数（服务端封顶后累计到经验游标）。
+	ReadSeconds int `json:"readSeconds"`
+}
+
+// NovelRewardMsg 打赏入参：Points 是作者收到的积分，等于打赏者扣掉的经验。
+type NovelRewardMsg struct {
+	NovelID int `json:"novelID"`
+	Points  int `json:"points"`
+}
+
+// NovelLedgerListMsg 流水分页入参。
+type NovelLedgerListMsg struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +162,7 @@ type NovelChapterItem struct {
 type NovelParagraphItem struct {
 	Index      int    `json:"index"`
 	Text       string `json:"text"`
+	ImageURL   string `json:"imageURL"`
 	CommentNum int    `json:"commentNum"`
 }
 
@@ -303,7 +319,13 @@ func novelWriteError(c *gin.Context, err error, notFoundMsg string) {
 		response.Response(c, http.StatusForbidden, 403, nil, err.Error())
 	case errors.Is(err, domain.ErrForbidden):
 		response.Response(c, http.StatusForbidden, 403, nil, "无权操作")
-	case errors.Is(err, domain.ErrNovelChapterLimit):
+	case errors.Is(err, domain.ErrNovelNotEnoughExperience):
+		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+	case errors.Is(err, domain.ErrNovelRewardSelf):
+		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+	case errors.Is(err, domain.ErrNovelRewardDailyLimit):
+		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+	case errors.Is(err, domain.ErrNovelAlreadyCheckedIn):
 		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 	case errors.Is(err, domain.ErrBadRequest):
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数不符合要求")
@@ -596,7 +618,12 @@ func NovelChapter(c *gin.Context) {
 	}
 	paragraphs := make([]NovelParagraphItem, 0, len(detail.Paragraphs))
 	for _, p := range detail.Paragraphs {
-		paragraphs = append(paragraphs, NovelParagraphItem{Index: p.Index, Text: p.Text, CommentNum: p.CommentNum})
+		paragraphs = append(paragraphs, NovelParagraphItem{
+			Index:      p.Index,
+			Text:       p.Text,
+			ImageURL:   p.ImageURL,
+			CommentNum: p.CommentNum,
+		})
 	}
 	resp := NovelChapterDetailResponse{
 		Chapter:    novelChapterToItem(detail.Chapter),
@@ -872,6 +899,7 @@ func NovelProgressReport(c *gin.Context) {
 		ChapterID:      msg.ChapterID,
 		ParagraphIndex: msg.ParagraphIndex,
 		Percent:        msg.Percent,
+		ReadSeconds:    msg.ReadSeconds,
 	}); err != nil {
 		novelWriteError(c, err, "章节不存在")
 		return
@@ -906,4 +934,123 @@ func NovelProgressGet(c *gin.Context) {
 		"percent":        progress.Percent,
 		"updatedAt":      progress.UpdatedAt,
 	}})
+}
+
+// ---------------------------------------------------------------------------
+// 积分与经验
+// ---------------------------------------------------------------------------
+
+// novelLedgerItem 流水条目：label/currency 由服务端给出，前端不再自己翻译事件名。
+func novelLedgerItem(l *domain.NovelLedger) gin.H {
+	return gin.H{
+		"ledgerID":     l.ID,
+		"novelID":      l.NovelID,
+		"event":        l.EventType,
+		"label":        domain.NovelEventLabel(l.EventType),
+		"currency":     domain.NovelEventCurrency(l.EventType),
+		"amount":       l.Amount,
+		"settledValue": l.SettledValue,
+		"createdAt":    l.CreatedAt,
+	}
+}
+
+// NovelPointsSummary 我的经验与作者积分总览。
+func NovelPointsSummary(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	summary, err := service.NovelPoints.Summary(c.Request.Context(), user.ID)
+	if err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	byEvent := make([]gin.H, 0, len(summary.ByEvent))
+	for event, amount := range summary.ByEvent {
+		byEvent = append(byEvent, gin.H{
+			"event":    event,
+			"label":    domain.NovelEventLabel(event),
+			"currency": domain.NovelEventCurrency(event),
+			"amount":   amount,
+		})
+	}
+	// 事件顺序固定，避免每次刷新列表跳来跳去。
+	sort.Slice(byEvent, func(i, j int) bool {
+		return byEvent[i]["event"].(string) < byEvent[j]["event"].(string)
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"experience":    summary.Experience,
+		"pointsFen":     summary.PointsFen,
+		"pointsScore":   summary.PointsScore,
+		"byEvent":       byEvent,
+		"todayExp":      summary.TodayExp,
+		"checkInDay":    summary.CheckInDay,
+		"checkInStreak": summary.CheckInStreak,
+	})
+}
+
+// NovelPointsLedger 我的积分/经验流水（分页）。
+func NovelPointsLedger(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	var msg NovelLedgerListMsg
+	_ = c.ShouldBindBodyWith(&msg, binding.JSON)
+	items, total, err := service.NovelPoints.Ledger(c.Request.Context(), user.ID, msg.Limit, msg.Offset)
+	if err != nil {
+		apperr.Write(c, err)
+		return
+	}
+	list := make([]gin.H, 0, len(items))
+	for _, l := range items {
+		list = append(list, novelLedgerItem(l))
+	}
+	c.JSON(http.StatusOK, gin.H{"items": list, "total": total})
+}
+
+// NovelPointsCheckIn 每日签到（每天一次，重复签到不重复发放）。
+func NovelPointsCheckIn(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	result, err := service.NovelPoints.CheckIn(c.Request.Context(), user.ID)
+	if err != nil {
+		novelWriteError(c, err, "签到失败")
+		return
+	}
+	data := gin.H{"amount": result.Amount, "streak": result.Streak, "day": result.Day, "already": result.Already}
+	if result.Already {
+		response.Response(c, http.StatusOK, 200, data, "今天已经签到过了")
+		return
+	}
+	response.Response(c, http.StatusOK, 200, data, "签到成功")
+}
+
+// NovelReward 打赏：读者花等量经验，作者收到积分（同一本书每人每天最多一次）。
+func NovelReward(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	var msg NovelRewardMsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
+	if msg.NovelID <= 0 || msg.Points <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "无效的打赏参数")
+		return
+	}
+	result, err := service.NovelPoints.RewardAuthor(c.Request.Context(), user.ID, msg.NovelID, msg.Points)
+	if err != nil {
+		novelWriteError(c, err, "小说不存在")
+		return
+	}
+	response.Response(c, http.StatusOK, 200, gin.H{
+		"points":     result.Points,
+		"cost":       result.Cost,
+		"experience": result.Experience,
+	}, "已打赏")
 }

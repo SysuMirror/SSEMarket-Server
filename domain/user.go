@@ -12,7 +12,10 @@ type User struct {
 	AvatarURL                  string
 	Identity                   string
 	Score                      int
-	BanEnd                     time.Time
+	// Experience 读者经验；NovelPoints 作者积分（单位：分，1 积分 = 10 分）。
+	Experience                   int
+	NovelPoints                  int
+	BanEnd                       time.Time
 	PunishNum                  int
 	HideProfilePosts           bool
 	ISEmailNotificationBlocked bool

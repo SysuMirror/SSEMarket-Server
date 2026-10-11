@@ -727,6 +727,11 @@ func (r *novelRepository) UpsertProgress(ctx context.Context, p *domain.NovelPro
 	if err != nil {
 		return err
 	}
+	// 进度只前进不倒退：回看旧章节、或阅读心跳上报的 0% 都不该把「继续阅读」位置抹掉。
+	// 阅读经验仍然照常结算（SettleReadTime 在 service 层，与本函数无关）。
+	if p.ChapterNum < m.ChapterNum || (p.ChapterNum == m.ChapterNum && p.Percent < m.Percent) {
+		return nil
+	}
 	return r.session(ctx).Model(&m).Updates(map[string]any{
 		"chapter_id":      p.ChapterID,
 		"chapter_num":     p.ChapterNum,

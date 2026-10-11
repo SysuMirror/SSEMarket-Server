@@ -169,6 +169,10 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/novel/shelf/list", controller.NovelShelfList)
 	auth.POST("/api/auth/novel/progress/report", controller.NovelProgressReport)
 	auth.POST("/api/auth/novel/progress/get", controller.NovelProgressGet)
+	auth.POST("/api/auth/novel/points/summary", controller.NovelPointsSummary)
+	auth.POST("/api/auth/novel/points/ledger", controller.NovelPointsLedger)
+	auth.POST("/api/auth/novel/points/checkin", controller.NovelPointsCheckIn)
+	auth.POST("/api/auth/novel/reward", controller.NovelReward)
 
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
 	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)

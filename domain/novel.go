@@ -81,9 +81,11 @@ type NovelComment struct {
 }
 
 // NovelParagraph 渲染用段落：Index 与前端分段序号一致。
+// ImageURL 非空表示这是一段图片（正文里单独一行的图片），前端按图片渲染。
 type NovelParagraph struct {
 	Index      int    `json:"index"`
 	Text       string `json:"text"`
+	ImageURL   string `json:"imageURL"`
 	CommentNum int    `json:"commentNum"`
 }
 
@@ -150,12 +152,14 @@ type NovelCommentCreateInput struct {
 }
 
 // NovelProgressInput 上报阅读进度入参。
+// ReadSeconds 是本次心跳新增的阅读秒数（服务端封顶后累计到经验游标）。
 type NovelProgressInput struct {
 	NovelID        int
 	UserID         int
 	ChapterID      int
 	ParagraphIndex int
 	Percent        float64
+	ReadSeconds    int
 }
 
 // NovelProgress 阅读进度实体。
@@ -194,8 +198,7 @@ type NovelChapterDetail struct {
 
 // 小说业务错误。
 var (
-	ErrNovelChapterLimit = errors.New("单本书最多 200 章")
-	ErrNovelNotAuthor    = errors.New("只有本书作者可以管理这本书")
+	ErrNovelNotAuthor = errors.New("只有本书作者可以管理这本书")
 )
 
 // SplitNovelParagraphs 正文分段规则：换行分隔、去空白行。
@@ -215,9 +218,127 @@ func SplitNovelParagraphs(content string) []string {
 	return out
 }
 
+// novelImageExts 正文图片支持的扩展名（裸链接自动识别时用）。
+var novelImageExts = []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp"}
+
+// novelNonImageExts 一眼就不是图片的后缀。
+// Markdown 图片语法里作者已经写明「这是一张图」，而图床返回的 URL 常常没有扩展名
+// （例如 https://image.example/i/1728abc），所以那种写法只排除这些明确的非图片文件。
+var novelNonImageExts = []string{
+	".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".md", ".csv",
+	".mp3", ".wav", ".m4a", ".ogg", ".flac", ".mp4", ".mov", ".avi", ".mkv", ".webm",
+	".zip", ".rar", ".7z", ".gz", ".tar", ".exe", ".apk", ".js", ".json", ".html", ".htm",
+}
+
+// normalizeNovelURL 归一化并校验链接形态：无空白、必须是 http(s):// 或协议相对 //。
+// 返回小写形态供扩展名判断，原始 URL 由调用方自己保留。
+func normalizeNovelURL(raw string) (string, bool) {
+	u := strings.TrimSpace(raw)
+	if u == "" || strings.ContainsAny(u, " \t\n") {
+		return "", false
+	}
+	lower := strings.ToLower(u)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "//") {
+		return "", false
+	}
+	return lower, true
+}
+
+// novelURLPath 去掉 query / fragment，图床常带 ?x-oss-process=...。
+func novelURLPath(lower string) string {
+	if i := strings.IndexAny(lower, "?#"); i >= 0 {
+		return lower[:i]
+	}
+	return lower
+}
+
+// isNovelImageURL 是否是一个图片直链（必须带图片扩展名）。
+func isNovelImageURL(raw string) bool {
+	lower, ok := normalizeNovelURL(raw)
+	if !ok {
+		return false
+	}
+	path := novelURLPath(lower)
+	for _, ext := range novelImageExts {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNovelMarkdownImageURL Markdown 图片语法里的 URL：允许无扩展名的图床链接，
+// 但排除 novelNonImageExts 里明确的非图片文件。
+func isNovelMarkdownImageURL(raw string) bool {
+	lower, ok := normalizeNovelURL(raw)
+	if !ok {
+		return false
+	}
+	path := novelURLPath(lower)
+	for _, ext := range novelNonImageExts {
+		if strings.HasSuffix(path, ext) {
+			return false
+		}
+	}
+	return true
+}
+
+// NovelParagraphImage 判断段落是否为「图片段落」，是则返回图片 URL。
+//
+// 支持两种写法（都要求整段只有图片本身）：
+//  1. Markdown 图片：![任意说明](https://.../a.png) —— 作者明确意图，URL 可以没有扩展名
+//  2. 单独一行的图片直链：https://.../a.png —— 自动识别，必须带图片扩展名
+//
+// 分段规则按换行切段、丢弃空白行，所以「图片上下各留一个空行」天然就是一段。
+func NovelParagraphImage(text string) string {
+	s := strings.TrimSpace(text)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "![") {
+		i := strings.Index(s, "](")
+		if i < 0 {
+			return ""
+		}
+		rest := s[i+2:]
+		end := strings.LastIndex(rest, ")")
+		if end < 0 {
+			return ""
+		}
+		url := strings.TrimSpace(rest[:end])
+		// ![alt](url "标题")：只取第一个空格前的 URL。
+		if j := strings.IndexAny(url, " \t"); j >= 0 {
+			url = strings.TrimSpace(url[:j])
+		}
+		if !isNovelMarkdownImageURL(url) {
+			return ""
+		}
+		return url
+	}
+	if isNovelImageURL(s) {
+		return s
+	}
+	return ""
+}
+
+// NovelContentWordCount 正文字数：图片段落不计入（图片链接不算「写了多少字」）。
+func NovelContentWordCount(content string) int {
+	total := 0
+	for _, p := range SplitNovelParagraphs(content) {
+		if NovelParagraphImage(p) != "" {
+			continue
+		}
+		total += NovelWordCount(p)
+	}
+	return total
+}
+
 // NovelParagraphExcerpt 段落摘要（用于评论面板标注「针对哪一段」）。
 func NovelParagraphExcerpt(text string, maxRunes int) string {
 	text = strings.TrimSpace(text)
+	if NovelParagraphImage(text) != "" {
+		return "[图片]"
+	}
 	if maxRunes <= 0 {
 		maxRunes = 40
 	}

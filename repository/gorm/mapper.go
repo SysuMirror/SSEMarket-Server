@@ -47,6 +47,8 @@ func userToDomain(u *model.User) *domain.User {
 		AvatarURL:                  u.AvatarURL,
 		Identity:                   u.Identity,
 		Score:                      u.Score,
+		Experience:                 u.Experience,
+		NovelPoints:                u.NovelPoints,
 		BanEnd:                     u.Banend,
 		PunishNum:                  u.Punishnum,
 		HideProfilePosts:           u.HideProfilePosts,

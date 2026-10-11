@@ -184,6 +184,26 @@ type NovelService interface {
 	GetProgress(ctx context.Context, novelID, userID int) (*domain.NovelProgress, error)
 }
 
+// NovelPointsService 小说积分与经验体系（流水见 novel_ledger）。
+type NovelPointsService interface {
+	// 读者侧
+	SettleReadTime(ctx context.Context, userID, novelID, seconds int) (int, error)
+	GrantCommentExp(ctx context.Context, userID, novelID, commentID int) (int, error)
+	GrantCommentLikeExp(ctx context.Context, commentAuthorID, novelID, commentID, likerID int) (int, error)
+	CheckIn(ctx context.Context, userID int) (*domain.NovelCheckInResult, error)
+
+	// 作者侧
+	GrantShelfAdd(ctx context.Context, authorID, novelID, readerID int) (int, error)
+	GrantReaderUV(ctx context.Context, authorID, novelID, readerID int) (int, error)
+	SettleWritingWords(ctx context.Context, authorID, novelID, words int) (int, error)
+	GrantChapterPublish(ctx context.Context, authorID, novelID, chapterID int) (int, error)
+	RewardAuthor(ctx context.Context, fromUserID, novelID, points int) (*domain.NovelRewardResult, error)
+
+	// 查询
+	Summary(ctx context.Context, userID int) (*domain.NovelPointsSummary, error)
+	Ledger(ctx context.Context, userID, limit, offset int) ([]*domain.NovelLedger, int64, error)
+}
+
 // ShopService 商城领域服务。
 type ShopService interface {
 	Create(ctx context.Context, in domain.ProductCreateInput) (int, error)

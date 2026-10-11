@@ -17,6 +17,10 @@ type User struct {
 	AvatarURL                  string    `gorm:"column:avatar_url;type:varchar(255)"`
 	Identity                   string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
 	Score                      int       `gorm:"column:score;type:int;default:0"`
+	// Experience 读者经验（阅读/评论/签到等）；
+	// NovelPoints 作者积分，以「分」记账（1 积分 = 10 分），便于 0.1 积分也能整数记账。
+	Experience                 int       `gorm:"column:experience;type:int;default:0"`
+	NovelPoints                int       `gorm:"column:novel_points;type:int;default:0"`
 	ReceivedLikeNum            int       `gorm:"column:received_like_num;type:int;default:0"`
 	ReceivedVoteNum            int       `gorm:"column:received_vote_num;type:int;default:0"`
 	ISEmailNotificationBlocked bool      `gorm:"column:is_email_notification_blocked;type:bool"`

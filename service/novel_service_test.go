@@ -36,7 +36,8 @@ func (s *novelRepoStub) UpdateNovelFields(_ context.Context, novelID int, fields
 
 func newNovelServiceStub(novel *domain.Novel) (service.NovelService, *novelRepoStub) {
 	repo := &novelRepoStub{novel: novel}
-	return service.NewNovelService(repo), repo
+	// 积分服务传 nil：这组测试只覆盖改书逻辑，积分挂钩另有测试。
+	return service.NewNovelService(repo, nil), repo
 }
 
 func sampleNovel() *domain.Novel {
