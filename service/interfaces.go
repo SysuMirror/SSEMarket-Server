@@ -156,6 +156,33 @@ type RatingService interface {
 	FindUser(ctx context.Context, id int) (*domain.User, error)
 }
 
+// NovelService 小说板块领域服务。
+type NovelService interface {
+	ListNovels(ctx context.Context, filter domain.NovelBrowseFilter) ([]*domain.Novel, error)
+	CountNovels(ctx context.Context, filter domain.NovelBrowseFilter) (int64, error)
+	Categories(ctx context.Context) ([]domain.NovelCategory, error)
+	GetNovelDetail(ctx context.Context, novelID, viewerID int) (*domain.Novel, *domain.User, bool, *domain.NovelProgress, error)
+	EnrichNovels(ctx context.Context, novels []*domain.Novel, viewerID int) (map[int]*domain.User, map[int]bool, map[int]*domain.NovelProgress, error)
+	CreateNovel(ctx context.Context, in domain.NovelCreateInput) (int, error)
+	DeleteNovel(ctx context.Context, novelID, userID int) error
+
+	ListChapters(ctx context.Context, novelID, limit, offset int) ([]*domain.NovelChapter, int64, error)
+	GetChapterDetail(ctx context.Context, chapterID, viewerID int) (*domain.NovelChapterDetail, error)
+	CreateChapter(ctx context.Context, in domain.NovelChapterCreateInput) (*domain.NovelChapter, error)
+	DeleteChapter(ctx context.Context, chapterID, userID int) error
+
+	ListComments(ctx context.Context, filter domain.NovelCommentFilter, viewerID int) ([]*domain.NovelComment, map[int]*domain.User, map[int]bool, int64, error)
+	CreateComment(ctx context.Context, in domain.NovelCommentCreateInput) (*domain.NovelComment, *domain.User, error)
+	DeleteComment(ctx context.Context, commentID, userID int) error
+	ToggleCommentLike(ctx context.Context, commentID, userID int) error
+
+	ToggleShelf(ctx context.Context, novelID, userID int) (bool, error)
+	IsOnShelf(ctx context.Context, novelID, userID int) (bool, error)
+	ListShelf(ctx context.Context, userID, limit, offset int) ([]*domain.Novel, int64, error)
+	ReportProgress(ctx context.Context, in domain.NovelProgressInput) error
+	GetProgress(ctx context.Context, novelID, userID int) (*domain.NovelProgress, error)
+}
+
 // ShopService 商城领域服务。
 type ShopService interface {
 	Create(ctx context.Context, in domain.ProductCreateInput) (int, error)

@@ -24,6 +24,7 @@ var (
 	Lotteries     LotteryService
 	Sso           SsoService
 	Quest         QuestService
+	Novels        NovelService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -62,4 +63,7 @@ func InitServices(db *gorm.DB) {
 
 	questRepo := gormrepo.NewQuestRepository(db)
 	Quest = NewQuestService(questRepo, postRepo, userRepo)
+
+	novelRepo := gormrepo.NewNovelRepository(db)
+	Novels = NewNovelService(novelRepo)
 }
