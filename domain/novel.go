@@ -119,6 +119,17 @@ type NovelCreateInput struct {
 	Status     string
 }
 
+// NovelUpdateInput 改书入参：指针字段表示「本次要改的」，nil 表示不动。
+type NovelUpdateInput struct {
+	NovelID  int
+	UserID   int
+	Title    *string
+	CoverURL *string
+	Category *string
+	Intro    *string
+	Status   *string
+}
+
 // NovelChapterCreateInput 发章入参。
 type NovelChapterCreateInput struct {
 	NovelID    int

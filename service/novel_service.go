@@ -22,6 +22,7 @@ const (
 	novelAuthorNoteMax    = 1000
 	novelCommentMaxRunes  = 500
 	novelChapterLimit     = 200
+	novelCoverURLMaxRunes = 500
 )
 
 type novelService struct {
@@ -132,11 +133,15 @@ func (s *novelService) CreateNovel(ctx context.Context, in domain.NovelCreateInp
 	if status != domain.NovelStatusCompleted {
 		status = domain.NovelStatusSerializing
 	}
+	cover := strings.TrimSpace(in.CoverURL)
+	if utf8.RuneCountInString(cover) > novelCoverURLMaxRunes {
+		return 0, domain.ErrBadRequest
+	}
 	novel := &domain.Novel{
 		UserID:     in.UserID,
 		Title:      title,
 		AuthorName: authorName,
-		CoverURL:   strings.TrimSpace(in.CoverURL),
+		CoverURL:   cover,
 		Category:   category,
 		Intro:      intro,
 		Status:     status,
@@ -146,6 +151,57 @@ func (s *novelService) CreateNovel(ctx context.Context, in domain.NovelCreateInp
 		return 0, err
 	}
 	return novel.ID, nil
+}
+
+// UpdateNovel 作者改书：只改传入的字段（书名 / 封面 / 分类 / 简介 / 状态）。
+func (s *novelService) UpdateNovel(ctx context.Context, in domain.NovelUpdateInput) error {
+	novel, err := s.novels.FindNovelByID(ctx, in.NovelID)
+	if err != nil {
+		return err
+	}
+	if novel.UserID != in.UserID {
+		return domain.ErrNovelNotAuthor
+	}
+	updates := map[string]any{}
+	if in.Title != nil {
+		title := strings.TrimSpace(*in.Title)
+		if utf8.RuneCountInString(title) < 2 || utf8.RuneCountInString(title) > novelTitleMaxRunes {
+			return domain.ErrBadRequest
+		}
+		updates["title"] = title
+	}
+	if in.CoverURL != nil {
+		cover := strings.TrimSpace(*in.CoverURL)
+		if utf8.RuneCountInString(cover) > novelCoverURLMaxRunes {
+			return domain.ErrBadRequest
+		}
+		updates["cover_url"] = cover
+	}
+	if in.Category != nil {
+		category := strings.TrimSpace(*in.Category)
+		if utf8.RuneCountInString(category) > novelCategoryMaxRunes {
+			return domain.ErrBadRequest
+		}
+		updates["category"] = category
+	}
+	if in.Intro != nil {
+		intro := strings.TrimSpace(*in.Intro)
+		if utf8.RuneCountInString(intro) > novelIntroMaxRunes {
+			return domain.ErrBadRequest
+		}
+		updates["intro"] = intro
+	}
+	if in.Status != nil {
+		status := strings.TrimSpace(*in.Status)
+		if status != domain.NovelStatusCompleted {
+			status = domain.NovelStatusSerializing
+		}
+		updates["status"] = status
+	}
+	if len(updates) == 0 {
+		return domain.ErrBadRequest
+	}
+	return s.novels.UpdateNovelFields(ctx, in.NovelID, updates)
 }
 
 func (s *novelService) DeleteNovel(ctx context.Context, novelID, userID int) error {

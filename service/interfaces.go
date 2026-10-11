@@ -164,6 +164,7 @@ type NovelService interface {
 	GetNovelDetail(ctx context.Context, novelID, viewerID int) (*domain.Novel, *domain.User, bool, *domain.NovelProgress, error)
 	EnrichNovels(ctx context.Context, novels []*domain.Novel, viewerID int) (map[int]*domain.User, map[int]bool, map[int]*domain.NovelProgress, error)
 	CreateNovel(ctx context.Context, in domain.NovelCreateInput) (int, error)
+	UpdateNovel(ctx context.Context, in domain.NovelUpdateInput) error
 	DeleteNovel(ctx context.Context, novelID, userID int) error
 
 	ListChapters(ctx context.Context, novelID, limit, offset int) ([]*domain.NovelChapter, int64, error)

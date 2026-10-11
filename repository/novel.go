@@ -14,6 +14,7 @@ type NovelRepository interface {
 	CountNovels(ctx context.Context, filter domain.NovelBrowseFilter) (int64, error)
 	FindNovelByID(ctx context.Context, id int) (*domain.Novel, error)
 	CreateNovel(ctx context.Context, novel *domain.Novel) error
+	UpdateNovelFields(ctx context.Context, novelID int, fields map[string]any) error
 	DeleteNovelCascade(ctx context.Context, novelID int) error
 	CategoriesWithCount(ctx context.Context) ([]domain.NovelCategory, error)
 

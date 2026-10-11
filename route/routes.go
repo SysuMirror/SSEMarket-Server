@@ -155,6 +155,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/novel/categories", controller.NovelCategories)
 	auth.POST("/api/auth/novel/detail", controller.NovelDetail)
 	auth.POST("/api/auth/novel/create", controller.NovelCreate)
+	auth.POST("/api/auth/novel/update", controller.NovelUpdate)
 	auth.POST("/api/auth/novel/delete", controller.NovelDelete)
 	auth.POST("/api/auth/novel/chapters", controller.NovelChapters)
 	auth.POST("/api/auth/novel/chapter", controller.NovelChapter)

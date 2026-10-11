@@ -220,6 +220,15 @@ func (r *novelRepository) CreateNovel(ctx context.Context, novel *domain.Novel) 
 	return nil
 }
 
+// UpdateNovelFields 只更新 fields 里给出的列（书名 / 封面 / 分类 / 简介 / 状态）。
+func (r *novelRepository) UpdateNovelFields(ctx context.Context, novelID int, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	fields["updated_at"] = time.Now()
+	return r.session(ctx).Model(&model.Novel{}).Where("novel_id = ?", novelID).Updates(fields).Error
+}
+
 func (r *novelRepository) DeleteNovelCascade(ctx context.Context, novelID int) error {
 	return r.session(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(

@@ -40,6 +40,16 @@ type NovelCreateMsg struct {
 	Status     string `json:"status"`
 }
 
+// NovelUpdateMsg 改书请求：字段为 nil 表示不改。
+type NovelUpdateMsg struct {
+	NovelID  int     `json:"novelID"`
+	Title    *string `json:"title"`
+	CoverURL *string `json:"coverURL"`
+	Category *string `json:"category"`
+	Intro    *string `json:"intro"`
+	Status   *string `json:"status"`
+}
+
 type NovelChapterListMsg struct {
 	NovelID int `json:"novelID"`
 	Limit   int `json:"limit"`
@@ -467,6 +477,63 @@ func novelCreateMsg(msg NovelCreateMsg) string {
 	return "参数错误"
 }
 
+// NovelUpdate 作者改书（封面 / 书名 / 分类 / 简介 / 状态），只更新请求里出现的字段。
+func NovelUpdate(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	var msg NovelUpdateMsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil || msg.NovelID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "无效的小说 ID")
+		return
+	}
+	if msg.Title == nil && msg.CoverURL == nil && msg.Category == nil && msg.Intro == nil && msg.Status == nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "没有要修改的内容")
+		return
+	}
+	err := service.Novels.UpdateNovel(c.Request.Context(), domain.NovelUpdateInput{
+		NovelID:  msg.NovelID,
+		UserID:   user.ID,
+		Title:    msg.Title,
+		CoverURL: msg.CoverURL,
+		Category: msg.Category,
+		Intro:    msg.Intro,
+		Status:   msg.Status,
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrBadRequest) {
+			response.Response(c, http.StatusBadRequest, 400, nil, novelUpdateMsg(msg))
+			return
+		}
+		novelWriteError(c, err, "小说不存在")
+		return
+	}
+	response.Response(c, http.StatusOK, 200, nil, "已更新")
+}
+
+func novelUpdateMsg(msg NovelUpdateMsg) string {
+	if msg.Title != nil {
+		title := strings.TrimSpace(*msg.Title)
+		if utf8.RuneCountInString(title) < 2 {
+			return "书名至少 2 个字"
+		}
+		if utf8.RuneCountInString(title) > 60 {
+			return "书名最多 60 个字"
+		}
+	}
+	if msg.CoverURL != nil && utf8.RuneCountInString(strings.TrimSpace(*msg.CoverURL)) > 500 {
+		return "封面链接过长"
+	}
+	if msg.Intro != nil && utf8.RuneCountInString(strings.TrimSpace(*msg.Intro)) > 1000 {
+		return "简介最多 1000 字"
+	}
+	if msg.Category != nil && utf8.RuneCountInString(strings.TrimSpace(*msg.Category)) > 20 {
+		return "分类名最多 20 个字"
+	}
+	return "参数错误"
+}
+
 func NovelDelete(c *gin.Context) {
 	user, ok := requireLoginUser(c)
 	if !ok {
@@ -533,6 +600,7 @@ func NovelChapter(c *gin.Context) {
 	}
 	resp := NovelChapterDetailResponse{
 		Chapter:    novelChapterToItem(detail.Chapter),
+		NovelID:    detail.Chapter.NovelID,
 		NovelTitle: detail.NovelTitle,
 		AuthorName: detail.AuthorName,
 		Paragraphs: paragraphs,
@@ -670,7 +738,7 @@ func NovelCommentCreate(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
-			response.Response(c, http.StatusNotFound, 404, nil, "章节不存在")
+			response.Response(c, http.StatusNotFound, 404, nil, "章节不存在，请刷新后重试")
 		case errors.Is(err, domain.ErrBadRequest):
 			response.Response(c, http.StatusBadRequest, 400, nil, novelCommentCreateMsg(msg, user))
 		default:
