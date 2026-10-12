@@ -24,6 +24,12 @@ type CoinThrowMsg struct {
 	Coins      int    `json:"coins"`
 }
 
+// CoinCancelMsg 取消投币入参：撤回我在该内容上投着的全部币。
+type CoinCancelMsg struct {
+	TargetType string `json:"targetType"`
+	TargetID   int    `json:"targetID"`
+}
+
 // CoinLedgerListMsg 币流水分页入参。
 type CoinLedgerListMsg struct {
 	Limit  int `json:"limit"`
@@ -51,6 +57,8 @@ func coinError(c *gin.Context, err error) {
 		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 	case errors.Is(err, domain.ErrCoinSelf):
 		response.Response(c, http.StatusForbidden, 403, nil, err.Error())
+	case errors.Is(err, domain.ErrCoinNotThrown):
+		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 	case errors.Is(err, domain.ErrBadRequest):
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数不符合要求")
 	default:
@@ -95,6 +103,42 @@ func CoinThrow(c *gin.Context) {
 			"targetID":   result.TargetID,
 		},
 		"msg": "已投币",
+	})
+}
+
+// CoinCancel 取消投币：撤回我在该内容上投着的全部币（退币 + 回退经验）。
+// coinsLeft 是退款后的新余额，total 是取消后我还投着的币（可能剩历史投票折算的）。
+func CoinCancel(c *gin.Context) {
+	user, ok := requireLoginUser(c)
+	if !ok {
+		return
+	}
+	var msg CoinCancelMsg
+	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
+	targetType := coinTargetType(msg.TargetType)
+	if targetType == "" || msg.TargetID <= 0 {
+		response.Response(c, http.StatusBadRequest, 400, nil, "无效的投币参数")
+		return
+	}
+	result, err := service.Coins.CancelThrow(c.Request.Context(), user.ID, targetType, msg.TargetID)
+	if err != nil {
+		coinError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code": 200,
+		"data": gin.H{
+			"coins":      result.Coins,
+			"total":      result.Total,
+			"exp":        result.Exp,
+			"coinsLeft":  result.CoinsLeft,
+			"targetType": result.TargetType,
+			"targetID":   result.TargetID,
+		},
+		"msg": "已取消投币",
 	})
 }
 

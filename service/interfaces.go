@@ -185,6 +185,8 @@ type NovelService interface {
 
 	// RateNovel 给书评分（1–5 星，每人每本一条，可改）；作者首次收到这条评分时 +1 币。
 	RateNovel(ctx context.Context, novelID, userID, score int) (*domain.NovelRatingResult, error)
+	// RatingDistribution 各星级人数：下标 0 = 5 星，依次到下标 4 = 1 星。
+	RatingDistribution(ctx context.Context, novelID int) ([5]int, error)
 	// MyRating 我给这本书打了几分（0 = 没打过）。
 	MyRating(ctx context.Context, novelID, userID int) (int, error)
 	// MyRatings 我给这批书各打了几分（列表页按钮态用）。
@@ -230,6 +232,8 @@ type CoinService interface {
 
 	// 投币：每人每个内容最多 2 币，每个币给投币者 +10 主页经验
 	Throw(ctx context.Context, userID int, targetType string, targetID, coins int) (*domain.CoinThrowResult, error)
+	// CancelThrow 取消投币：撤回我在该内容上投着的全部币，退币并回退经验
+	CancelThrow(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error)
 
 	// 查询
 	Summary(ctx context.Context, userID int) (*domain.CoinSummary, error)

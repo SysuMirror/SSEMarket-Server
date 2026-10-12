@@ -113,6 +113,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)
 	// 投币（投票功能已下线，历史票数折算成已投的币；投币入口在帖子与小说卡片上）
 	auth.POST("/api/auth/coin/throw", controller.CoinThrow)
+	auth.POST("/api/auth/coin/cancel", controller.CoinCancel)
 	auth.GET("/api/auth/coin/summary", controller.CoinSummary)
 	auth.POST("/api/auth/coin/ledger", controller.CoinLedger)
 	auth.POST("/api/auth/coin/visit", controller.CoinVisit)

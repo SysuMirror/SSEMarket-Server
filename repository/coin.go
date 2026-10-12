@@ -25,6 +25,10 @@ type CoinRepository interface {
 	// 币不足返回 domain.ErrCoinNotEnough，超过每人每内容上限返回 domain.ErrCoinLimit。
 	Throw(ctx context.Context, in domain.CoinThrowInput) (*domain.CoinThrowResult, error)
 
+	// Cancel 取消投币：退币 + 回退主页经验 + 记退款流水 + 把我在该内容上的投币清零。
+	// 一个都没投过返回 domain.ErrCoinNotThrown。
+	Cancel(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error)
+
 	// Balance 当前币余额。
 	Balance(ctx context.Context, userID int) (int, error)
 

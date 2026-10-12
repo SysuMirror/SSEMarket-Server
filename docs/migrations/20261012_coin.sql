@@ -34,7 +34,8 @@ FROM (
   SELECT 'novel_ratings.comment_id' UNION ALL
   SELECT 'novel_comments.is_rating' UNION ALL
   SELECT 'coin_ledger'            UNION ALL
-  SELECT 'coin_throw'
+  SELECT 'coin_throw'             UNION ALL
+  SELECT 'coin_throw.thrown_total'
 ) t
 LEFT JOIN information_schema.columns c
   ON c.table_schema = DATABASE()
@@ -137,7 +138,8 @@ CREATE TABLE IF NOT EXISTS `coin_throw` (
   `user_id`     INT NOT NULL,
   `target_type` VARCHAR(16) NOT NULL COMMENT 'post|novel',
   `target_id`   INT NOT NULL,
-  `coin_num`    INT NOT NULL DEFAULT 0 COMMENT '累计投币数，上限 2',
+  `coin_num`     INT NOT NULL DEFAULT 0 COMMENT '当前投着的币数(0-2)，取消投币会清零',
+  `thrown_total` INT NOT NULL DEFAULT 0 COMMENT '历史累计投过的总枚数(取消不减)，投币流水幂等键序号',
   `created_at`  DATETIME NULL,
   `updated_at`  DATETIME NULL,
   PRIMARY KEY (`throw_id`),
@@ -145,6 +147,13 @@ CREATE TABLE IF NOT EXISTS `coin_throw` (
   KEY `idx_coin_throw_user` (`user_id`),
   KEY `idx_coin_throw_target` (`target_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='投币记录(每人每内容上限2币)';
+
+-- coin_throw 补 thrown_total 列（2026-10-12 下午新增：取消投币后再投的流水幂等键）。
+-- 老数据回填 thrown_total = coin_num：旧版流水幂等键序号 = 投完后的累计枚数，
+-- 已用掉的最大序号就是当时的 coin_num，回填后新序号从这之后继续，不会撞旧键。
+ALTER TABLE `coin_throw`
+  ADD COLUMN `thrown_total` INT NOT NULL DEFAULT 0 COMMENT '历史累计投过的总枚数(取消不减)';
+UPDATE `coin_throw` SET `thrown_total` = `coin_num` WHERE `thrown_total` = 0 AND `coin_num` > 0;
 
 -- =============================================================================
 -- 回滚（按需执行；additive 变更回滚即删列/删表，会丢币数据，慎执行）

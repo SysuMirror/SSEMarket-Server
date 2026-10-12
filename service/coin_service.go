@@ -189,6 +189,25 @@ func (s *coinService) Throw(ctx context.Context, userID int, targetType string, 
 	return result, nil
 }
 
+// CancelThrow 取消投币：把我在该内容上投着的币全部撤回（退币 + 回退经验）。
+//
+// 与 Throw 不同，这里不校验目标是否存在/可见——coin_throw 行本身就是投过币的凭证，
+// 内容被删后也应该能撤币拿回余额；帖子侧照常失效详情与 Feed 缓存。
+func (s *coinService) CancelThrow(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error) {
+	if s == nil {
+		return nil, domain.ErrBadRequest
+	}
+	result, err := s.coins.Cancel(ctx, userID, targetType, targetID)
+	if err != nil {
+		return nil, err
+	}
+	if targetType == domain.CoinTargetPost {
+		InvalidatePostDetail(targetID)
+		InvalidateHomeBrowse()
+	}
+	return result, nil
+}
+
 // ---------------------------------------------------------------------------
 // 查询
 // ---------------------------------------------------------------------------

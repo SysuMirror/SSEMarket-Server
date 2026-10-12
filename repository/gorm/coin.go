@@ -33,6 +33,7 @@ var coinDisplayEvents = []string{
 	domain.CoinEventWriteDaily,
 	domain.CoinEventRated,
 	domain.CoinEventThrow,
+	domain.CoinEventRefund,
 }
 
 // lockCoinUser 锁住当事人那一行并返回它：同一用户的币收支串行执行，
@@ -194,7 +195,9 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			return domain.ErrCoinNotEnough
 		}
 
-		seq := total // 第几枚币：1 或 2，同一目标上唯一
+		// 流水幂等键序号：该目标上「历史累计投到的第几枚」（含后来取消的）。
+		// 用只增不减的 thrown_total，取消后再投也不会和旧流水撞 dedup_key。
+		seq := throw.ThrownTotal + in.Coins
 		if err := tx.Create(coinLedgerRow(domain.CoinGrantInput{
 			UserID:     in.UserID,
 			TargetType: in.TargetType,
@@ -211,7 +214,11 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 		}
 
 		if err := tx.Model(&model.CoinThrow{}).Where("throw_id = ?", throw.ThrowID).
-			UpdateColumns(map[string]any{"coin_num": total, "updated_at": time.Now()}).Error; err != nil {
+			UpdateColumns(map[string]any{
+				"coin_num":     total,
+				"thrown_total": throw.ThrownTotal + in.Coins,
+				"updated_at":   time.Now(),
+			}).Error; err != nil {
 			return err
 		}
 
@@ -229,6 +236,101 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 		result.Total = total
 		result.Exp = in.Coins * domain.CoinExpPerCoin
 		result.CoinsLeft = user.Coins - in.Coins
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Cancel 取消投币：把我在该内容上投着的币全部撤回。
+//
+// 与 Throw 对称的反事务：
+//   - 锁投币者 + 锁 coin_throw 行，一个都没投着（coin_num<=0，含只有历史投票折算的
+//     情形——折算票不是真币，撤不了）直接返回 ErrCoinNotThrown；
+//   - 退币 + 回退主页经验（口径与每小时经验重算一致：coin_throw.coin_num × 10）；
+//   - 退款记一条正数流水（幂等键取只增的 thrown_total，反复投了退也不会撞键）；
+//   - coin_num 清零，被投内容的投币计数同步减回去。
+func (r *coinRepository) Cancel(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error) {
+	if userID <= 0 || targetID <= 0 {
+		return nil, domain.ErrBadRequest
+	}
+	switch targetType {
+	case domain.CoinTargetPost, domain.CoinTargetNovel:
+	default:
+		return nil, domain.ErrBadRequest
+	}
+	result := &domain.CoinThrowResult{
+		Coins:      0,
+		TargetType: targetType,
+		TargetID:   targetID,
+	}
+	err := r.session(ctx).Transaction(func(tx *gorm.DB) error {
+		user, err := lockCoinUser(tx, userID)
+		if err != nil {
+			return err
+		}
+		var throw model.CoinThrow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND target_type = ? AND target_id = ?", userID, targetType, targetID).
+			First(&throw).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrCoinNotThrown
+			}
+			return err
+		}
+		if throw.CoinNum <= 0 {
+			return domain.ErrCoinNotThrown
+		}
+		amount := throw.CoinNum
+
+		// 退币 + 回退主页经验（GREATEST 兜底，经验不会被回退成负数）。
+		if err := tx.Model(&model.User{}).Where("userID = ?", userID).
+			UpdateColumn("coins", gorm.Expr("coins + ?", amount)).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.User{}).Where("userID = ?", userID).
+			UpdateColumn("score", gorm.Expr("GREATEST(score - ?, 0)", amount*domain.CoinExpPerCoin)).Error; err != nil {
+			return err
+		}
+
+		// 退款流水：正数入账，dedup 取当前 thrown_total（退款不推进它，
+		// 但两次退款之间必然隔了一次投币，序号只会更大，不会撞键）。
+		if err := tx.Create(coinLedgerRow(domain.CoinGrantInput{
+			UserID:     userID,
+			TargetType: targetType,
+			TargetID:   targetID,
+			EventType:  domain.CoinEventRefund,
+			DedupKey:   domain.CoinDedupRefund(targetType, targetID, userID, throw.ThrownTotal),
+			Amount:     amount,
+		})).Error; err != nil {
+			if isDuplicateKeyErr(err) {
+				// 同一序号已退过：说明这笔取消已经生效过，不再重复退款。
+				return domain.ErrCoinNotThrown
+			}
+			return err
+		}
+
+		if err := tx.Model(&model.CoinThrow{}).Where("throw_id = ?", throw.ThrowID).
+			UpdateColumns(map[string]any{"coin_num": 0, "updated_at": time.Now()}).Error; err != nil {
+			return err
+		}
+
+		// 被投内容的投币计数减回去（GREATEST 已兜住不为负）。
+		if err := adjustTargetCoins(tx, targetType, targetID, -amount); err != nil {
+			return err
+		}
+
+		// 取消后「我投着几个」只剩历史投票折算的币（帖子可能有，小说恒为 0）。
+		legacy, err := legacyVoteCoins(tx, userID, targetType, []int{targetID})
+		if err != nil {
+			return err
+		}
+		result.Coins = amount
+		result.Total = legacy[targetID]
+		result.Exp = -amount * domain.CoinExpPerCoin
+		result.CoinsLeft = user.Coins + amount
 		return nil
 	})
 	if err != nil {
@@ -464,11 +566,17 @@ func coinLedgerToDomain(l *model.CoinLedger) *domain.CoinLedger {
 	}
 }
 
-// coinLedgerLabel 流水说明：投币行带上目标类型，其余用事件名。
+// coinLedgerLabel 流水说明：投币/取消投币行带上目标类型，其余用事件名。
 func coinLedgerLabel(l *model.CoinLedger) string {
 	label := domain.CoinEventLabel(l.EventType)
-	if l.EventType == domain.CoinEventThrow && l.TargetType != "" {
-		label = "投币 · " + domain.CoinTargetLabel(l.TargetType)
+	if l.TargetType == "" {
+		return label
+	}
+	switch l.EventType {
+	case domain.CoinEventThrow:
+		return "投币 · " + domain.CoinTargetLabel(l.TargetType)
+	case domain.CoinEventRefund:
+		return "取消投币 · " + domain.CoinTargetLabel(l.TargetType)
 	}
 	return label
 }

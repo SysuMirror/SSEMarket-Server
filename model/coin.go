@@ -40,7 +40,11 @@ type CoinThrow struct {
 	TargetType string `gorm:"uniqueIndex:uk_coin_throw,priority:2;column:target_type;type:varchar(16);not null"`
 	TargetID   int `gorm:"uniqueIndex:uk_coin_throw,priority:3;index:idx_coin_throw_target,priority:1;column:target_id;type:int;not null"`
 
+	// 当前在这条内容上投着的币数（0–2）；取消投币会减回 0。
 	CoinNum int `gorm:"column:coin_num;type:int;not null;default:0"`
+	// 历史累计投过的总枚数（取消不减）：投币流水的幂等键取这个序号，
+	// 取消后再投也不会和旧流水撞 dedup_key。
+	ThrownTotal int `gorm:"column:thrown_total;type:int;not null;default:0"`
 
 	CreatedAt time.Time `gorm:"column:created_at;type:datetime"`
 	UpdatedAt time.Time `gorm:"column:updated_at;type:datetime"`

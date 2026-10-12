@@ -25,6 +25,7 @@ const (
 	CoinEventWriteDaily = "write_daily" // 当日更新写作满 4000 字 +1 币
 	CoinEventRated      = "rated"       // 收到评分（作者 +1 币）
 	CoinEventThrow      = "coin_throw"  // 投币支出（负数）
+	CoinEventRefund     = "coin_refund" // 取消投币退款（正数）
 
 	// 纯计数事件：只推进 settled_value 游标，不发放，也不出现在总览/流水里。
 	CoinAccumulateRead  = "acc_read"  // 当日阅读秒数累计
@@ -66,6 +67,7 @@ var (
 	ErrCoinNotEnough = errors.New("币不够，无法投币")
 	ErrCoinLimit     = errors.New("已经给这个内容投满 2 币了")
 	ErrCoinSelf      = errors.New("不能给自己的内容投币")
+	ErrCoinNotThrown = errors.New("还没有投过币，无法取消")
 )
 
 // CoinLedgerDay 把时间归到「本地日期」，每日任务都按这个口径。
@@ -101,9 +103,16 @@ func CoinDedupRated(authorID, novelID, raterID int) string {
 	return CoinEventRated + ":" + strconv.Itoa(authorID) + ":" + strconv.Itoa(novelID) + ":" + strconv.Itoa(raterID)
 }
 
-// CoinDedupThrow 投币流水：seq 是该目标上累计投到的第几枚，天然不重复。
+// CoinDedupThrow 投币流水：seq 是该目标上历史累计投到的第几枚（coin_throw.thrown_total，
+// 取消不减），取消后再投也不会重复。
 func CoinDedupThrow(targetType string, targetID, userID, seq int) string {
 	return CoinEventThrow + ":" + targetType + ":" + strconv.Itoa(targetID) + ":" + strconv.Itoa(userID) + ":" + strconv.Itoa(seq)
+}
+
+// CoinDedupRefund 取消投币的退款流水：refundSeq 递增（取 coin_throw.thrown_total，
+// 每次取消时它都不小于上一次退款时的值，再投过币后只会更大），天然不重复。
+func CoinDedupRefund(targetType string, targetID, userID, refundSeq int) string {
+	return CoinEventRefund + ":" + targetType + ":" + strconv.Itoa(targetID) + ":" + strconv.Itoa(userID) + ":" + strconv.Itoa(refundSeq)
 }
 
 // CoinTargetLabel 投币目标的中文说明（流水展示用）。
@@ -133,6 +142,8 @@ func CoinEventLabel(eventType string) string {
 		return "收到评分"
 	case CoinEventThrow:
 		return "投币"
+	case CoinEventRefund:
+		return "取消投币"
 	default:
 		return eventType
 	}
