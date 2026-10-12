@@ -114,14 +114,24 @@ type NovelBrowseFilter struct {
 	Offset    int
 }
 
+// 评论排序口径（NovelCommentFilter.Order）。
+const (
+	NovelCommentOrderLatest = "latest" // 最新发布在前（默认）
+	NovelCommentOrderLikes  = "likes"  // 点赞最多在前
+)
+
 // NovelCommentFilter 评论列表筛选。
 type NovelCommentFilter struct {
 	NovelID        int
 	TargetType     string
 	ChapterID      int
 	ParagraphIndex int
-	Limit          int
-	Offset         int
+	// Keyword 按评论内容模糊搜索（LIKE，空串不过滤）
+	Keyword string
+	// Order 只认 latest / likes，其余值一律按 latest 处理
+	Order  string
+	Limit  int
+	Offset int
 }
 
 // NovelCreateInput 建书入参。

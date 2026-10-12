@@ -54,6 +54,9 @@ type NovelRepository interface {
 	FindRating(ctx context.Context, novelID, userID int) (int, error)
 	MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error)
 
+	// RatingDistribution 各星级人数：返回 [5]int，下标 0 = 5 星，依次到下标 4 = 1 星。
+	RatingDistribution(ctx context.Context, novelID int) ([5]int, error)
+
 	// 评分自动附带的书评（novel_comments.is_rating=1，挂在 novel_ratings.comment_id 上）
 	GetRatingCommentID(ctx context.Context, novelID, userID int) (int, error)
 	SetRatingCommentID(ctx context.Context, novelID, userID, commentID int) error

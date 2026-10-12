@@ -509,14 +509,22 @@ func (r *novelRepository) applyCommentFilter(q *gorm.DB, filter domain.NovelComm
 	case domain.NovelTargetBook:
 		q = q.Where("target_type = ?", domain.NovelTargetBook)
 	}
+	// 关键字搜索：按评论内容模糊匹配（调用方已截断长度，这里只防空串/纯空白）
+	if kw := strings.TrimSpace(filter.Keyword); kw != "" {
+		q = q.Where("content LIKE ?", "%"+kw+"%")
+	}
 	return q
 }
 
 func (r *novelRepository) ListComments(ctx context.Context, filter domain.NovelCommentFilter) ([]*domain.NovelComment, error) {
 	limit, offset := novelNormalizePage(filter.Limit, filter.Offset)
+	order := "comment_id DESC"
+	if filter.Order == domain.NovelCommentOrderLikes {
+		order = "like_num DESC, comment_id DESC"
+	}
 	var list []model.NovelComment
 	err := r.applyCommentFilter(r.session(ctx).Model(&model.NovelComment{}), filter).
-		Order("comment_id DESC").
+		Order(order).
 		Offset(offset).Limit(limit).
 		Find(&list).Error
 	if err != nil {
@@ -859,6 +867,34 @@ func (r *novelRepository) FindRating(ctx context.Context, novelID, userID int) (
 		return 0, err
 	}
 	return row.Score, nil
+}
+
+// RatingDistribution 各星级人数：下标 0 = 5 星，依次到下标 4 = 1 星（详情页分布条用）。
+func (r *novelRepository) RatingDistribution(ctx context.Context, novelID int) ([5]int, error) {
+	var out [5]int
+	if novelID <= 0 {
+		return out, nil
+	}
+	type row struct {
+		Score int
+		Cnt   int
+	}
+	var rows []row
+	err := r.session(ctx).Model(&model.NovelRating{}).
+		Select("score", "COUNT(*) AS cnt").
+		Where("novel_id = ?", novelID).
+		Group("score").
+		Find(&rows).Error
+	if err != nil {
+		return out, err
+	}
+	for _, x := range rows {
+		if x.Score >= domain.NovelRatingMin && x.Score <= domain.NovelRatingMax {
+			// 5 星进下标 0，1 星进下标 4
+			out[domain.NovelRatingMax-x.Score] = x.Cnt
+		}
+	}
+	return out, nil
 }
 
 // MyRatings 我在这批书上各打了几分（列表页按钮态用）。

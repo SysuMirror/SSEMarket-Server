@@ -605,6 +605,11 @@ func (s *novelService) GetProgress(ctx context.Context, novelID, userID int) (*d
 //
 // 作者侧收益：首次收到某个读者的评分时 +1 币。幂等键是（作者, 书, 读者），
 // 所以读者改分、重复提交同一分数都不会再给币。评分不给读者任何币或经验。
+// RatingDistribution 各星级人数（详情页分布条用），下标 0 = 5 星。
+func (s *novelService) RatingDistribution(ctx context.Context, novelID int) ([5]int, error) {
+	return s.novels.RatingDistribution(ctx, novelID)
+}
+
 func (s *novelService) RateNovel(ctx context.Context, novelID, userID, score int) (*domain.NovelRatingResult, error) {
 	if s == nil || novelID <= 0 || userID <= 0 {
 		return nil, domain.ErrBadRequest

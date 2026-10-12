@@ -74,8 +74,11 @@ type NovelCommentListMsg struct {
 	TargetType     string `json:"targetType"`
 	ChapterID      int    `json:"chapterID"`
 	ParagraphIndex int    `json:"paragraphIndex"`
-	Limit          int    `json:"limit"`
-	Offset         int    `json:"offset"`
+	// Keyword 按评论内容模糊搜索；Order 只认 latest（默认）/ likes
+	Keyword string `json:"keyword"`
+	Order   string `json:"order"`
+	Limit   int    `json:"limit"`
+	Offset  int    `json:"offset"`
 }
 
 type NovelCommentCreateMsg struct {
@@ -149,6 +152,8 @@ type NovelListItem struct {
 
 type NovelDetailResponse struct {
 	NovelListItem
+	// RatingBars 评分分布：下标 0 = 5 星人数，依次到下标 4 = 1 星人数。
+	RatingBars     [5]int `json:"ratingBars"`
 	AuthorAvatar   string `json:"authorAvatar"`
 	AuthorScore    int    `json:"authorScore"`
 	AuthorIdentity string `json:"authorIdentity"`
@@ -481,6 +486,10 @@ func NovelDetail(c *gin.Context) {
 		item[0].ProgressChapterNum = progress.ChapterNum
 	}
 	detail := NovelDetailResponse{NovelListItem: item[0], IsAuthor: novel.UserID == user.ID}
+	// 评分分布：查不到不挡详情，静默按全 0 展示
+	if bars, err := service.Novels.RatingDistribution(ctx, msg.NovelID); err == nil {
+		detail.RatingBars = bars
+	}
 	if author != nil {
 		detail.AuthorAvatar = author.AvatarURL
 		detail.AuthorScore = author.Score
@@ -765,11 +774,22 @@ func NovelCommentList(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"comments": []NovelCommentItem{}, "total": 0})
 		return
 	}
+	// 搜索词截断：LIKE 模式串太长没有意义，也防住超长入参
+	keyword := strings.TrimSpace(msg.Keyword)
+	if runes := utf8.RuneCountInString(keyword); runes > 30 {
+		keyword = string([]rune(keyword)[:30])
+	}
+	order := msg.Order
+	if order != domain.NovelCommentOrderLikes && order != domain.NovelCommentOrderLatest {
+		order = domain.NovelCommentOrderLatest
+	}
 	filter := domain.NovelCommentFilter{
 		NovelID:        msg.NovelID,
 		TargetType:     msg.TargetType,
 		ChapterID:      msg.ChapterID,
 		ParagraphIndex: msg.ParagraphIndex,
+		Keyword:        keyword,
+		Order:          order,
 		Limit:          msg.Limit,
 		Offset:         msg.Offset,
 	}
