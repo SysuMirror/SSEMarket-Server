@@ -10,6 +10,7 @@ func postToDomain(p *model.Post) *domain.Post {
 		return nil
 	}
 	return &domain.Post{
+		ID:         p.PostID,
 		UserID:     p.UserID,
 		Partition:  p.Partition,
 		Title:      p.Title,
