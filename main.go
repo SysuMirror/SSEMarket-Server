@@ -144,6 +144,8 @@ func main() {
 	db := common.InitDB()
 	service.InitServices(db)
 	service.Ranks.RebuildRankStats(context.Background())
+	// 启动即全量重算一次积分,后续由 Copy() 内的 @every 1h cron 维持
+	go controller.CalculateAndSaveScores()
 
 	rds := core.RedisInit()
 	common.InitJWTkey()

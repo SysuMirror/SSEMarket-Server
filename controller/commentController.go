@@ -24,6 +24,7 @@ type CommentResponse struct {
 	Author          string
 	AuthorTelephone string
 	AuthorScore     int
+	AuthorTitle     string
 	AuthorAvatar    string
 	AuthorIdentity  string
 	CommentTime     time.Time
@@ -46,6 +47,7 @@ type Subcomment struct {
 	Author          string    `json:"author"`
 	AuthorID        int       `json:"authorID"`
 	AuthorScore     int       `json:"authorScore"`
+	AuthorTitle     string    `json:"authorTitle"`
 	AuthorTelephone string    `json:"authorTelephone"`
 	AuthorAvatar    string    `json:"authorAvatar"`
 	AuthorIdentity  string    `json:"authorIdentity"`
@@ -74,6 +76,7 @@ func pcommentWithMetaToResponse(item *domain.PcommentWithMeta) CommentResponse {
 		Author:          author.Name,
 		AuthorTelephone: author.Phone,
 		AuthorScore:     author.Score,
+		AuthorTitle:     author.CustomTitle,
 		AuthorAvatar:    author.AvatarURL,
 		AuthorIdentity:  author.Identity,
 		CommentTime:     item.Pcomment.CreatedAt,
@@ -96,6 +99,7 @@ func ccommentWithMetaToSubcomment(item *domain.CcommentWithMeta) Subcomment {
 		Author:          author.Name,
 		AuthorID:        author.ID,
 		AuthorScore:     author.Score,
+		AuthorTitle:     author.CustomTitle,
 		AuthorTelephone: author.Phone,
 		AuthorAvatar:    author.AvatarURL,
 		AuthorIdentity:  author.Identity,

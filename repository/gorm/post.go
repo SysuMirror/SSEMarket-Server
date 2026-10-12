@@ -340,6 +340,10 @@ func applyBrowseOrder(q *gorm.DB, orderBy string) *gorm.DB {
 		return q.Order("comment_num DESC, postID DESC")
 	case "comment_asc":
 		return q.Order("comment_num ASC, postID DESC")
+	case "browse_desc":
+		return q.Order("browse_num DESC, postID DESC")
+	case "browse_asc":
+		return q.Order("browse_num ASC, postID DESC")
 	default:
 		return q.Order("post_time DESC")
 	}

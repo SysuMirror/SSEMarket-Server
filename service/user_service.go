@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -628,6 +629,28 @@ func (s *userService) UpdateUserInfo(ctx context.Context, in domain.UpdateUserIn
 	return nil
 }
 
+// SetCustomTitle 满级(Lv8, score>=5000)用户自定义称号;1~12 字符(rune 计),自动 trim。
+func (s *userService) SetCustomTitle(ctx context.Context, userID int, title string) error {
+	title = strings.TrimSpace(title)
+	runes := []rune(title)
+	if len(runes) == 0 || len(runes) > 12 {
+		return domain.ErrBadRequest
+	}
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.Score < 5000 {
+		return domain.ErrForbidden
+	}
+	if err := s.users.UpdateCustomTitle(ctx, userID, title); err != nil {
+		return err
+	}
+	InvalidateUserSession(ctx, u.ID)
+	InvalidateUserInfo(u.ID)
+	return nil
+}
+
 func (s *userService) ToggleEmailNotification(ctx context.Context, userID int) error {
 	return s.users.ToggleEmailNotificationBlocked(ctx, userID)
 }
@@ -688,12 +711,24 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 				totalLikeNum += likeNum
 			}
 		}
-		sueCount, _ := s.users.CountSuccessfulSuesByUser(ctx, user.ID)
+		browseBonus := 0
+		postBrowseNums, err := s.users.ListPostBrowseNumsByUserID(ctx, user.ID)
+		if err == nil {
+			for _, n := range postBrowseNums {
+				browseBonus += int(math.Ceil(float64(n) * 0.01))
+			}
+		}
+		pvoteCount, _ := s.users.CountPvotesByPostIDs(ctx, postIDs)
 		// 投币经验与发帖/评论/点赞等项相加，之后仍然只由 score 这一条线决定主页等级。
+		// 举报成功/处罚项已在 online 9247516 移除，不再恢复。
 		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum +
-			int(psaveCount)*3 + int(commentedCount+repliedCount)*2 + int(sueCount)*20 - user.PunishNum*20 +
+			int(psaveCount)*3 + int(pvoteCount)*3 + int(commentedCount+repliedCount)*2 + browseBonus +
 			thrownByUser[user.ID]*domain.CoinExpPerCoin
-		_ = s.users.UpdateScore(ctx, user.ID, totalScore)
+		if totalScore != user.Score {
+			// 分数落库后同步失效用户信息缓存,否则页面等级最长滞后 1h+ 才更新
+			_ = s.users.UpdateScore(ctx, user.ID, totalScore)
+			InvalidateUserInfo(user.ID)
+		}
 	}
 	log.Println("Score updated")
 }

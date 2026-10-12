@@ -57,6 +57,7 @@ type UserService interface {
 	GetAvatarByPhone(ctx context.Context, phone string) (*domain.User, error)
 	GetInfo(ctx context.Context, phone string, userID int) (*domain.User, error)
 	UpdateUserInfo(ctx context.Context, in domain.UpdateUserInput, tokenUserID int) error
+	SetCustomTitle(ctx context.Context, userID int, title string) error
 	ToggleEmailNotification(ctx context.Context, userID int) error
 	CalculateAndSaveScores(ctx context.Context)
 	GetStatistics(ctx context.Context, userID int) (*domain.UserStatistics, error)

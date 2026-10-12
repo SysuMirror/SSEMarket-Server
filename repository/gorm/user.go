@@ -248,6 +248,11 @@ func isDuplicateKeyError(err error) bool {
 	return errors.As(err, &me) && me.Number == 1062
 }
 
+// 定点更新,不走全字段 Save(users.banend 为 NULL 的行全字段写回会被严格模式拒绝)
+func (r *userRepository) UpdateCustomTitle(ctx context.Context, userID int, title string) error {
+	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("custom_title", title).Error
+}
+
 func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedPassword string) error {
 	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("password", hashedPassword).Error
 }
@@ -668,12 +673,19 @@ func (r *userRepository) GetCcommentLikeNum(ctx context.Context, ccommentID int)
 	return likeNum, nil
 }
 
-func (r *userRepository) CountSuccessfulSuesByUser(ctx context.Context, userID int) (int64, error) {
+// ListPostBrowseNumsByUserID 返回该用户每帖浏览量,供积分公式逐帖 CEIL(browse*0.01) 使用。
+func (r *userRepository) ListPostBrowseNumsByUserID(ctx context.Context, userID int) ([]int, error) {
+	var nums []int
+	err := r.session(ctx).Model(&model.Post{}).Where("userID = ?", userID).Pluck("browse_num", &nums).Error
+	return nums, err
+}
+
+func (r *userRepository) CountPvotesByPostIDs(ctx context.Context, postIDs []int) (int64, error) {
+	if len(postIDs) == 0 {
+		return 0, nil
+	}
 	var count int64
-	err := r.session(ctx).Model(&model.Sue{}).
-		Where("status = ? AND finish = ? AND userID = ?", " ok", 1, userID).
-		Select("DISTINCT targettype, targetID").
-		Count(&count).Error
+	err := r.session(ctx).Model(&model.Pvote{}).Where("postID IN (?)", postIDs).Count(&count).Error
 	return count, err
 }
 

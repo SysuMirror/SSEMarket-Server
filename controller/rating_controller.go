@@ -78,6 +78,7 @@ type RatingPostListItem struct {
 	UserID         int       `json:"userID"`
 	UserName       string    `json:"userName"`
 	UserScore      int       `json:"userScore"`
+	UserTitle      string    `json:"userTitle"`
 	UserTelephone  string    `json:"userTelephone"`
 	UserAvatar     string    `json:"userAvatar"`
 	UserIdentity   string    `json:"userIdentity"`
@@ -105,6 +106,7 @@ type RatingCommentResponse struct {
 	Author          string    `json:"author"`
 	AuthorTelephone string    `json:"authorTelephone"`
 	AuthorScore     int       `json:"authorScore"`
+	AuthorTitle     string    `json:"authorTitle"`
 	AuthorAvatar    string    `json:"authorAvatar"`
 	AuthorIdentity  string    `json:"authorIdentity"`
 	CommentTime     time.Time `json:"commentTime"`
@@ -162,6 +164,7 @@ func buildRatingPostListItems(posts []*domain.RatingPost, catMap map[int]*domain
 			UserID:        p.UserID,
 			UserName:      u.Name,
 			UserScore:     u.Score,
+			UserTitle:     u.CustomTitle,
 			UserTelephone: u.Phone,
 			UserAvatar:    u.AvatarURL,
 			UserIdentity:  u.Identity,
@@ -464,6 +467,7 @@ func RatingCommentList(c *gin.Context) {
 			Author:          u.Name,
 			AuthorTelephone: u.Phone,
 			AuthorScore:     u.Score,
+			AuthorTitle:     u.CustomTitle,
 			AuthorAvatar:    u.AvatarURL,
 			AuthorIdentity:  u.Identity,
 			CommentTime:     cm.CreatedAt,

@@ -22,6 +22,7 @@ type UserRepository interface {
 	UpdateEmailWithHistory(ctx context.Context, userID int, oldEmail, newEmail string) error
 	ExistsUsedEmail(ctx context.Context, userID int, email string) (bool, error)
 	UpdatePassword(ctx context.Context, userID int, hashedPassword string) error
+	UpdateCustomTitle(ctx context.Context, userID int, title string) error
 	UpdateAvatarURL(ctx context.Context, userID int, avatarURL string) error
 	ToggleEmailNotificationBlocked(ctx context.Context, userID int) error
 	UpdateScore(ctx context.Context, userID int, score int) error
@@ -60,7 +61,8 @@ type UserRepository interface {
 	CountCcommentsOnPcommentsExcludingUser(ctx context.Context, pcommentIDs []int, userID int) (int64, error)
 	ListCcommentIDsByUserID(ctx context.Context, userID int) ([]int, error)
 	GetCcommentLikeNum(ctx context.Context, ccommentID int) (int, error)
-	CountSuccessfulSuesByUser(ctx context.Context, userID int) (int64, error)
+	ListPostBrowseNumsByUserID(ctx context.Context, userID int) ([]int, error)
+	CountPvotesByPostIDs(ctx context.Context, postIDs []int) (int64, error)
 
 	ListPostSummariesByUserID(ctx context.Context, userID int) ([]domain.PostSummary, error)
 	CountPsavesByUserID(ctx context.Context, userID int) (int64, error)
