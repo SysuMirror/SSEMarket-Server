@@ -184,10 +184,10 @@ type CoinThrowInput struct {
 
 // CoinThrowResult 投币结果。
 type CoinThrowResult struct {
-	Coins      int    `json:"coins"`      // 这次投了几个币
-	Total      int    `json:"total"`      // 这个内容上我累计投了几个币
-	Exp        int    `json:"exp"`        // 这次换来的主页经验
-	CoinsLeft  int    `json:"coinsLeft"`  // 投币后剩余币
+	Coins      int    `json:"coins"`     // 这次投了几个币
+	Total      int    `json:"total"`     // 这个内容上我累计投了几个币
+	Exp        int    `json:"exp"`       // 这次换来的主页经验
+	CoinsLeft  int    `json:"coinsLeft"` // 投币后剩余币
 	TargetType string `json:"targetType"`
 	TargetID   int    `json:"targetID"`
 }

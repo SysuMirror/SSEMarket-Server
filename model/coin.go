@@ -36,9 +36,9 @@ func (CoinLedger) TableName() string { return "coin_ledger" }
 type CoinThrow struct {
 	ThrowID int `gorm:"primaryKey;autoIncrement;column:throw_id"`
 
-	UserID     int `gorm:"uniqueIndex:uk_coin_throw,priority:1;index:idx_coin_throw_user;column:user_id;type:int;not null"`
+	UserID     int    `gorm:"uniqueIndex:uk_coin_throw,priority:1;index:idx_coin_throw_user;column:user_id;type:int;not null"`
 	TargetType string `gorm:"uniqueIndex:uk_coin_throw,priority:2;column:target_type;type:varchar(16);not null"`
-	TargetID   int `gorm:"uniqueIndex:uk_coin_throw,priority:3;index:idx_coin_throw_target,priority:1;column:target_id;type:int;not null"`
+	TargetID   int    `gorm:"uniqueIndex:uk_coin_throw,priority:3;index:idx_coin_throw_target,priority:1;column:target_id;type:int;not null"`
 
 	// 当前在这条内容上投着的币数（0–2）；取消投币会减回 0。
 	CoinNum int `gorm:"column:coin_num;type:int;not null;default:0"`
