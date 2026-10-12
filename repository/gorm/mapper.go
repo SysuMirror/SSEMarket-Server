@@ -49,6 +49,7 @@ func userToDomain(u *model.User) *domain.User {
 		Score:                      u.Score,
 		Experience:                 u.Experience,
 		NovelPoints:                u.NovelPoints,
+		Coins:                      u.Coins,
 		BanEnd:                     u.Banend,
 		PunishNum:                  u.Punishnum,
 		HideProfilePosts:           u.HideProfilePosts,
@@ -70,6 +71,10 @@ func userToModel(u *domain.User) model.User {
 		AvatarURL:                  u.AvatarURL,
 		Identity:                   u.Identity,
 		Score:                      u.Score,
+		// Save 是整行写入，成长值与币余额必须带上，否则改一次资料就把它们清零。
+		Experience:                 u.Experience,
+		NovelPoints:                u.NovelPoints,
+		Coins:                      u.Coins,
 		Banend:                     u.BanEnd,
 		Punishnum:                  u.PunishNum,
 		HideProfilePosts:           u.HideProfilePosts,

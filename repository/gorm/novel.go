@@ -11,6 +11,7 @@ import (
 	"loginTest/repository"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type novelRepository struct {
@@ -766,6 +767,114 @@ func (r *novelRepository) ProgressByNovelIDs(ctx context.Context, userID int, no
 		out[list[i].NovelID] = novelProgressToDomain(&list[i])
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// 评分
+// ---------------------------------------------------------------------------
+
+// UpsertRating 写入或更新一条评分，并把 novels 上的均分账（rating_sum / rating_count）一起改好。
+//
+// prevScore 是改之前的分数，0 表示这条评分是新的（真实分数最低 1 星，所以 0 不会撞车）；
+// 第二个返回值是更新后的书本，调用方直接拿它显示新均分，不用自己重算一遍均分账。
+func (r *novelRepository) UpsertRating(ctx context.Context, novelID, userID, score int) (prevScore int, novel *domain.Novel, err error) {
+	if novelID <= 0 || userID <= 0 || score < domain.NovelRatingMin || score > domain.NovelRatingMax {
+		return 0, nil, domain.ErrBadRequest
+	}
+	err = r.session(ctx).Transaction(func(tx *gorm.DB) error {
+		var row model.NovelRating
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("novel_id = ? AND user_id = ?", novelID, userID).First(&row).Error
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 首次评分：插一行，均分账同时多一个人。
+			now := time.Now()
+			if err := tx.Create(&model.NovelRating{
+				NovelID:   novelID,
+				UserID:    userID,
+				Score:     score,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}).Error; err != nil {
+				return err
+			}
+			prevScore = 0
+			if err := tx.Model(&model.Novel{}).Where("novel_id = ?", novelID).
+				UpdateColumns(map[string]any{
+					"rating_sum":   gorm.Expr("rating_sum + ?", score),
+					"rating_count": gorm.Expr("rating_count + 1"),
+					"updated_at":   now,
+				}).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else {
+			// 改分：只挪总分，人数不变；分数没动就什么都不做。
+			prevScore = row.Score
+			if row.Score != score {
+				if err := tx.Model(&model.NovelRating{}).Where("rating_id = ?", row.RatingID).
+					UpdateColumns(map[string]any{"score": score, "updated_at": time.Now()}).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.Novel{}).Where("novel_id = ?", novelID).
+					UpdateColumn("rating_sum", gorm.Expr("GREATEST(rating_sum + ?, 0)", score-row.Score)).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		var updated model.Novel
+		if err := tx.Where("novel_id = ?", novelID).First(&updated).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		novel = novelToDomain(&updated)
+		return nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return prevScore, novel, nil
+}
+
+// FindRating 我给这本书打了几分；没打过返回 0。
+func (r *novelRepository) FindRating(ctx context.Context, novelID, userID int) (int, error) {
+	if novelID <= 0 || userID <= 0 {
+		return 0, nil
+	}
+	var row model.NovelRating
+	err := r.session(ctx).Where("novel_id = ? AND user_id = ?", novelID, userID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return row.Score, nil
+}
+
+// MyRatings 我在这批书上各打了几分（列表页按钮态用）。
+func (r *novelRepository) MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error) {
+	out := make(map[int]int, len(novelIDs))
+	if userID <= 0 || len(novelIDs) == 0 {
+		return out, nil
+	}
+	var list []model.NovelRating
+	if err := r.session(ctx).Where("user_id = ? AND novel_id IN ?", userID, novelIDs).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	for i := range list {
+		out[list[i].NovelID] = list[i].Score
+	}
+	return out, nil
+}
+
+// DeleteRatingsByNovel 删书时清掉它的所有评分。
+func (r *novelRepository) DeleteRatingsByNovel(ctx context.Context, novelID int) error {
+	return r.session(ctx).Where("novel_id = ?", novelID).Delete(&model.NovelRating{}).Error
 }
 
 // ---------------------------------------------------------------------------

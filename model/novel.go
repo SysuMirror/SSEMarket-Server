@@ -22,6 +22,12 @@ type Novel struct {
 	ShelfNum   int `gorm:"column:shelf_num;type:int;default:0"`
 	CommentNum int `gorm:"column:comment_num;type:int;default:0"`
 
+	// CoinNum 被投币总数（投币记录见 coin_throws，这里只是列表/详情展示用的计数）。
+	CoinNum int `gorm:"column:coin_num;type:int;default:0"`
+	// RatingSum / RatingCount 评分累加与人数，平均分 = sum / count。
+	RatingSum   int `gorm:"column:rating_sum;type:int;default:0"`
+	RatingCount int `gorm:"column:rating_count;type:int;default:0"`
+
 	LatestChapterID    int        `gorm:"column:latest_chapter_id;type:int;default:0"`
 	LatestChapterTitle string     `gorm:"column:latest_chapter_title;type:varchar(200);default:''"`
 	LatestChapterAt    *time.Time `gorm:"column:latest_chapter_at;type:datetime"`

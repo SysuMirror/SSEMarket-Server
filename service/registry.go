@@ -26,6 +26,7 @@ var (
 	Quest         QuestService
 	Novels        NovelService
 	NovelPoints   NovelPointsService
+	Coins         CoinService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -68,5 +69,8 @@ func InitServices(db *gorm.DB) {
 	novelRepo := gormrepo.NewNovelRepository(db)
 	ledgerRepo := gormrepo.NewLedgerRepository(db)
 	NovelPoints = NewNovelPointsService(ledgerRepo, novelRepo)
-	Novels = NewNovelService(novelRepo, NovelPoints)
+
+	// 币体系：投币时要解析被投内容的作者与可见性，所以把帖子库和书本库一起注进来。
+	Coins = NewCoinService(gormrepo.NewCoinRepository(db), postRepo, novelRepo)
+	Novels = NewNovelService(novelRepo, NovelPoints, Coins)
 }

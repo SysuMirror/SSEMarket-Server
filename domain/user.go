@@ -12,9 +12,11 @@ type User struct {
 	AvatarURL                  string
 	Identity                   string
 	Score                      int
-	// Experience 读者经验；NovelPoints 作者积分（单位：分，1 积分 = 10 分）。
+	// Experience 读者经验；NovelPoints 作者积分（单位：分，1 积分 = 10 分）；
+	// Coins 站内币余额（发帖/阅读/写作/评分赚来，投币时花掉，见 domain/coin.go）。
 	Experience                   int
 	NovelPoints                  int
+	Coins                        int
 	BanEnd                       time.Time
 	PunishNum                  int
 	HideProfilePosts           bool

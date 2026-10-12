@@ -21,6 +21,12 @@ const (
 	NovelTargetParagraph = "paragraph"
 )
 
+// 评分：1–5 星，每人每本一条，可以改。
+const (
+	NovelRatingMin = 1
+	NovelRatingMax = 5
+)
+
 // Novel 小说领域实体。
 type Novel struct {
 	ID         int
@@ -37,6 +43,11 @@ type Novel struct {
 	ReadNum    int
 	ShelfNum   int
 	CommentNum int
+
+	// CoinNum 被投币总数；RatingSum/RatingCount 评分总和与人数（平均分 = Sum/Count）。
+	CoinNum     int
+	RatingSum   int
+	RatingCount int
 
 	LatestChapterID    int
 	LatestChapterTitle string
@@ -196,9 +207,30 @@ type NovelChapterDetail struct {
 	Next       *NovelChapterAdjacent
 }
 
+// NovelRatingResult 一次评分的结果。
+type NovelRatingResult struct {
+	NovelID     int     `json:"novelID"`
+	Score       int     `json:"score"`  // 这次打了几分
+	Changed     bool    `json:"changed"` // 分数真的变了（重复提交同一个分数为 false）
+	FirstTime   bool    `json:"firstTime"`
+	RatingCount int     `json:"ratingCount"`
+	RatingAvg   float64 `json:"ratingAvg"`
+	Coins       int     `json:"coins"`  // 作者因此拿到的币（仅首次评分）
+	Points      int     `json:"points"` // 作者因此拿到的积分（仅首次评分）
+}
+
+// NovelRatingAvg 平均分；没人评返回 0。
+func NovelRatingAvg(n *Novel) float64 {
+	if n == nil || n.RatingCount <= 0 {
+		return 0
+	}
+	return float64(n.RatingSum) / float64(n.RatingCount)
+}
+
 // 小说业务错误。
 var (
 	ErrNovelNotAuthor = errors.New("只有本书作者可以管理这本书")
+	ErrNovelRateSelf  = errors.New("不能给自己的书评分")
 )
 
 // SplitNovelParagraphs 正文分段规则：换行分隔、去空白行。

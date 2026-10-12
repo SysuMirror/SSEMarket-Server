@@ -48,6 +48,12 @@ type NovelRepository interface {
 	ToggleCommentLike(ctx context.Context, commentID, userID int) error
 	CommentLikedSet(ctx context.Context, userID int, commentIDs []int) (map[int]bool, error)
 
+	// 评分（1–5 星，每人每本一条，可改）
+	// UpsertRating 返回改之前的分数（0 = 首次）与更新后的书本。
+	UpsertRating(ctx context.Context, novelID, userID, score int) (prevScore int, novel *domain.Novel, err error)
+	FindRating(ctx context.Context, novelID, userID int) (int, error)
+	MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error)
+
 	// 书架与阅读进度
 	ToggleShelf(ctx context.Context, novelID, userID int) (bool, error)
 	IsOnShelf(ctx context.Context, novelID, userID int) (bool, error)

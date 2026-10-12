@@ -26,12 +26,14 @@ const (
 
 type novelService struct {
 	novels repository.NovelRepository
-	// points 积分/经验发放；允许为 nil（单测与未开通积分的场景），所有调用都做了 nil 判断。
+	// points 积分/经验发放；coins 币发放。两者都允许为 nil（单测与未开通的场景），
+	// 所有调用都做了 nil 判断。
 	points NovelPointsService
+	coins  CoinService
 }
 
-func NewNovelService(novels repository.NovelRepository, points NovelPointsService) NovelService {
-	return &novelService{novels: novels, points: points}
+func NewNovelService(novels repository.NovelRepository, points NovelPointsService, coins CoinService) NovelService {
+	return &novelService{novels: novels, points: points, coins: coins}
 }
 
 // ---------------------------------------------------------------------------
@@ -583,4 +585,16 @@ func (s *novelService) grantReaderUV(ctx context.Context, novel *domain.Novel, v
 
 func (s *novelService) GetProgress(ctx context.Context, novelID, userID int) (*domain.NovelProgress, error) {
 	return s.novels.FindProgress(ctx, novelID, userID)
+}
+
+// ---------------------------------------------------------------------------
+// 评分
+// ---------------------------------------------------------------------------
+
+// MyRating 我给这本书打了几分（0 = 没打过）。
+func (s *novelService) MyRating(ctx context.Context, novelID, userID int) (int, error) {
+	if s == nil || novelID <= 0 || userID <= 0 {
+		return 0, nil
+	}
+	return s.novels.FindRating(ctx, novelID, userID)
 }

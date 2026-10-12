@@ -15,6 +15,7 @@ type Post struct {
 	CommentNum int
 	LikeNum    int
 	VoteNum    int
+	CoinNum    int // 被投币总数（只展示，不参与任何结算）
 	BrowseNum  int
 	PostTime   time.Time
 	Heat       float64

@@ -15,6 +15,8 @@ type Post struct {
 	CommentNum int       `gorm:"column:comment_num;type:int"`
 	LikeNum    int       `gorm:"column:like_num;type:int"`
 	VoteNum    int       `gorm:"column:vote_num;type:int;default:0"`
+	// CoinNum 被投币总数（展示用，不参与任何结算；投币明细见 coin_throws）。
+	CoinNum    int       `gorm:"column:coin_num;type:int;default:0"`
 	BrowseNum  int       `gorm:"column:browse_num;type:int"`
 	PostTime   time.Time `gorm:"column:post_time;type:datetime"`
 	Heat       float64   `gorm:"column:heat;type:double"`

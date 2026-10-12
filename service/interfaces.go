@@ -205,6 +205,27 @@ type NovelPointsService interface {
 }
 
 // ShopService 商城领域服务。
+// CoinService 站内币体系（与上面的经验/积分互不相通，各记各的流水）。
+//
+// 赚币的四条规则都在服务端触发，调用方不需要判断「今天是不是第一次」——
+// 幂等键由 domain/coin.go 统一拼，重复调用只会有一条流水。
+type CoinService interface {
+	// 赚币
+	GrantFirstPost(ctx context.Context, userID int) (int, error)
+	AddReadSeconds(ctx context.Context, userID, seconds int) (int, error)
+	AddWriteWords(ctx context.Context, authorID, words int) (int, error)
+	GrantRated(ctx context.Context, authorID, novelID, raterID int) (int, error)
+
+	// 投币：每人每个内容最多 2 币，每个币给投币者 +10 主页经验
+	Throw(ctx context.Context, userID int, targetType string, targetID, coins int) (*domain.CoinThrowResult, error)
+
+	// 查询
+	Summary(ctx context.Context, userID int) (*domain.CoinSummary, error)
+	Ledger(ctx context.Context, userID, limit, offset int) ([]*domain.CoinLedger, int64, error)
+	MyThrows(ctx context.Context, userID int, targetType string, targetIDs []int) (map[int]int, error)
+	ThrownForTarget(ctx context.Context, targetType string, targetID int) (int, error)
+}
+
 type ShopService interface {
 	Create(ctx context.Context, in domain.ProductCreateInput) (int, error)
 	List(ctx context.Context, filter domain.ProductFilter) ([]*domain.Product, error)
