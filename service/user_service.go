@@ -28,10 +28,13 @@ const maxValidateFail = 5
 
 type userService struct {
 	users repository.UserRepository
+	// coins 投币换来的主页经验要参与每小时 score 重算，否则重算会把投币经验冲掉。
+	// 允许为 nil（单测与未开通币体系的场景）。
+	coins CoinService
 }
 
-func NewUserService(users repository.UserRepository) UserService {
-	return &userService{users: users}
+func NewUserService(users repository.UserRepository, coins CoinService) UserService {
+	return &userService{users: users, coins: coins}
 }
 
 func (s *userService) GetByID(ctx context.Context, id int) (*domain.User, error) {
@@ -636,6 +639,17 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 		log.Printf("CalculateAndSaveScores list users: %v", err)
 		return
 	}
+	// 投币换来的主页经验：口径与投币当场加分的口径完全一致（投币总数 × 10），
+	// 所以每小时重算不会把投币经验冲掉。整表一次取回，不在按用户的循环里逐个查。
+	thrownByUser := map[int]int{}
+	if s.coins != nil {
+		totals, err := s.coins.ThrownTotalsAll(ctx)
+		if err != nil {
+			log.Printf("CalculateAndSaveScores thrown totals: %v", err)
+		} else {
+			thrownByUser = totals
+		}
+	}
 	for _, user := range users {
 		if user.ID == 0 {
 			continue
@@ -675,8 +689,10 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 			}
 		}
 		sueCount, _ := s.users.CountSuccessfulSuesByUser(ctx, user.ID)
+		// 投币经验与发帖/评论/点赞等项相加，之后仍然只由 score 这一条线决定主页等级。
 		totalScore := len(postIDs)*10 + len(pcommentIDs)*5 + len(ccommentIDs)*5 + totalLikeNum +
-			int(psaveCount)*3 + int(commentedCount+repliedCount)*2 + int(sueCount)*20 - user.PunishNum*20
+			int(psaveCount)*3 + int(commentedCount+repliedCount)*2 + int(sueCount)*20 - user.PunishNum*20 +
+			thrownByUser[user.ID]*domain.CoinExpPerCoin
 		_ = s.users.UpdateScore(ctx, user.ID, totalScore)
 	}
 	log.Println("Score updated")

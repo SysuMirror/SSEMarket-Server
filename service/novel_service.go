@@ -332,6 +332,10 @@ func (s *novelService) CreateChapter(ctx context.Context, in domain.NovelChapter
 		_, _ = s.points.GrantChapterPublish(ctx, novel.UserID, in.NovelID, chapter.ID)
 		_, _ = s.points.SettleWritingWords(ctx, novel.UserID, in.NovelID, chapter.WordNum)
 	}
+	// 币：当日更新字数累计（WordNum 已排除图片段落），满 4000 字给作者 1 币。
+	if s.coins != nil {
+		_, _ = s.coins.AddWriteWords(ctx, novel.UserID, chapter.WordNum)
+	}
 	return chapter, nil
 }
 
@@ -571,6 +575,11 @@ func (s *novelService) ReportProgress(ctx context.Context, in domain.NovelProgre
 	if s.points != nil && in.ReadSeconds > 0 {
 		_, _ = s.points.SettleReadTime(ctx, in.UserID, in.NovelID, in.ReadSeconds)
 	}
+	// 币：同一份心跳秒数另记一条当日游标，满 30 分钟给读者 1 币。
+	// 两条线各自累计、各自幂等，互不影响。
+	if s.coins != nil && in.ReadSeconds > 0 {
+		_, _ = s.coins.AddReadSeconds(ctx, in.UserID, in.ReadSeconds)
+	}
 	return nil
 }
 
@@ -591,10 +600,84 @@ func (s *novelService) GetProgress(ctx context.Context, novelID, userID int) (*d
 // 评分
 // ---------------------------------------------------------------------------
 
+// RateNovel 给一本书评分（1–5 星，每人每本一条，可以改）。
+//
+// 作者侧收益：首次收到某个读者的评分时 +1 币。幂等键是（作者, 书, 读者），
+// 所以读者改分、重复提交同一分数都不会再给币。评分不给读者任何币或经验。
+func (s *novelService) RateNovel(ctx context.Context, novelID, userID, score int) (*domain.NovelRatingResult, error) {
+	if s == nil || novelID <= 0 || userID <= 0 {
+		return nil, domain.ErrBadRequest
+	}
+	if score < domain.NovelRatingMin || score > domain.NovelRatingMax {
+		return nil, domain.ErrBadRequest
+	}
+	novel, err := s.novels.FindNovelByID(ctx, novelID)
+	if err != nil {
+		return nil, err
+	}
+	if novel.UserID == userID {
+		return nil, domain.ErrNovelRateSelf
+	}
+	prevScore, updated, err := s.novels.UpsertRating(ctx, novelID, userID, score)
+	if err != nil {
+		return nil, err
+	}
+	result := &domain.NovelRatingResult{
+		NovelID:     novelID,
+		Score:       score,
+		Changed:     prevScore != score,
+		FirstTime:   prevScore == 0,
+		RatingCount: updated.RatingCount,
+		RatingAvg:   domain.NovelRatingAvg(updated),
+	}
+	if s.coins != nil {
+		granted, _ := s.coins.GrantRated(ctx, updated.UserID, novelID, userID)
+		result.Coins = granted
+	}
+	return result, nil
+}
+
 // MyRating 我给这本书打了几分（0 = 没打过）。
 func (s *novelService) MyRating(ctx context.Context, novelID, userID int) (int, error) {
 	if s == nil || novelID <= 0 || userID <= 0 {
 		return 0, nil
 	}
 	return s.novels.FindRating(ctx, novelID, userID)
+}
+
+// MyRatings 我给这批书各打了几分（列表页按钮态用）。
+func (s *novelService) MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error) {
+	if s == nil || userID <= 0 || len(novelIDs) == 0 {
+		return map[int]int{}, nil
+	}
+	return s.novels.MyRatings(ctx, userID, novelIDs)
+}
+
+// MyNovelStats 列表页/详情页要用的「我对这些书做了什么」：打了几分、投了几个币。
+// 两项分别来自评分表和投币表，合在这里一次返回，控制器只调一次。
+func (s *novelService) MyNovelStats(ctx context.Context, novelIDs []int, viewerID int) (*domain.NovelViewerStats, error) {
+	stats := &domain.NovelViewerStats{
+		Ratings: map[int]int{},
+		Coins:   map[int]int{},
+	}
+	if s == nil || viewerID <= 0 || len(novelIDs) == 0 {
+		return stats, nil
+	}
+	ratings, err := s.novels.MyRatings(ctx, viewerID, novelIDs)
+	if err != nil {
+		return nil, err
+	}
+	if ratings != nil {
+		stats.Ratings = ratings
+	}
+	if s.coins != nil {
+		throws, err := s.coins.MyThrows(ctx, viewerID, domain.CoinTargetNovel, novelIDs)
+		if err != nil {
+			return nil, err
+		}
+		if throws != nil {
+			stats.Coins = throws
+		}
+	}
+	return stats, nil
 }

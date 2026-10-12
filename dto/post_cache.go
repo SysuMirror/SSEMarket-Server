@@ -20,7 +20,9 @@ type PostCacheItem struct {
 	Ptext      string `json:"ptext"`
 	LikeNum    int    `json:"like_num"`
 	CommentNum int    `json:"comment_num"`
-	BrowseNum  int     `json:"browse_num"`
+	// CoinNum 被投币总数。投币后必须失效这条缓存，否则详情页币数停在旧值。
+	CoinNum   int     `json:"coin_num"`
+	BrowseNum int     `json:"browse_num"`
 	Heat       float64 `json:"heat"`
 	Photos     string  `json:"photos"`
 	Tag        string `json:"tag"`
@@ -53,6 +55,8 @@ func (d *PostDetailCacheDTO) ConvertFromModel(post model.Post, user model.User) 
 		Ptext:       post.Ptext,
 		LikeNum:     post.LikeNum,
 		CommentNum:  post.CommentNum,
+		// 缓存走的是 model 直读，不经过 mapper，所以历史票数要在这里同样并入币数。
+		CoinNum:     post.CoinNum + post.VoteNum,
 		BrowseNum:   post.BrowseNum,
 		Heat:        post.Heat,
 		Photos:      post.Photos,
@@ -91,6 +95,10 @@ func (d *PostDetailCacheDTO) ConvertToModel() (model.Post, model.User) {
 		Ptext:       d.Post.Ptext,
 		LikeNum:     d.Post.LikeNum,
 		CommentNum:  d.Post.CommentNum,
+		// 缓存里存的 CoinNum 已经是「真实投币 + 历史票数」的合并值，
+		// VoteNum 置 0，避免 mapper 再合并一次把票数算两遍。
+		CoinNum:   d.Post.CoinNum,
+		VoteNum:   0,
 		BrowseNum:   d.Post.BrowseNum,
 		Heat:        d.Post.Heat,
 		Photos:      d.Post.Photos,

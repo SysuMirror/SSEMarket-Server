@@ -20,9 +20,33 @@ func NewCoinService(coins repository.CoinRepository, posts repository.PostReposi
 	return &coinService{coins: coins, posts: posts, novels: novels}
 }
 
+// coinEarnEvents 赚币的那几条事件（投币支出是负数，不算在内）。
+var coinEarnEvents = []string{
+	domain.CoinEventVisitDaily,
+	domain.CoinEventPostDaily,
+	domain.CoinEventReadDaily,
+	domain.CoinEventWriteDaily,
+	domain.CoinEventRated,
+}
+
 // ---------------------------------------------------------------------------
 // 赚币：全部走 dedup_key 幂等，同一件事重复触发只会有一条流水
 // ---------------------------------------------------------------------------
+
+// GrantDailyVisit 每日进入网页 +1 币。
+// 前端进站点时调一次即可：幂等键含日期，重复调用（刷新、多标签页）只会有一条流水。
+func (s *coinService) GrantDailyVisit(ctx context.Context, userID int) (int, error) {
+	if s == nil || userID <= 0 {
+		return 0, nil
+	}
+	granted, _, err := s.coins.Grant(ctx, domain.CoinGrantInput{
+		UserID:    userID,
+		EventType: domain.CoinEventVisitDaily,
+		DedupKey:  domain.CoinDedupDay(domain.CoinEventVisitDaily, userID, domain.CoinLedgerDay(time.Now())),
+		Amount:    domain.CoinVisitDaily,
+	})
+	return granted, err
+}
 
 // GrantFirstPost 每日首次发帖 +1 币。
 // 幂等键含日期，所以一天发十帖也只给一次币。
@@ -147,12 +171,22 @@ func (s *coinService) Throw(ctx context.Context, userID int, targetType string, 
 	default:
 		return nil, domain.ErrBadRequest
 	}
-	return s.coins.Throw(ctx, domain.CoinThrowInput{
+	result, err := s.coins.Throw(ctx, domain.CoinThrowInput{
 		UserID:     userID,
 		TargetType: targetType,
 		TargetID:   targetID,
 		Coins:      coins,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// 帖子详情缓存与主页 Feed 缓存里带着 coin_num，投币后必须失效，否则币数停在旧值。
+	// （小说列表/详情没有缓存，novels.coin_num 直接读库，不需要处理。）
+	if targetType == domain.CoinTargetPost {
+		InvalidatePostDetail(targetID)
+		InvalidateHomeBrowse()
+	}
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -173,12 +207,20 @@ func (s *coinService) Summary(ctx context.Context, userID int) (*domain.CoinSumm
 	if err != nil {
 		return nil, err
 	}
-	received, err := s.coins.SumSigned(ctx, userID,
-		domain.CoinEventPostDaily, domain.CoinEventReadDaily, domain.CoinEventWriteDaily, domain.CoinEventRated)
+	received, err := s.coins.SumSigned(ctx, userID, coinEarnEvents...)
+	if err != nil {
+		return nil, err
+	}
+	// 「收到评分」这一项只看 rated，不能把发帖/阅读/写作的币也算成评分收益。
+	ratedCoins, err := s.coins.SumSigned(ctx, userID, domain.CoinEventRated)
 	if err != nil {
 		return nil, err
 	}
 
+	visitDone, err := s.coins.ExistsDedup(ctx, domain.CoinDedupDay(domain.CoinEventVisitDaily, userID, day))
+	if err != nil {
+		return nil, err
+	}
 	postDone, err := s.coins.ExistsDedup(ctx, domain.CoinDedupDay(domain.CoinEventPostDaily, userID, day))
 	if err != nil {
 		return nil, err
@@ -200,13 +242,22 @@ func (s *coinService) Summary(ctx context.Context, userID int) (*domain.CoinSumm
 		return nil, err
 	}
 
-	// 发帖这一项没有计数器：当天发过帖就是 1，没发过就 0，达标线 1 帖。
+	// 进入网页与发帖这两项没有计数器：当天做过就是 1，没做过就 0，达标线 1 次。
+	visitProgress := 0
+	if visitDone {
+		visitProgress = 1
+	}
 	postProgress := 0
 	if postDone {
 		postProgress = 1
 	}
 
 	tasks := []domain.CoinTask{
+		{
+			Event: domain.CoinEventVisitDaily, Label: "进入网页 1 次",
+			Target: 1, Progress: visitProgress, Reward: domain.CoinVisitDaily,
+			Done: visitDone, Available: !visitDone,
+		},
 		{
 			Event: domain.CoinEventPostDaily, Label: "发 1 篇帖子",
 			Target: 1, Progress: postProgress, Reward: domain.CoinPostDaily,
@@ -223,8 +274,8 @@ func (s *coinService) Summary(ctx context.Context, userID int) (*domain.CoinSumm
 			Done: writeDone, Available: !writeDone,
 		},
 		{
-			Event: domain.CoinEventRated, Label: "收到评分（作者收益）",
-			Target: domain.CoinRated, Progress: received, Reward: domain.CoinRated,
+			Event: domain.CoinEventRated, Label: "作品收到评分（作者收益）",
+			Target: domain.CoinRated, Progress: ratedCoins, Reward: domain.CoinRated,
 			Done: false, Available: true,
 		},
 	}
@@ -261,4 +312,13 @@ func (s *coinService) ThrownForTarget(ctx context.Context, targetType string, ta
 		return 0, nil
 	}
 	return s.coins.ThrownForTarget(ctx, targetType, targetID)
+}
+
+// ThrownTotalsAll 全站每个人的投币总数，一次查询拿全。
+// 主页经验每小时重算用它，避免在按用户的循环里逐个查（N 个用户 N 次查询）。
+func (s *coinService) ThrownTotalsAll(ctx context.Context) (map[int]int, error) {
+	if s == nil {
+		return map[int]int{}, nil
+	}
+	return s.coins.ThrownTotalsAll(ctx)
 }

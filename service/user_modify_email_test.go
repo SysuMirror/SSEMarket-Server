@@ -186,7 +186,7 @@ func withRedis(t *testing.T) *inMemoryRedis {
 func TestModifyEmailRejectsInvalidInputBeforeRedis(t *testing.T) {
 	t.Cleanup(func() { core.MyRedis = nil })
 	repo := &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}}
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 
 	tests := []struct {
 		name string
@@ -218,7 +218,7 @@ func TestModifyEmailPropagatesRepositoryErrors(t *testing.T) {
 
 	findErr := errors.New("find failed")
 	repo := &modifyEmailRepository{findErr: findErr}
-	_, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err := service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, findErr) {
@@ -226,7 +226,7 @@ func TestModifyEmailPropagatesRepositoryErrors(t *testing.T) {
 	}
 
 	repo = &modifyEmailRepository{}
-	_, err = service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err = service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -235,7 +235,7 @@ func TestModifyEmailPropagatesRepositoryErrors(t *testing.T) {
 
 	existsErr := errors.New("exists failed")
 	repo = &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}, existsErr: existsErr}
-	_, err = service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err = service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, existsErr) {
@@ -244,7 +244,7 @@ func TestModifyEmailPropagatesRepositoryErrors(t *testing.T) {
 
 	usedErr := errors.New("used failed")
 	repo = &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}, usedErr: usedErr}
-	_, err = service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err = service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, usedErr) {
@@ -257,7 +257,7 @@ func TestModifyEmailRedisUnavailable(t *testing.T) {
 	core.MyRedis = nil
 	t.Cleanup(func() { core.MyRedis = previous })
 	repo := &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}}
-	_, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err := service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, domain.ErrInternal) {
@@ -271,7 +271,7 @@ func TestModifyEmailRedisUnavailable(t *testing.T) {
 func TestModifyEmailRejectsExistingEmailAndBadCode(t *testing.T) {
 	store := withRedis(t)
 	repo := &modifyEmailRepository{user: &domain.User{ID: 7, Email: "old@example.com"}, exists: true}
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 	_, err := svc.ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
@@ -308,7 +308,7 @@ func TestModifyEmailRejectsPreviouslyUsedEmail(t *testing.T) {
 		user:      &domain.User{ID: 7, Email: "current@example.com"},
 		usedEmail: true,
 	}
-	_, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err := service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "former@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, domain.ErrEmailUsed) {
@@ -328,7 +328,7 @@ func TestModifyEmailSuccessNormalizesAndInvalidatesCaches(t *testing.T) {
 	store.values[util.PrefixUserSession+"7"] = "session"
 	store.values[util.GetUserInfoKey(7)] = "profile"
 
-	got, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	got, err := service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "  New@Example.COM ", ValiCode: "123456",
 	})
 	if err != nil {
@@ -367,7 +367,7 @@ func TestModifyEmailDatabaseUpdateFailureKeepsVerificationCode(t *testing.T) {
 	}
 	store.values["vcode:new@example.com"] = "123456"
 
-	_, err := service.NewUserService(repo).ModifyEmail(context.Background(), domain.ModifyEmailInput{
+	_, err := service.NewUserService(repo, nil).ModifyEmail(context.Background(), domain.ModifyEmailInput{
 		UserID: 7, NewEmail: "new@example.com", ValiCode: "123456",
 	})
 	if !errors.Is(err, updateErr) {

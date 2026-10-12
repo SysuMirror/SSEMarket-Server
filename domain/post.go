@@ -14,9 +14,10 @@ type Post struct {
 	Content    string
 	CommentNum int
 	LikeNum    int
-	VoteNum    int
-	CoinNum    int // 被投币总数（只展示，不参与任何结算）
-	BrowseNum  int
+	// CoinNum 被投币总数（只展示，不参与任何结算）：
+	// 真实投币数 + 历史投票数（投票功能已下线，旧票按 1 票 = 1 币折算，见 PostCoinNum）。
+	CoinNum   int
+	BrowseNum int
 	PostTime   time.Time
 	Heat       float64
 	Photos     string
@@ -69,6 +70,8 @@ type BrowseItem struct {
 	Author           *User
 	IsSaved          bool
 	IsLiked          bool
+	// MyCoins 我在这帖上累计投了几个币（0 = 没投过；上限 2，见 CoinMaxPerTarget）。
+	MyCoins          int
 	HotComment       *Pcomment // 该帖点赞最多的一条一级评论(并列按字数倒序),可能为 nil
 	HotCommentAuthor *User    // HotComment.UserID 对应的用户,可能为 nil
 }
@@ -81,6 +84,8 @@ type PostDetail struct {
 	IsLiked   bool
 	IsWatched bool
 	BrowseNum int
+	// MyCoins 我在这帖上累计投了几个币（0 = 没投过）。
+	MyCoins int
 }
 
 // AuthTokens 登录/注册返回。

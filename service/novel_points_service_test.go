@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -563,71 +562,7 @@ func TestCheckInStreakBonusIsCapped(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// 打赏
-// ---------------------------------------------------------------------------
-
-// newRewardService 复用改书测试里的书本 stub（积分服务只需要 FindNovelByID）。
-func newRewardService(novel *domain.Novel) (service.NovelPointsService, *ledgerStub) {
-	stub := newLedgerStub()
-	return service.NewNovelPointsService(stub, &novelRepoStub{novel: novel}), stub
-}
-
-func TestRewardTransfersExperienceToPoints(t *testing.T) {
-	novel := sampleNovel() // 作者 UserID=100
-	svc, stub := newRewardService(novel)
-	ctx := context.Background()
-
-	stub.exp[7] = 30 // 打赏者先攒 30 经验
-	before := stub.exp[7]
-
-	result, err := svc.RewardAuthor(ctx, 7, novel.ID, 10)
-	if err != nil {
-		t.Fatalf("打赏失败: %v", err)
-	}
-	if result.Points != 10 || result.Cost != 10 {
-		t.Errorf("result = %+v, 期望 points=10 cost=10", result)
-	}
-	if stub.exp[7] != before-10 {
-		t.Errorf("打赏者经验 = %d, 期望 %d", stub.exp[7], before-10)
-	}
-	if stub.points[100] != 10*domain.NovelPointUnitPerScore {
-		t.Errorf("作者积分 = %d 分, 期望 %d", stub.points[100], 10*domain.NovelPointUnitPerScore)
-	}
-}
-
-func TestRewardRejectsSelfInsufficientAndSecondSameDay(t *testing.T) {
-	novel := sampleNovel()
-	ctx := context.Background()
-
-	svc, _ := newRewardService(novel)
-	if err := func() error { _, err := svc.RewardAuthor(ctx, 100, novel.ID, 10); return err }(); !errors.Is(err, domain.ErrNovelRewardSelf) {
-		t.Errorf("自己打赏 err = %v, 期望 ErrNovelRewardSelf", err)
-	}
-
-	svc2, _ := newRewardService(novel)
-	if _, err := svc2.RewardAuthor(ctx, 7, novel.ID, 10); !errors.Is(err, domain.ErrNovelNotEnoughExperience) {
-		t.Errorf("经验不足 err = %v, 期望 ErrNovelNotEnoughExperience", err)
-	}
-
-	svc3, stub := newRewardService(novel)
-	stub.exp[7] = 100
-	if _, err := svc3.RewardAuthor(ctx, 7, novel.ID, 10); err != nil {
-		t.Fatalf("首次打赏失败: %v", err)
-	}
-	if _, err := svc3.RewardAuthor(ctx, 7, novel.ID, 10); !errors.Is(err, domain.ErrNovelRewardDailyLimit) {
-		t.Errorf("同日第二次 err = %v, 期望 ErrNovelRewardDailyLimit", err)
-	}
-	if stub.exp[7] != 90 {
-		t.Errorf("被拒的第二次不应扣经验，实际 %d", stub.exp[7])
-	}
-
-	svc4, _ := newRewardService(novel)
-	if _, err := svc4.RewardAuthor(ctx, 7, novel.ID, 1); !errors.Is(err, domain.ErrBadRequest) {
-		t.Errorf("低于下限 err = %v, 期望 ErrBadRequest", err)
-	}
-}
-
+// 打赏已下线（被投币体系替换），对应的 RewardAuthor 测试随之移除。
 // ---------------------------------------------------------------------------
 // 总览与流水
 // ---------------------------------------------------------------------------

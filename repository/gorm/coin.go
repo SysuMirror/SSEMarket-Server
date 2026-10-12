@@ -27,6 +27,7 @@ func (r *coinRepository) session(ctx context.Context) *gorm.DB {
 
 // coinDisplayEvents 流水展示口径：纯计数行（当日阅读秒数、写作字数）不露出。
 var coinDisplayEvents = []string{
+	domain.CoinEventVisitDaily,
 	domain.CoinEventPostDaily,
 	domain.CoinEventReadDaily,
 	domain.CoinEventWriteDaily,
@@ -174,7 +175,11 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			}
 			return err
 		}
-		total := throw.CoinNum + in.Coins
+		legacyVotes, err := legacyVoteCoins(tx, in.UserID, in.TargetType, []int{in.TargetID})
+		if err != nil {
+			return err
+		}
+		total := throw.CoinNum + legacyVotes[in.TargetID] + in.Coins
 		if total > domain.CoinMaxPerTarget {
 			return domain.ErrCoinLimit
 		}
@@ -321,6 +326,40 @@ func (r *coinRepository) ThrownByMe(ctx context.Context, userID int, targetType 
 	}
 	for _, x := range rows {
 		out[x.TargetID] = x.CoinNum
+	}
+	// 历史投票折算进来的币也要显示出来，否则前端显示的「已投 N 币」和上限口径不一致。
+	legacy, err := legacyVoteCoins(r.session(ctx), userID, targetType, targetIDs)
+	if err != nil {
+		return nil, err
+	}
+	for id, n := range legacy {
+		out[id] += n
+	}
+	return out, nil
+}
+
+// legacyVoteCoins 历史投票折算：投票功能已下线，pvotes 表只读不再写入，
+// 一人一票折算成一个「已经投过的币」，用于投币上限与「我投了几个」的口径。
+// 只有帖子有历史投票，小说恒为空。折算只影响上限与展示，不给投币者补主页经验。
+func legacyVoteCoins(db *gorm.DB, userID int, targetType string, targetIDs []int) (map[int]int, error) {
+	out := map[int]int{}
+	if userID <= 0 || len(targetIDs) == 0 || targetType != domain.CoinTargetPost {
+		return out, nil
+	}
+	type row struct {
+		PostID int
+		Cnt    int
+	}
+	var rows []row
+	if err := db.Model(&model.Pvote{}).
+		Select("postID", "COUNT(*) AS cnt").
+		Where("userID = ? AND postID IN ?", userID, targetIDs).
+		Group("postID").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, x := range rows {
+		out[x.PostID] = x.Cnt
 	}
 	return out, nil
 }

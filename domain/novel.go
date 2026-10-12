@@ -184,6 +184,14 @@ type NovelProgress struct {
 	UpdatedAt      time.Time
 }
 
+// NovelViewerStats 当前用户在这批书上的个人状态（列表页按钮态用）。
+type NovelViewerStats struct {
+	// Ratings 我给每本书打了几分（0 = 没打过）。
+	Ratings map[int]int
+	// Coins 我给每本书投了几个币（0 = 没投）。
+	Coins map[int]int
+}
+
 // NovelCategory 分类聚合。
 type NovelCategory struct {
 	Name  string `json:"name"`
@@ -210,13 +218,12 @@ type NovelChapterDetail struct {
 // NovelRatingResult 一次评分的结果。
 type NovelRatingResult struct {
 	NovelID     int     `json:"novelID"`
-	Score       int     `json:"score"`  // 这次打了几分
+	Score       int     `json:"score"`   // 这次打了几分
 	Changed     bool    `json:"changed"` // 分数真的变了（重复提交同一个分数为 false）
 	FirstTime   bool    `json:"firstTime"`
 	RatingCount int     `json:"ratingCount"`
 	RatingAvg   float64 `json:"ratingAvg"`
-	Coins       int     `json:"coins"`  // 作者因此拿到的币（仅首次评分）
-	Points      int     `json:"points"` // 作者因此拿到的积分（仅首次评分）
+	Coins       int     `json:"coins"` // 作者因此拿到的币（同一读者只给一次）
 }
 
 // NovelRatingAvg 平均分；没人评返回 0。

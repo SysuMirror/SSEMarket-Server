@@ -10,14 +10,15 @@ func postToDomain(p *model.Post) *domain.Post {
 		return nil
 	}
 	return &domain.Post{
-		ID:         p.PostID,
 		UserID:     p.UserID,
 		Partition:  p.Partition,
 		Title:      p.Title,
 		Content:    p.Ptext,
 		CommentNum: p.CommentNum,
 		LikeNum:    p.LikeNum,
-		VoteNum:    p.VoteNum,
+		// 投票功能已下线：历史票数折算成「已经投过的币」并入 CoinNum。
+		// vote_num 不再有写入路径（只有删帖会减），所以这个合并值不会被刷。
+		CoinNum: p.CoinNum + p.VoteNum,
 		BrowseNum:  p.BrowseNum,
 		PostTime:   p.PostTime,
 		Heat:       p.Heat,

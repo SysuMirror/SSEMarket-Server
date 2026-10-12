@@ -9,7 +9,7 @@ import (
 // 站点「币」体系（与小说的经验/积分体系完全独立，各记各的流水）。
 //
 // 币只有两个用途：
-//   - 赚币：每日首次发帖、每日阅读满 30 分钟、每日更新写作满 4000 字、收到评分；
+//   - 赚币：每日进入网页、每日首次发帖、每日阅读满 30 分钟、每日更新写作满 4000 字、收到评分；
 //   - 投币：给帖子或小说投币，每人对每个内容最多 2 币；投币者按每个币 +10 主页经验（users.score）。
 //
 // 余额记在 users.coins；收支记 coin_ledger 流水（dedup_key 唯一索引保证幂等）；
@@ -19,6 +19,7 @@ import (
 
 // 币流水事件类型。
 const (
+	CoinEventVisitDaily = "visit_daily" // 每日进入网页 +1 币
 	CoinEventPostDaily  = "post_daily"  // 每日首次发帖 +1 币
 	CoinEventReadDaily  = "read_daily"  // 当日阅读累计满 30 分钟 +1 币
 	CoinEventWriteDaily = "write_daily" // 当日更新写作满 4000 字 +1 币
@@ -32,6 +33,9 @@ const (
 
 // 规则表（数值口径集中在这里，改规则只改这一处）。
 const (
+	// 每天进入网页给 1 币：前端进站点时上报一次，幂等键含日期，一天只给一次。
+	CoinVisitDaily = 1
+
 	// 每日首次发帖 +1 币（同一天第二帖不再给）。
 	CoinPostDaily = 1
 
@@ -117,6 +121,8 @@ func CoinTargetLabel(targetType string) string {
 // CoinEventLabel 币流水事件的中文说明（前端展示用）。
 func CoinEventLabel(eventType string) string {
 	switch eventType {
+	case CoinEventVisitDaily:
+		return "每日进入网页"
 	case CoinEventPostDaily:
 		return "每日首次发帖"
 	case CoinEventReadDaily:

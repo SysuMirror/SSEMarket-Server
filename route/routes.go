@@ -111,17 +111,20 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/submitFeedback", controller.SubmitFeedback)
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)
-	auth.POST("/api/auth/searchPostsByTitle", controller.SearchPostsByTitle)
+	// 投币（投票功能已下线，历史票数折算成已投的币；投币入口在帖子与小说卡片上）
+	auth.POST("/api/auth/coin/throw", controller.CoinThrow)
+	auth.GET("/api/auth/coin/summary", controller.CoinSummary)
+	auth.POST("/api/auth/coin/ledger", controller.CoinLedger)
+	auth.POST("/api/auth/coin/visit", controller.CoinVisit)
+
+	// 排行榜：帖子榜与作者榜都按投币数排
+	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
+	auth.GET("/api/auth/userRanking", controller.GetUserRanking)
 	auth.POST("/api/auth/lottery/create", controller.LotteryCreate)
 	auth.POST("/api/auth/lottery/detail", controller.LotteryDetail)
 	auth.POST("/api/auth/lottery/participate", controller.LotteryParticipate)
 	auth.POST("/api/auth/lottery/checkParticipated", controller.LotteryCheckParticipated)
 
-	auth.POST("/api/auth/submitVote", controller.SubmitVote)
-	auth.GET("/api/auth/voteRanking", controller.GetVoteRanking)
-	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
-	auth.GET("/api/auth/userRanking", controller.GetUserRanking)
-	auth.POST("/api/auth/checkUserVoted", controller.CheckUserVoted)
 	auth.GET("/api/auth/getNotice", controller.GetNotice)
 	auth.GET("/api/auth/getNoticeNum", controller.GetNoticeNum)
 	auth.PATCH("api/auth/readNotice/:noticeID", controller.ReadNotice)
@@ -172,7 +175,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/novel/points/summary", controller.NovelPointsSummary)
 	auth.POST("/api/auth/novel/points/ledger", controller.NovelPointsLedger)
 	auth.POST("/api/auth/novel/points/checkin", controller.NovelPointsCheckIn)
-	auth.POST("/api/auth/novel/reward", controller.NovelReward)
+	auth.POST("/api/auth/novel/rate", controller.NovelRate)
 
 	auth.GET("/websocket/auth/chat", controller.ChatHandler)
 	auth.GET("/api/auth/leaveChatView", controller.LeaveChatView)

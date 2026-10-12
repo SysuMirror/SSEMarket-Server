@@ -88,6 +88,10 @@ func InitDB() *gorm.DB {
 	db.AutoMigrate(&model.NovelBookshelf{})
 	db.AutoMigrate(&model.NovelProgress{})
 	db.AutoMigrate(&model.NovelLedger{})
+	db.AutoMigrate(&model.NovelRating{})
+	// 站内币体系：流水 + 投币记录（与小说的经验/积分互不相通）。
+	db.AutoMigrate(&model.CoinLedger{})
+	db.AutoMigrate(&model.CoinThrow{})
 	RunRatingMigration(db)
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
 

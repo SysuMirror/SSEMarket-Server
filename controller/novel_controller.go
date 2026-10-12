@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"loginTest/apperr"
 	"loginTest/domain"
@@ -98,10 +99,10 @@ type NovelProgressMsg struct {
 	ReadSeconds int `json:"readSeconds"`
 }
 
-// NovelRewardMsg 打赏入参：Points 是作者收到的积分，等于打赏者扣掉的经验。
-type NovelRewardMsg struct {
+// NovelRateMsg 评分入参：Score 是 1–5 星。
+type NovelRateMsg struct {
 	NovelID int `json:"novelID"`
-	Points  int `json:"points"`
+	Score   int `json:"score"`
 }
 
 // NovelLedgerListMsg 流水分页入参。
@@ -128,6 +129,13 @@ type NovelListItem struct {
 	ReadNum            int        `json:"readNum"`
 	ShelfNum           int        `json:"shelfNum"`
 	CommentNum         int        `json:"commentNum"`
+	// 投币与评分：CoinNum/RatingCount/RatingAvg 是这本书的公开数据，
+	// MyCoins/MyRating 是当前用户自己的状态（0 = 没投过 / 没评过）。
+	CoinNum     int     `json:"coinNum"`
+	RatingCount int     `json:"ratingCount"`
+	RatingAvg   float64 `json:"ratingAvg"`
+	MyCoins     int     `json:"myCoins"`
+	MyRating    int     `json:"myRating"`
 	LatestChapterID    int        `json:"latestChapterID"`
 	LatestChapterTitle string     `json:"latestChapterTitle"`
 	LatestChapterAt    *time.Time `json:"latestChapterAt"`
@@ -245,11 +253,30 @@ func novelGetUserDisplay(m map[int]*domain.User, id int) *domain.User {
 	return &domain.User{}
 }
 
+// novelViewerStats 取「我对这批书做了什么」（评分 / 投币），失败时返回空表，
+// 列表页按钮态缺了总比整个列表挂掉好。
+func novelViewerStats(ctx context.Context, novels []*domain.Novel, viewerID int) *domain.NovelViewerStats {
+	empty := &domain.NovelViewerStats{Ratings: map[int]int{}, Coins: map[int]int{}}
+	if viewerID <= 0 || len(novels) == 0 {
+		return empty
+	}
+	ids := make([]int, 0, len(novels))
+	for _, n := range novels {
+		ids = append(ids, n.ID)
+	}
+	stats, err := service.Novels.MyNovelStats(ctx, ids, viewerID)
+	if err != nil || stats == nil {
+		return empty
+	}
+	return stats
+}
+
 func buildNovelListItems(
 	novels []*domain.Novel,
 	userMap map[int]*domain.User,
 	shelfMap map[int]bool,
 	progressMap map[int]*domain.NovelProgress,
+	stats *domain.NovelViewerStats,
 ) []NovelListItem {
 	out := make([]NovelListItem, 0, len(novels))
 	for _, n := range novels {
@@ -272,12 +299,19 @@ func buildNovelListItems(
 			ReadNum:            n.ReadNum,
 			ShelfNum:           n.ShelfNum,
 			CommentNum:         n.CommentNum,
+			CoinNum:            n.CoinNum,
+			RatingCount:        n.RatingCount,
+			RatingAvg:          domain.NovelRatingAvg(n),
 			LatestChapterID:    n.LatestChapterID,
 			LatestChapterTitle: n.LatestChapterTitle,
 			LatestChapterAt:    n.LatestChapterAt,
 			CreatedAt:          n.CreatedAt,
 			UpdatedAt:          n.UpdatedAt,
 			OnShelf:            shelfMap[n.ID],
+		}
+		if stats != nil {
+			item.MyCoins = stats.Coins[n.ID]
+			item.MyRating = stats.Ratings[n.ID]
 		}
 		if p := progressMap[n.ID]; p != nil {
 			item.ProgressPercent = p.Percent
@@ -321,6 +355,8 @@ func novelWriteError(c *gin.Context, err error, notFoundMsg string) {
 		response.Response(c, http.StatusForbidden, 403, nil, "无权操作")
 	case errors.Is(err, domain.ErrNovelNotEnoughExperience):
 		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+	case errors.Is(err, domain.ErrNovelRateSelf):
+		response.Response(c, http.StatusForbidden, 403, nil, err.Error())
 	case errors.Is(err, domain.ErrNovelRewardSelf):
 		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 	case errors.Is(err, domain.ErrNovelRewardDailyLimit):
@@ -361,12 +397,13 @@ func NovelList(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
+	stats := novelViewerStats(ctx, novels, user.ID)
 	total, err := service.Novels.CountNovels(ctx, novelBrowseFilter(&msg))
 	if err != nil {
 		apperr.Write(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap), "total": total})
+	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap, stats), "total": total})
 }
 
 // NovelMine 我写的书（写作页选书、书籍管理入口）。
@@ -396,12 +433,13 @@ func NovelMine(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
+	stats := novelViewerStats(ctx, novels, user.ID)
 	total, err := service.Novels.CountNovels(ctx, filter)
 	if err != nil {
 		apperr.Write(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap), "total": total})
+	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap, stats), "total": total})
 }
 
 func NovelCategories(c *gin.Context) {
@@ -433,7 +471,7 @@ func NovelDetail(c *gin.Context) {
 	if author != nil {
 		authorMap[author.ID] = author
 	}
-	item := buildNovelListItems([]*domain.Novel{novel}, authorMap, map[int]bool{novel.ID: onShelf}, map[int]*domain.NovelProgress{})
+	item := buildNovelListItems([]*domain.Novel{novel}, authorMap, map[int]bool{novel.ID: onShelf}, map[int]*domain.NovelProgress{}, novelViewerStats(ctx, []*domain.Novel{novel}, user.ID))
 	if progress != nil {
 		item[0].ProgressPercent = progress.Percent
 		item[0].ProgressChapterID = progress.ChapterID
@@ -879,7 +917,7 @@ func NovelShelfList(c *gin.Context) {
 		apperr.Write(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap), "total": total})
+	c.JSON(http.StatusOK, gin.H{"novels": buildNovelListItems(novels, userMap, shelfMap, progressMap, novelViewerStats(ctx, novels, user.ID)), "total": total})
 }
 
 func NovelProgressReport(c *gin.Context) {
@@ -1028,29 +1066,34 @@ func NovelPointsCheckIn(c *gin.Context) {
 	response.Response(c, http.StatusOK, 200, data, "签到成功")
 }
 
-// NovelReward 打赏：读者花等量经验，作者收到积分（同一本书每人每天最多一次）。
-func NovelReward(c *gin.Context) {
+// NovelRate 给书评分（1–5 星，每人每本一条，可改）。
+// 作者首次收到该读者的评分时 +1 币；评分不给读者任何币或经验。
+func NovelRate(c *gin.Context) {
 	user, ok := requireLoginUser(c)
 	if !ok {
 		return
 	}
-	var msg NovelRewardMsg
+	var msg NovelRateMsg
 	if err := c.ShouldBindBodyWith(&msg, binding.JSON); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
 		return
 	}
-	if msg.NovelID <= 0 || msg.Points <= 0 {
-		response.Response(c, http.StatusBadRequest, 400, nil, "无效的打赏参数")
+	if msg.NovelID <= 0 || msg.Score < domain.NovelRatingMin || msg.Score > domain.NovelRatingMax {
+		response.Response(c, http.StatusBadRequest, 400, nil, "评分必须是 1–5 星")
 		return
 	}
-	result, err := service.NovelPoints.RewardAuthor(c.Request.Context(), user.ID, msg.NovelID, msg.Points)
+	result, err := service.Novels.RateNovel(c.Request.Context(), msg.NovelID, user.ID, msg.Score)
 	if err != nil {
 		novelWriteError(c, err, "小说不存在")
 		return
 	}
 	response.Response(c, http.StatusOK, 200, gin.H{
-		"points":     result.Points,
-		"cost":       result.Cost,
-		"experience": result.Experience,
-	}, "已打赏")
+		"novelID":     result.NovelID,
+		"score":       result.Score,
+		"changed":     result.Changed,
+		"firstTime":   result.FirstTime,
+		"ratingCount": result.RatingCount,
+		"ratingAvg":   result.RatingAvg,
+		"coins":       result.Coins,
+	}, "已评分")
 }
