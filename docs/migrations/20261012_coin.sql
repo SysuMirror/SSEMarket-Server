@@ -155,6 +155,68 @@ ALTER TABLE `coin_throw`
   ADD COLUMN `thrown_total` INT NOT NULL DEFAULT 0 COMMENT '历史累计投过的总枚数(取消不减)';
 UPDATE `coin_throw` SET `thrown_total` = `coin_num` WHERE `thrown_total` = 0 AND `coin_num` > 0;
 
+-- ---------------------------------------------------------------------------
+-- 5.1) 取消投币上线后的数据修正（2026-10-12 晚，可重复执行）
+-- 线上 bug：取消投币后再投，被误报「已经给这个内容投满 2 币了」。
+-- 根因有两处，代码侧已修（见 repository/gorm/coin.go），这里修数据：
+--   (a) 投币流水幂等键换格式：旧键 coin_throw:post:12:34:2 的序号取自「投完后的
+--       累计枚数」，新键 coin_throw:<throw_id>:<序号> 的序号取自只增的 thrown_total。
+--       老库 thrown_total 没回填（AutoMigrate 只加列、默认 0）时，取消后重投会算出
+--       同一个序号 → 撞 uk_coin_dedup → 被当成「已投满」。新键带 throw_id，
+--       与历史键彻底分开，不回填也不会撞；下面的回填只是把序号顺手对齐。
+--   (b) 旧代码把「历史投票折算」（1 票 = 1 币，没扣过余额）写进了 coin_num，
+--       于是取消投币会连折算票一起退成真币、经验重算也会多发经验。
+--       coin_num 现在只记真币，折算票读取时由 pvotes 现算，所以按流水重算这一列。
+-- 全部以 coin_ledger 为准（流水是唯一不会说谎的地方），因此可重复执行。
+-- ---------------------------------------------------------------------------
+
+-- (1) 有投币/退款流水的记录：coin_num = 投币支出 + 退款收入（当前真投着的币）
+UPDATE `coin_throw` ct
+JOIN (
+  SELECT `user_id`, `target_type`, `target_id`,
+         -SUM(`amount`) AS real_coins
+  FROM `coin_ledger`
+  WHERE `event_type` IN ('coin_throw', 'coin_refund')
+  GROUP BY `user_id`, `target_type`, `target_id`
+) l ON l.`user_id` = ct.`user_id`
+   AND l.`target_type` = ct.`target_type`
+   AND l.`target_id`   = ct.`target_id`
+SET ct.`coin_num` = LEAST(GREATEST(l.`real_coins`, 0), 2);
+
+-- (2) 没有任何投币/退款流水的记录：从没真投过币（旧折算票造成的非零值清零）
+UPDATE `coin_throw` ct
+LEFT JOIN `coin_ledger` l
+       ON l.`user_id` = ct.`user_id`
+      AND l.`target_type` = ct.`target_type`
+      AND l.`target_id` = ct.`target_id`
+      AND l.`event_type` IN ('coin_throw', 'coin_refund')
+SET ct.`coin_num` = 0
+WHERE l.`ledger_id` IS NULL AND ct.`coin_num` > 0;
+
+-- (3) thrown_total 对齐到「历史投出去过的总枚数」（只增不减，取流水累计与现值较大者）
+UPDATE `coin_throw` ct
+JOIN (
+  SELECT `user_id`, `target_type`, `target_id`, -SUM(`amount`) AS thrown
+  FROM `coin_ledger`
+  WHERE `event_type` = 'coin_throw'
+  GROUP BY `user_id`, `target_type`, `target_id`
+) l ON l.`user_id` = ct.`user_id`
+   AND l.`target_type` = ct.`target_type`
+   AND l.`target_id`   = ct.`target_id`
+SET ct.`thrown_total` = GREATEST(ct.`thrown_total`, l.`thrown`);
+
+-- (4) 自查：coin_num 与流水对不上的记录（应为 0 行）
+SELECT ct.`throw_id`, ct.`user_id`, ct.`target_type`, ct.`target_id`, ct.`coin_num`,
+       COALESCE(-SUM(l.`amount`), 0) AS ledger_coins
+FROM `coin_throw` ct
+LEFT JOIN `coin_ledger` l
+       ON l.`user_id` = ct.`user_id`
+      AND l.`target_type` = ct.`target_type`
+      AND l.`target_id` = ct.`target_id`
+      AND l.`event_type` IN ('coin_throw', 'coin_refund')
+GROUP BY ct.`throw_id`, ct.`user_id`, ct.`target_type`, ct.`target_id`, ct.`coin_num`
+HAVING ct.`coin_num` <> LEAST(GREATEST(COALESCE(-SUM(l.`amount`), 0), 0), 2);
+
 -- =============================================================================
 -- 回滚（按需执行；additive 变更回滚即删列/删表，会丢币数据，慎执行）
 -- ALTER TABLE users  DROP COLUMN coins, DROP COLUMN experience, DROP COLUMN novel_points;

@@ -180,8 +180,11 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 		if err != nil {
 			return err
 		}
-		total := throw.CoinNum + legacyVotes[in.TargetID] + in.Coins
-		if total > domain.CoinMaxPerTarget {
+		// coin_num 只记真币（投出去、可撤回、算经验）。旧投票折算不落进这一列，
+		// 只在「还能不能投」的上限判定和「已投几枚」的展示口径里加上去——
+		// 否则取消投币会把折算票也退成真币。
+		held := throw.CoinNum + in.Coins
+		if held+legacyVotes[in.TargetID] > domain.CoinMaxPerTarget {
 			return domain.ErrCoinLimit
 		}
 
@@ -195,7 +198,7 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			return domain.ErrCoinNotEnough
 		}
 
-		// 流水幂等键序号：该目标上「历史累计投到的第几枚」（含后来取消的）。
+		// 流水幂等键序号：这条投币记录上「历史累计投到的第几枚」（含后来取消的）。
 		// 用只增不减的 thrown_total，取消后再投也不会和旧流水撞 dedup_key。
 		seq := throw.ThrownTotal + in.Coins
 		if err := tx.Create(coinLedgerRow(domain.CoinGrantInput{
@@ -203,7 +206,7 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			TargetType: in.TargetType,
 			TargetID:   in.TargetID,
 			EventType:  domain.CoinEventThrow,
-			DedupKey:   domain.CoinDedupThrow(in.TargetType, in.TargetID, in.UserID, seq),
+			DedupKey:   domain.CoinDedupThrow(throw.ThrowID, seq),
 			Amount:     -in.Coins,
 		})).Error; err != nil {
 			if isDuplicateKeyErr(err) {
@@ -215,7 +218,7 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 
 		if err := tx.Model(&model.CoinThrow{}).Where("throw_id = ?", throw.ThrowID).
 			UpdateColumns(map[string]any{
-				"coin_num":     total,
+				"coin_num":     held,
 				"thrown_total": throw.ThrownTotal + in.Coins,
 				"updated_at":   time.Now(),
 			}).Error; err != nil {
@@ -233,7 +236,9 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			return err
 		}
 
-		result.Total = total
+		// 回给前端的 total 是「已投几枚」的展示口径：真币 + 旧投票折算，
+		// 与 ThrownByMe（列表/详情里的 myCoins）保持一致。
+		result.Total = held + legacyVotes[in.TargetID]
 		result.Exp = in.Coins * domain.CoinExpPerCoin
 		result.CoinsLeft = user.Coins - in.Coins
 		return nil
@@ -283,7 +288,26 @@ func (r *coinRepository) Cancel(ctx context.Context, userID int, targetType stri
 		if throw.CoinNum <= 0 {
 			return domain.ErrCoinNotThrown
 		}
+		// 退款金额以流水为准：coin_num 是「已投几枚」的展示列，老数据里可能混进了
+		// 旧投票折算（1 票 = 1 币，没扣过余额），按它退款会凭空造币。
+		real, err := realCoinsFromLedger(tx, userID, targetType, targetID)
+		if err != nil {
+			return err
+		}
+		if real <= 0 {
+			legacy, err := legacyVoteCoins(tx, userID, targetType, []int{targetID})
+			if err != nil {
+				return err
+			}
+			if legacy[targetID] > 0 {
+				return domain.ErrCoinVoteLegacy
+			}
+			return domain.ErrCoinNotThrown
+		}
 		amount := throw.CoinNum
+		if amount > real {
+			amount = real
+		}
 
 		// 退币 + 回退主页经验（GREATEST 兜底，经验不会被回退成负数）。
 		if err := tx.Model(&model.User{}).Where("userID = ?", userID).
@@ -302,7 +326,7 @@ func (r *coinRepository) Cancel(ctx context.Context, userID int, targetType stri
 			TargetType: targetType,
 			TargetID:   targetID,
 			EventType:  domain.CoinEventRefund,
-			DedupKey:   domain.CoinDedupRefund(targetType, targetID, userID, throw.ThrownTotal),
+			DedupKey:   domain.CoinDedupRefund(throw.ThrowID, throw.ThrownTotal),
 			Amount:     amount,
 		})).Error; err != nil {
 			if isDuplicateKeyErr(err) {
@@ -438,6 +462,23 @@ func (r *coinRepository) ThrownByMe(ctx context.Context, userID int, targetType 
 		out[id] += n
 	}
 	return out, nil
+}
+
+// realCoinsFromLedger 流水口径下我在这条内容上真投着几个币：
+// 投币流水（负数）+ 退款流水（正数）取反。流水是唯一不会说谎的地方——
+// coin_num 可能被旧数据污染，退款金额必须按流水算，否则取消投币会凭空造币。
+func realCoinsFromLedger(tx *gorm.DB, userID int, targetType string, targetID int) (int, error) {
+	var net *int
+	if err := tx.Model(&model.CoinLedger{}).
+		Where("user_id = ? AND target_type = ? AND target_id = ? AND event_type IN ?",
+			userID, targetType, targetID, []string{domain.CoinEventThrow, domain.CoinEventRefund}).
+		Select("COALESCE(SUM(amount), 0)").Scan(&net).Error; err != nil {
+		return 0, err
+	}
+	if net == nil {
+		return 0, nil
+	}
+	return -*net, nil
 }
 
 // legacyVoteCoins 历史投票折算：投票功能已下线，pvotes 表只读不再写入，

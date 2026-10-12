@@ -59,6 +59,8 @@ func coinError(c *gin.Context, err error) {
 		response.Response(c, http.StatusForbidden, 403, nil, err.Error())
 	case errors.Is(err, domain.ErrCoinNotThrown):
 		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+	case errors.Is(err, domain.ErrCoinVoteLegacy):
+		response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 	case errors.Is(err, domain.ErrBadRequest):
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数不符合要求")
 	default:

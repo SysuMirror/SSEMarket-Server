@@ -68,6 +68,9 @@ var (
 	ErrCoinLimit     = errors.New("已经给这个内容投满 2 币了")
 	ErrCoinSelf      = errors.New("不能给自己的内容投币")
 	ErrCoinNotThrown = errors.New("还没有投过币，无法取消")
+	// ErrCoinVoteLegacy 这条内容上的「已投 N 币」全是旧投票折算出来的，
+	// 折算票不是真币、没有扣过余额，所以不能撤回（撤回会凭空造币）。
+	ErrCoinVoteLegacy = errors.New("旧投票折算的币不能撤回")
 )
 
 // CoinLedgerDay 把时间归到「本地日期」，每日任务都按这个口径。
@@ -103,16 +106,21 @@ func CoinDedupRated(authorID, novelID, raterID int) string {
 	return CoinEventRated + ":" + strconv.Itoa(authorID) + ":" + strconv.Itoa(novelID) + ":" + strconv.Itoa(raterID)
 }
 
-// CoinDedupThrow 投币流水：seq 是该目标上历史累计投到的第几枚（coin_throw.thrown_total，
-// 取消不减），取消后再投也不会重复。
-func CoinDedupThrow(targetType string, targetID, userID, seq int) string {
-	return CoinEventThrow + ":" + targetType + ":" + strconv.Itoa(targetID) + ":" + strconv.Itoa(userID) + ":" + strconv.Itoa(seq)
+// CoinDedupThrow 投币流水：throwID 定位「谁在哪个内容上的投币记录」，
+// seq 是这条记录上历史累计投到的第几枚（coin_throw.thrown_total，取消不减）。
+//
+// 键里带 throwID 是刻意的：旧版键形如 coin_throw:post:12:34:2，序号取自「投完后的
+// 累计枚数」；取消投币上线后序号改取只增不减的 thrown_total，老库没回填该列时
+// 两者会撞键，表现为「取消投币后再投被误判成已投满 2 币」。换前缀后新键与历史
+// 键彻底分开，不依赖回填也能正确工作。
+func CoinDedupThrow(throwID, seq int) string {
+	return CoinEventThrow + ":" + strconv.Itoa(throwID) + ":" + strconv.Itoa(seq)
 }
 
-// CoinDedupRefund 取消投币的退款流水：refundSeq 递增（取 coin_throw.thrown_total，
-// 每次取消时它都不小于上一次退款时的值，再投过币后只会更大），天然不重复。
-func CoinDedupRefund(targetType string, targetID, userID, refundSeq int) string {
-	return CoinEventRefund + ":" + targetType + ":" + strconv.Itoa(targetID) + ":" + strconv.Itoa(userID) + ":" + strconv.Itoa(refundSeq)
+// CoinDedupRefund 取消投币的退款流水：同一笔投币最多退一次。
+// refundSeq 取当前 thrown_total —— 两次退款之间必然隔了一次投币，序号只会更大。
+func CoinDedupRefund(throwID, refundSeq int) string {
+	return CoinEventRefund + ":" + strconv.Itoa(throwID) + ":" + strconv.Itoa(refundSeq)
 }
 
 // CoinTargetLabel 投币目标的中文说明（流水展示用）。
