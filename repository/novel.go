@@ -54,6 +54,12 @@ type NovelRepository interface {
 	FindRating(ctx context.Context, novelID, userID int) (int, error)
 	MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error)
 
+	// 评分自动附带的书评（novel_comments.is_rating=1，挂在 novel_ratings.comment_id 上）
+	GetRatingCommentID(ctx context.Context, novelID, userID int) (int, error)
+	SetRatingCommentID(ctx context.Context, novelID, userID, commentID int) error
+	// UpdateCommentContent 改评论正文；评论已不存在时 found=false（被删了，调用方决定重建）。
+	UpdateCommentContent(ctx context.Context, commentID int, content string) (found bool, err error)
+
 	// 书架与阅读进度
 	ToggleShelf(ctx context.Context, novelID, userID int) (bool, error)
 	IsOnShelf(ctx context.Context, novelID, userID int) (bool, error)

@@ -105,6 +105,7 @@ func novelCommentToDomain(c *model.NovelComment) *domain.NovelComment {
 		ParagraphExcerpt: c.ParagraphExcerpt,
 		UserID:           c.UserID,
 		Content:          c.Content,
+		IsRating:         c.IsRating,
 		LikeNum:          c.LikeNum,
 		DenyNum:          c.DenyNum,
 		CreatedAt:        c.CreatedAt,
@@ -203,17 +204,17 @@ func (r *novelRepository) FindNovelByID(ctx context.Context, id int) (*domain.No
 func (r *novelRepository) CreateNovel(ctx context.Context, novel *domain.Novel) error {
 	now := time.Now()
 	m := model.Novel{
-		UserID:      novel.UserID,
-		Title:       novel.Title,
-		AuthorName:  novel.AuthorName,
-		CoverURL:    novel.CoverURL,
-		Category:    novel.Category,
-		Intro:       novel.Intro,
-		Status:      novel.Status,
-		ChapterNum:  0,
-		WordNum:     0,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		UserID:     novel.UserID,
+		Title:      novel.Title,
+		AuthorName: novel.AuthorName,
+		CoverURL:   novel.CoverURL,
+		Category:   novel.Category,
+		Intro:      novel.Intro,
+		Status:     novel.Status,
+		ChapterNum: 0,
+		WordNum:    0,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	if err := r.session(ctx).Create(&m).Error; err != nil {
 		return err
@@ -576,6 +577,7 @@ func (r *novelRepository) CreateComment(ctx context.Context, comment *domain.Nov
 		ParagraphExcerpt: comment.ParagraphExcerpt,
 		UserID:           comment.UserID,
 		Content:          comment.Content,
+		IsRating:         comment.IsRating,
 		CreatedAt:        time.Now(),
 	}
 	if err := r.session(ctx).Create(&m).Error; err != nil {
@@ -873,6 +875,47 @@ func (r *novelRepository) MyRatings(ctx context.Context, userID int, novelIDs []
 		out[list[i].NovelID] = list[i].Score
 	}
 	return out, nil
+}
+
+// GetRatingCommentID 这条评分当前挂着的自动书评 ID；没有（或还没生成）返回 0。
+func (r *novelRepository) GetRatingCommentID(ctx context.Context, novelID, userID int) (int, error) {
+	if novelID <= 0 || userID <= 0 {
+		return 0, nil
+	}
+	var row model.NovelRating
+	err := r.session(ctx).Where("novel_id = ? AND user_id = ?", novelID, userID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return row.CommentID, nil
+}
+
+// SetRatingCommentID 把自动书评 ID 记到评分行上。
+func (r *novelRepository) SetRatingCommentID(ctx context.Context, novelID, userID, commentID int) error {
+	if novelID <= 0 || userID <= 0 || commentID <= 0 {
+		return domain.ErrBadRequest
+	}
+	return r.session(ctx).Model(&model.NovelRating{}).
+		Where("novel_id = ? AND user_id = ?", novelID, userID).
+		UpdateColumn("comment_id", commentID).Error
+}
+
+// UpdateCommentContent 只改评论正文（评分改分时刷新自动书评用）；
+// 评论已被删除时 found=false，由调用方决定重建。
+func (r *novelRepository) UpdateCommentContent(ctx context.Context, commentID int, content string) (bool, error) {
+	if commentID <= 0 || content == "" {
+		return false, domain.ErrBadRequest
+	}
+	res := r.session(ctx).Model(&model.NovelComment{}).
+		Where("comment_id = ?", commentID).
+		UpdateColumn("content", content)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }
 
 // DeleteRatingsByNovel 删书时清掉它的所有评分。

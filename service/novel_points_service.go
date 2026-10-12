@@ -361,3 +361,12 @@ func (s *novelPointsService) Ledger(ctx context.Context, userID, limit, offset i
 	}
 	return s.ledger.List(ctx, userID, limit, offset, novelLedgerHiddenEvents)
 }
+
+// ReadSecondsFor 某读者在某本书上累计的阅读秒数：直接读阅读里程碑
+// （SettleMilestone 的 settled_value 就是按书累计的原始秒数游标）。
+func (s *novelPointsService) ReadSecondsFor(ctx context.Context, userID, novelID int) (int, error) {
+	if userID <= 0 || novelID <= 0 {
+		return 0, nil
+	}
+	return s.ledger.SettledByDedup(ctx, domain.NovelDedupMilestone(domain.LedgerEventReadTime, userID, novelID))
+}

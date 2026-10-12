@@ -156,6 +156,13 @@ func (s *ledgerStub) ExistsDedup(_ context.Context, dedupKey string) (bool, erro
 	return ok, nil
 }
 
+func (s *ledgerStub) SettledByDedup(_ context.Context, dedupKey string) (int, error) {
+	if row, ok := s.rows[dedupKey]; ok {
+		return row.SettledValue, nil
+	}
+	return 0, nil
+}
+
 func (s *ledgerStub) CountByDedupPrefix(_ context.Context, eventType, prefix string) (int64, error) {
 	var count int64
 	for _, row := range s.rows {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -634,7 +635,60 @@ func (s *novelService) RateNovel(ctx context.Context, novelID, userID, score int
 		granted, _ := s.coins.GrantRated(ctx, updated.UserID, novelID, userID)
 		result.Coins = granted
 	}
+	// 评分自动附带一条书评（在评论区可见）：首次新建，改分刷新同一条；
+	// 重复提交同一分数不再动评论。
+	if prevScore == 0 || prevScore != score {
+		result.CommentCreated = s.syncRatingComment(ctx, novelID, userID, score)
+	}
 	return result, nil
+}
+
+// syncRatingComment 生成/刷新评分自动附带的书评，返回是否新建。
+// 尽力而为：书评失败只记日志，不影响已经落库的评分本身。
+// 注意这里直接走 repo 层，不经过 CreateComment 服务——评分附带评论
+// 不应该触发「发表评论 +2 经验」，否则评分就成了刷经验的口子。
+func (s *novelService) syncRatingComment(ctx context.Context, novelID, userID, score int) bool {
+	seconds := 0
+	if s.points != nil {
+		seconds, _ = s.points.ReadSecondsFor(ctx, userID, novelID)
+	}
+	content := domain.RatingCommentContent(score, seconds)
+
+	commentID, err := s.novels.GetRatingCommentID(ctx, novelID, userID)
+	if err != nil {
+		log.Printf("[novel] rating comment lookup novel=%d user=%d: %v", novelID, userID, err)
+		return false
+	}
+	if commentID > 0 {
+		found, err := s.novels.UpdateCommentContent(ctx, commentID, content)
+		switch {
+		case err == nil && found:
+			return false // 改分刷新完成
+		case err != nil:
+			log.Printf("[novel] rating comment update novel=%d user=%d comment=%d: %v", novelID, userID, commentID, err)
+		default:
+			// 评论被作者删过了 → 重建一条
+		}
+	}
+	comment := &domain.NovelComment{
+		NovelID:        novelID,
+		ChapterID:      0,
+		ParagraphIndex: -1,
+		TargetType:     domain.NovelTargetBook,
+		UserID:         userID,
+		Content:        content,
+		IsRating:       true,
+		CreatedAt:      time.Now(),
+	}
+	if err := s.novels.CreateComment(ctx, comment); err != nil {
+		log.Printf("[novel] rating comment create novel=%d user=%d: %v", novelID, userID, err)
+		return false
+	}
+	_ = s.novels.IncrNovelComment(ctx, novelID, 1)
+	if err := s.novels.SetRatingCommentID(ctx, novelID, userID, comment.ID); err != nil {
+		log.Printf("[novel] rating comment link novel=%d user=%d comment=%d: %v", novelID, userID, comment.ID, err)
+	}
+	return true
 }
 
 // MyRating 我给这本书打了几分（0 = 没打过）。

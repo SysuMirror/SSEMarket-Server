@@ -31,6 +31,8 @@ FROM (
   SELECT 'novels.rating_count'    UNION ALL
   SELECT 'novel_ledger'           UNION ALL
   SELECT 'novel_ratings'          UNION ALL
+  SELECT 'novel_ratings.comment_id' UNION ALL
+  SELECT 'novel_comments.is_rating' UNION ALL
   SELECT 'coin_ledger'            UNION ALL
   SELECT 'coin_throw'
 ) t
@@ -62,6 +64,14 @@ ALTER TABLE `novels`
   ADD COLUMN `rating_sum`   INT NOT NULL DEFAULT 0 COMMENT '评分总和(平均分=rating_sum/rating_count)',
   ADD COLUMN `rating_count` INT NOT NULL DEFAULT 0 COMMENT '评分人数';
 
+-- 评分自动附带的书评：novel_ratings 挂它的 comment_id；
+-- novel_comments 用 is_rating 标记这类评论（前端特殊渲染）
+ALTER TABLE `novel_ratings`
+  ADD COLUMN `comment_id` INT NOT NULL DEFAULT 0 COMMENT '评分自动附带的书评ID(0=未生成)';
+
+ALTER TABLE `novel_comments`
+  ADD COLUMN `is_rating` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '评分自动附带的书评';
+
 -- ---------------------------------------------------------------------------
 -- 2) 小说积分/经验流水（若 20261011 之后线上也没建过这张表）
 -- ---------------------------------------------------------------------------
@@ -90,6 +100,7 @@ CREATE TABLE IF NOT EXISTS `novel_ratings` (
   `novel_id`   INT NOT NULL,
   `user_id`    INT NOT NULL,
   `score`      INT NOT NULL DEFAULT 0 COMMENT '1–5 星',
+  `comment_id` INT NOT NULL DEFAULT 0 COMMENT '评分自动附带的书评ID(0=未生成)',
   `created_at` DATETIME NULL,
   `updated_at` DATETIME NULL,
   PRIMARY KEY (`rating_id`),
@@ -140,5 +151,6 @@ CREATE TABLE IF NOT EXISTS `coin_throw` (
 -- ALTER TABLE users  DROP COLUMN coins, DROP COLUMN experience, DROP COLUMN novel_points;
 -- ALTER TABLE posts  DROP COLUMN coin_num;
 -- ALTER TABLE novels DROP COLUMN coin_num, DROP COLUMN rating_sum, DROP COLUMN rating_count;
+-- ALTER TABLE novel_comments DROP COLUMN is_rating;
 -- DROP TABLE IF EXISTS coin_throw, coin_ledger, novel_ratings, novel_ledger;
 -- =============================================================================

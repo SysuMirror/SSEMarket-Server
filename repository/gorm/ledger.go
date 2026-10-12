@@ -379,6 +379,23 @@ func (r *ledgerRepository) ExistsDedup(ctx context.Context, dedupKey string) (bo
 	return count > 0, nil
 }
 
+// SettledByDedup 读某条里程碑流水的 settled_value（该幂等键累计的原始量，
+// 如「某读者在某本书上的累计阅读秒数」）；没有流水行返回 0。
+func (r *ledgerRepository) SettledByDedup(ctx context.Context, dedupKey string) (int, error) {
+	if dedupKey == "" {
+		return 0, nil
+	}
+	var row model.NovelLedger
+	err := r.session(ctx).Where("dedup_key = ?", dedupKey).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return row.SettledValue, nil
+}
+
 func (r *ledgerRepository) CountByDedupPrefix(ctx context.Context, eventType, prefix string) (int64, error) {
 	var count int64
 	if err := r.session(ctx).Model(&model.NovelLedger{}).

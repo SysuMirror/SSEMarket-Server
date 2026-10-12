@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -76,17 +77,19 @@ type NovelChapter struct {
 
 // NovelComment 小说评论（书评 / 章评 / 段评）。
 type NovelComment struct {
-	ID             int
-	NovelID        int
-	ChapterID      int
-	ParagraphIndex int
-	TargetType     string
+	ID               int
+	NovelID          int
+	ChapterID        int
+	ParagraphIndex   int
+	TargetType       string
 	ParagraphExcerpt string
 
 	UserID  int
 	Content string
-	LikeNum int
-	DenyNum int
+	// IsRating 为 true 表示这是评分自动附带的书评（见 RatingCommentContent）。
+	IsRating bool
+	LikeNum  int
+	DenyNum  int
 
 	CreatedAt time.Time
 }
@@ -102,13 +105,13 @@ type NovelParagraph struct {
 
 // NovelBrowseFilter 书列表筛选。
 type NovelBrowseFilter struct {
-	Keyword  string
-	Category string
-	Status   string
-	ShelfFor int // >0 时只取该用户书架上的书
+	Keyword   string
+	Category  string
+	Status    string
+	ShelfFor  int // >0 时只取该用户书架上的书
 	AuthorFor int // >0 时只取该用户写的书
-	Limit    int
-	Offset   int
+	Limit     int
+	Offset    int
 }
 
 // NovelCommentFilter 评论列表筛选。
@@ -224,6 +227,35 @@ type NovelRatingResult struct {
 	RatingCount int     `json:"ratingCount"`
 	RatingAvg   float64 `json:"ratingAvg"`
 	Coins       int     `json:"coins"` // 作者因此拿到的币（同一读者只给一次）
+	// CommentCreated 本次评分是否新建了自动书评（改分只更新旧评论，不算新建）。
+	CommentCreated bool `json:"commentCreated"`
+}
+
+// RatingCommentContent 评分自动附带的书评文案：星级 + 评分时该书已累计的阅读时长。
+// readSeconds 来自 novel_ledger 的阅读里程碑游标；0 表示还没有阅读记录。
+func RatingCommentContent(score, readSeconds int) string {
+	stars := strings.Repeat("★", max(score, 0))
+	if readSeconds <= 0 {
+		return stars + " " + strconv.Itoa(score) + " 星 · 评分时还没有阅读记录"
+	}
+	return stars + " " + strconv.Itoa(score) + " 星 · 评分时已阅读 " + FormatReadDuration(readSeconds)
+}
+
+// FormatReadDuration 把秒数说成人话：1 小时以下只报分钟，不足 1 分钟报「不到 1 分钟」。
+func FormatReadDuration(seconds int) string {
+	if seconds < 60 {
+		return "不到 1 分钟"
+	}
+	h := seconds / 3600
+	m := (seconds % 3600) / 60
+	switch {
+	case h > 0 && m > 0:
+		return strconv.Itoa(h) + " 小时 " + strconv.Itoa(m) + " 分钟"
+	case h > 0:
+		return strconv.Itoa(h) + " 小时"
+	default:
+		return strconv.Itoa(m) + " 分钟"
+	}
 }
 
 // NovelRatingAvg 平均分；没人评返回 0。

@@ -7,14 +7,14 @@ import "time"
 
 // Novel 一本小说。
 type Novel struct {
-	NovelID     int    `gorm:"primaryKey;autoIncrement;column:novel_id"`
-	UserID      int    `gorm:"index:idx_novel_user;column:user_id;type:int;not null"`
-	Title       string `gorm:"column:title;type:varchar(100);not null"`
-	AuthorName  string `gorm:"column:author_name;type:varchar(50);default:''"`
-	CoverURL    string `gorm:"column:cover_url;type:varchar(512);default:''"`
-	Category    string `gorm:"column:category;type:varchar(32);default:'';index:idx_novel_category"`
-	Intro       string `gorm:"column:intro;type:varchar(1000);default:''"`
-	Status      string `gorm:"column:status;type:varchar(16);default:'serializing';index:idx_novel_status"`
+	NovelID    int    `gorm:"primaryKey;autoIncrement;column:novel_id"`
+	UserID     int    `gorm:"index:idx_novel_user;column:user_id;type:int;not null"`
+	Title      string `gorm:"column:title;type:varchar(100);not null"`
+	AuthorName string `gorm:"column:author_name;type:varchar(50);default:''"`
+	CoverURL   string `gorm:"column:cover_url;type:varchar(512);default:''"`
+	Category   string `gorm:"column:category;type:varchar(32);default:'';index:idx_novel_category"`
+	Intro      string `gorm:"column:intro;type:varchar(1000);default:''"`
+	Status     string `gorm:"column:status;type:varchar(16);default:'serializing';index:idx_novel_status"`
 
 	ChapterNum int `gorm:"column:chapter_num;type:int;default:0"`
 	WordNum    int `gorm:"column:word_num;type:int;default:0"`
@@ -60,17 +60,20 @@ func (NovelChapter) TableName() string { return "novel_chapters" }
 // NovelComment 小说评论。target_type 区分书评/章评/段评；
 // 段评用 chapter_id + paragraph_index 定位段落。
 type NovelComment struct {
-	CommentID      int    `gorm:"primaryKey;autoIncrement;column:comment_id"`
-	NovelID        int    `gorm:"index:idx_novel_comment_novel;column:novel_id;type:int;not null"`
-	ChapterID      int    `gorm:"column:chapter_id;type:int;default:0"`
-	ParagraphIndex int    `gorm:"column:paragraph_index;type:int;default:-1"`
-	TargetType     string `gorm:"column:target_type;type:varchar(16);not null;default:'book'"`
+	CommentID        int    `gorm:"primaryKey;autoIncrement;column:comment_id"`
+	NovelID          int    `gorm:"index:idx_novel_comment_novel;column:novel_id;type:int;not null"`
+	ChapterID        int    `gorm:"column:chapter_id;type:int;default:0"`
+	ParagraphIndex   int    `gorm:"column:paragraph_index;type:int;default:-1"`
+	TargetType       string `gorm:"column:target_type;type:varchar(16);not null;default:'book'"`
 	ParagraphExcerpt string `gorm:"column:paragraph_excerpt;type:varchar(120);default:''"`
 
 	UserID  int    `gorm:"index:idx_novel_comment_user;column:user_id;type:int;not null"`
 	Content string `gorm:"column:content;type:varchar(500);not null"`
-	LikeNum int    `gorm:"column:like_num;type:int;default:0"`
-	DenyNum int    `gorm:"column:deny_num;type:int;default:0"`
+	// IsRating 标记这是「评分自动附带的书评」（评分时同步生成，改分即改这条），
+	// 前端据此特殊渲染；普通手动评论为 false。
+	IsRating bool `gorm:"column:is_rating;type:tinyint(1);not null;default:0"`
+	LikeNum  int  `gorm:"column:like_num;type:int;default:0"`
+	DenyNum  int  `gorm:"column:deny_num;type:int;default:0"`
 
 	CreatedAt time.Time `gorm:"column:created_at;type:datetime"`
 }
@@ -99,13 +102,13 @@ func (NovelBookshelf) TableName() string { return "novel_bookshelf" }
 
 // NovelProgress 阅读进度（每人每本一条，覆盖更新）。
 type NovelProgress struct {
-	ProgressID     int     `gorm:"primaryKey;autoIncrement;column:progress_id"`
-	NovelID        int     `gorm:"index:idx_novel_progress_novel;uniqueIndex:uk_novel_progress,priority:1;column:novel_id;type:int;not null"`
-	UserID         int     `gorm:"index:idx_novel_progress_user,priority:1;uniqueIndex:uk_novel_progress,priority:2;column:user_id;type:int;not null"`
-	ChapterID      int     `gorm:"column:chapter_id;type:int;default:0"`
-	ChapterNum     int     `gorm:"column:chapter_num;type:int;default:0"`
-	ParagraphIndex int     `gorm:"column:paragraph_index;type:int;default:0"`
-	Percent        float64 `gorm:"column:percent;type:double;default:0"`
+	ProgressID     int       `gorm:"primaryKey;autoIncrement;column:progress_id"`
+	NovelID        int       `gorm:"index:idx_novel_progress_novel;uniqueIndex:uk_novel_progress,priority:1;column:novel_id;type:int;not null"`
+	UserID         int       `gorm:"index:idx_novel_progress_user,priority:1;uniqueIndex:uk_novel_progress,priority:2;column:user_id;type:int;not null"`
+	ChapterID      int       `gorm:"column:chapter_id;type:int;default:0"`
+	ChapterNum     int       `gorm:"column:chapter_num;type:int;default:0"`
+	ParagraphIndex int       `gorm:"column:paragraph_index;type:int;default:0"`
+	Percent        float64   `gorm:"column:percent;type:double;default:0"`
 	UpdatedAt      time.Time `gorm:"index:idx_novel_progress_user,priority:2;column:updated_at;type:datetime"`
 }
 

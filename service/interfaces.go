@@ -210,6 +210,9 @@ type NovelPointsService interface {
 	// 查询
 	Summary(ctx context.Context, userID int) (*domain.NovelPointsSummary, error)
 	Ledger(ctx context.Context, userID, limit, offset int) ([]*domain.NovelLedger, int64, error)
+
+	// ReadSecondsFor 某读者在某本书上累计的阅读秒数（阅读里程碑游标）；没读过返回 0。
+	ReadSecondsFor(ctx context.Context, userID, novelID int) (int, error)
 }
 
 // ShopService 商城领域服务。

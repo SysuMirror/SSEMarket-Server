@@ -116,26 +116,26 @@ type NovelLedgerListMsg struct {
 // ---------------------------------------------------------------------------
 
 type NovelListItem struct {
-	NovelID            int        `json:"novelID"`
-	Title              string     `json:"title"`
-	AuthorID           int        `json:"authorID"`
-	AuthorName         string     `json:"authorName"`
-	CoverURL           string     `json:"coverURL"`
-	Category           string     `json:"category"`
-	Intro              string     `json:"intro"`
-	Status             string     `json:"status"`
-	ChapterNum         int        `json:"chapterNum"`
-	WordNum            int        `json:"wordNum"`
-	ReadNum            int        `json:"readNum"`
-	ShelfNum           int        `json:"shelfNum"`
-	CommentNum         int        `json:"commentNum"`
+	NovelID    int    `json:"novelID"`
+	Title      string `json:"title"`
+	AuthorID   int    `json:"authorID"`
+	AuthorName string `json:"authorName"`
+	CoverURL   string `json:"coverURL"`
+	Category   string `json:"category"`
+	Intro      string `json:"intro"`
+	Status     string `json:"status"`
+	ChapterNum int    `json:"chapterNum"`
+	WordNum    int    `json:"wordNum"`
+	ReadNum    int    `json:"readNum"`
+	ShelfNum   int    `json:"shelfNum"`
+	CommentNum int    `json:"commentNum"`
 	// 投币与评分：CoinNum/RatingCount/RatingAvg 是这本书的公开数据，
 	// MyCoins/MyRating 是当前用户自己的状态（0 = 没投过 / 没评过）。
-	CoinNum     int     `json:"coinNum"`
-	RatingCount int     `json:"ratingCount"`
-	RatingAvg   float64 `json:"ratingAvg"`
-	MyCoins     int     `json:"myCoins"`
-	MyRating    int     `json:"myRating"`
+	CoinNum            int        `json:"coinNum"`
+	RatingCount        int        `json:"ratingCount"`
+	RatingAvg          float64    `json:"ratingAvg"`
+	MyCoins            int        `json:"myCoins"`
+	MyRating           int        `json:"myRating"`
 	LatestChapterID    int        `json:"latestChapterID"`
 	LatestChapterTitle string     `json:"latestChapterTitle"`
 	LatestChapterAt    *time.Time `json:"latestChapterAt"`
@@ -181,16 +181,16 @@ type NovelChapterAdjacentItem struct {
 }
 
 type NovelChapterDetailResponse struct {
-	Chapter      NovelChapterItem         `json:"chapter"`
-	NovelID      int                      `json:"novelID"`
-	NovelTitle   string                   `json:"novelTitle"`
-	AuthorName   string                   `json:"authorName"`
-	Paragraphs   []NovelParagraphItem     `json:"paragraphs"`
-	AuthorNote   string                   `json:"authorNote"`
-	Prev         *NovelChapterAdjacentItem `json:"prev"`
-	Next         *NovelChapterAdjacentItem `json:"next"`
-	OnShelf      bool                     `json:"onShelf"`
-	ProgressPercent float64               `json:"progressPercent"`
+	Chapter         NovelChapterItem          `json:"chapter"`
+	NovelID         int                       `json:"novelID"`
+	NovelTitle      string                    `json:"novelTitle"`
+	AuthorName      string                    `json:"authorName"`
+	Paragraphs      []NovelParagraphItem      `json:"paragraphs"`
+	AuthorNote      string                    `json:"authorNote"`
+	Prev            *NovelChapterAdjacentItem `json:"prev"`
+	Next            *NovelChapterAdjacentItem `json:"next"`
+	OnShelf         bool                      `json:"onShelf"`
+	ProgressPercent float64                   `json:"progressPercent"`
 }
 
 type NovelCommentItem struct {
@@ -208,8 +208,10 @@ type NovelCommentItem struct {
 	AuthorIdentity   string    `json:"authorIdentity"`
 	CommentTime      time.Time `json:"commentTime"`
 	Content          string    `json:"content"`
-	LikeNum          int       `json:"likeNum"`
-	IsLiked          bool      `json:"isLiked"`
+	// IsRating 为 true 表示这是评分自动附带的书评（星级 + 评分时阅读时长）。
+	IsRating bool `json:"isRating"`
+	LikeNum  int  `json:"likeNum"`
+	IsLiked  bool `json:"isLiked"`
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +342,7 @@ func novelCommentToItem(c *domain.NovelComment, userMap map[int]*domain.User, li
 		AuthorIdentity:   u.Identity,
 		CommentTime:      c.CreatedAt,
 		Content:          c.Content,
+		IsRating:         c.IsRating,
 		LikeNum:          c.LikeNum,
 		IsLiked:          likedMap[c.ID],
 	}
@@ -1088,12 +1091,13 @@ func NovelRate(c *gin.Context) {
 		return
 	}
 	response.Response(c, http.StatusOK, 200, gin.H{
-		"novelID":     result.NovelID,
-		"score":       result.Score,
-		"changed":     result.Changed,
-		"firstTime":   result.FirstTime,
-		"ratingCount": result.RatingCount,
-		"ratingAvg":   result.RatingAvg,
-		"coins":       result.Coins,
-	}, "已评分")
+		"novelID":        result.NovelID,
+		"score":          result.Score,
+		"changed":        result.Changed,
+		"firstTime":      result.FirstTime,
+		"ratingCount":    result.RatingCount,
+		"ratingAvg":      result.RatingAvg,
+		"coins":          result.Coins,
+		"commentCreated": result.CommentCreated,
+	}, "已评分，并附了一条书评")
 }

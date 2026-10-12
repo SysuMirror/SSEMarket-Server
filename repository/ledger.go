@@ -32,6 +32,9 @@ type LedgerRepository interface {
 	// ExistsDedup 幂等键是否已存在。
 	ExistsDedup(ctx context.Context, dedupKey string) (bool, error)
 
+	// SettledByDedup 读某条里程碑流水的 settled_value（该键累计的原始量）；无流水返回 0。
+	SettledByDedup(ctx context.Context, dedupKey string) (int, error)
+
 	// CountByDedupPrefix 统计某事件下以 prefix 开头的流水条数（单条评论点赞上限用）。
 	CountByDedupPrefix(ctx context.Context, eventType, prefix string) (int64, error)
 
