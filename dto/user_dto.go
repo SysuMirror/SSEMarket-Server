@@ -9,6 +9,7 @@ type UserDto struct {
 	Phone     string `json:"phone"`
 	Email     string `json:"email"`
 	Identity  string `json:"identity"`
+	Coins     int    `json:"coins"`
 }
 
 func ToUserDto(user domain.User) UserDto {
@@ -19,5 +20,6 @@ func ToUserDto(user domain.User) UserDto {
 		AvatarURL: user.AvatarURL,
 		Email:     user.Email,
 		Identity:  user.Identity,
+		Coins:     user.Coins,
 	}
 }
