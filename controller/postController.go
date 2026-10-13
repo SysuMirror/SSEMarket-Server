@@ -175,9 +175,12 @@ type PostResponse struct {
 	IsSaved       bool
 	IsLiked       bool
 	IsWatched     bool
-	Photos        string
-	Tag           string
-	PostKind      string `json:"PostKind"`
+	// Coin 该帖被投币总数；MyCoins 我在这帖上累计投了几个（0–2，投币按钮态用）。
+	Coin    int `json:"Coin"`
+	MyCoins int `json:"MyCoins"`
+	Photos  string
+	Tag     string
+	PostKind string `json:"PostKind"`
 	IsPrivate     bool
 	IsAnonymous   bool `json:"isAnonymous"`
 	IsOwner       bool `json:"isOwner"`
@@ -379,6 +382,8 @@ func browseItemToResponse(item domain.BrowseItem, viewerUserID int) PostResponse
 		Content:       util.TruncateRunes(p.Content, util.BrowseContentPreviewRunes),
 		Like:          p.LikeNum,
 		Comment:       p.CommentNum,
+		Coin:          p.CoinNum, // 已含历史投票折算
+		MyCoins:       item.MyCoins,
 		Browse:        p.BrowseNum,
 		Heat:          p.Heat,
 		PostTime:      p.PostTime,
@@ -792,6 +797,9 @@ type PostDetailsResponse struct {
 	IsSaved       bool
 	IsLiked       bool
 	IsWatched     bool
+	// Coin 该帖被投币总数（含历史投票折算）；MyCoins 我累计投了几个（0–2）。
+	Coin          int `json:"Coin"`
+	MyCoins       int `json:"MyCoins"`
 	Photos        string
 	Tag           string
 	IsPrivate     bool
@@ -925,6 +933,8 @@ func postDetailToResponse(d *domain.PostDetail, viewerUserID int) PostDetailsRes
 		Content:       p.Content,
 		Like:          p.LikeNum,
 		Comment:       p.CommentNum,
+		Coin:          p.CoinNum, // 已含历史投票折算
+		MyCoins:       d.MyCoins,
 		PostTime:      p.PostTime,
 		IsSaved:       d.IsSaved,
 		IsLiked:       d.IsLiked,

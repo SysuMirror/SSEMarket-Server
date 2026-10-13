@@ -118,10 +118,10 @@ type CommentService interface {
 // RankService 排行统计服务。
 type RankService interface {
 	AdjustUserReceivedLike(ctx context.Context, authorUserID, delta int)
-	AdjustUserReceivedVote(ctx context.Context, authorUserID, delta int)
-	AdjustPostVoteNum(ctx context.Context, postID, delta int)
 	OnPostDeleted(ctx context.Context, post *domain.Post)
 	RebuildRankStats(ctx context.Context)
+	PostCoinRanking(ctx context.Context, limit int) ([]domain.PostCoinRankItem, error)
+	UserCoinRanking(ctx context.Context, limit int) ([]domain.UserCoinRankItem, error)
 }
 
 // ChatService 聊天领域服务。
@@ -157,7 +157,94 @@ type RatingService interface {
 	FindUser(ctx context.Context, id int) (*domain.User, error)
 }
 
+// NovelService 小说板块领域服务。
+type NovelService interface {
+	ListNovels(ctx context.Context, filter domain.NovelBrowseFilter) ([]*domain.Novel, error)
+	CountNovels(ctx context.Context, filter domain.NovelBrowseFilter) (int64, error)
+	Categories(ctx context.Context) ([]domain.NovelCategory, error)
+	GetNovelDetail(ctx context.Context, novelID, viewerID int) (*domain.Novel, *domain.User, bool, *domain.NovelProgress, error)
+	EnrichNovels(ctx context.Context, novels []*domain.Novel, viewerID int) (map[int]*domain.User, map[int]bool, map[int]*domain.NovelProgress, error)
+	CreateNovel(ctx context.Context, in domain.NovelCreateInput) (int, error)
+	UpdateNovel(ctx context.Context, in domain.NovelUpdateInput) error
+	DeleteNovel(ctx context.Context, novelID, userID int) error
+
+	ListChapters(ctx context.Context, novelID, limit, offset int) ([]*domain.NovelChapter, int64, error)
+	GetChapterDetail(ctx context.Context, chapterID, viewerID int) (*domain.NovelChapterDetail, error)
+	CreateChapter(ctx context.Context, in domain.NovelChapterCreateInput) (*domain.NovelChapter, error)
+	DeleteChapter(ctx context.Context, chapterID, userID int) error
+
+	ListComments(ctx context.Context, filter domain.NovelCommentFilter, viewerID int) ([]*domain.NovelComment, map[int]*domain.User, map[int]bool, int64, error)
+	CreateComment(ctx context.Context, in domain.NovelCommentCreateInput) (*domain.NovelComment, *domain.User, error)
+	DeleteComment(ctx context.Context, commentID, userID int) error
+	ToggleCommentLike(ctx context.Context, commentID, userID int) error
+
+	ToggleShelf(ctx context.Context, novelID, userID int) (bool, error)
+	IsOnShelf(ctx context.Context, novelID, userID int) (bool, error)
+	ListShelf(ctx context.Context, userID, limit, offset int) ([]*domain.Novel, int64, error)
+	ReportProgress(ctx context.Context, in domain.NovelProgressInput) error
+	GetProgress(ctx context.Context, novelID, userID int) (*domain.NovelProgress, error)
+
+	// RateNovel 给书评分（1–5 星，每人每本一条，可改）；作者首次收到这条评分时 +1 币。
+	RateNovel(ctx context.Context, novelID, userID, score int) (*domain.NovelRatingResult, error)
+	// RatingDistribution 各星级人数：下标 0 = 5 星，依次到下标 4 = 1 星。
+	RatingDistribution(ctx context.Context, novelID int) ([5]int, error)
+	// MyRating 我给这本书打了几分（0 = 没打过）。
+	MyRating(ctx context.Context, novelID, userID int) (int, error)
+	// MyRatings 我给这批书各打了几分（列表页按钮态用）。
+	MyRatings(ctx context.Context, userID int, novelIDs []int) (map[int]int, error)
+	// MyNovelStats 我对这批书各打了几分、各投了几个币（列表/详情按钮态用）。
+	MyNovelStats(ctx context.Context, novelIDs []int, viewerID int) (*domain.NovelViewerStats, error)
+}
+
+// NovelPointsService 小说积分与经验体系（流水见 novel_ledger）。
+type NovelPointsService interface {
+	// 读者侧
+	SettleReadTime(ctx context.Context, userID, novelID, seconds int) (int, error)
+	GrantCommentExp(ctx context.Context, userID, novelID, commentID int) (int, error)
+	GrantCommentLikeExp(ctx context.Context, commentAuthorID, novelID, commentID, likerID int) (int, error)
+	CheckIn(ctx context.Context, userID int) (*domain.NovelCheckInResult, error)
+
+	// 作者侧
+	GrantShelfAdd(ctx context.Context, authorID, novelID, readerID int) (int, error)
+	GrantReaderUV(ctx context.Context, authorID, novelID, readerID int) (int, error)
+	SettleWritingWords(ctx context.Context, authorID, novelID, words int) (int, error)
+	GrantChapterPublish(ctx context.Context, authorID, novelID, chapterID int) (int, error)
+
+	// 查询
+	Summary(ctx context.Context, userID int) (*domain.NovelPointsSummary, error)
+	Ledger(ctx context.Context, userID, limit, offset int) ([]*domain.NovelLedger, int64, error)
+
+	// ReadSecondsFor 某读者在某本书上累计的阅读秒数（阅读里程碑游标）；没读过返回 0。
+	ReadSecondsFor(ctx context.Context, userID, novelID int) (int, error)
+}
+
 // ShopService 商城领域服务。
+// CoinService 站内币体系（与上面的经验/积分互不相通，各记各的流水）。
+//
+// 赚币的四条规则都在服务端触发，调用方不需要判断「今天是不是第一次」——
+// 幂等键由 domain/coin.go 统一拼，重复调用只会有一条流水。
+type CoinService interface {
+	// 赚币
+	GrantDailyVisit(ctx context.Context, userID int) (int, error)
+	GrantFirstPost(ctx context.Context, userID int) (int, error)
+	AddReadSeconds(ctx context.Context, userID, seconds int) (int, error)
+	AddWriteWords(ctx context.Context, authorID, words int) (int, error)
+	GrantRated(ctx context.Context, authorID, novelID, raterID int) (int, error)
+
+	// 投币：每人每个内容最多 2 币，每个币给投币者 +10 主页经验
+	Throw(ctx context.Context, userID int, targetType string, targetID, coins int) (*domain.CoinThrowResult, error)
+	// CancelThrow 取消投币：撤回我在该内容上投着的全部币，退币并回退经验
+	CancelThrow(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error)
+
+	// 查询
+	Summary(ctx context.Context, userID int) (*domain.CoinSummary, error)
+	Ledger(ctx context.Context, userID, limit, offset int) ([]*domain.CoinLedger, int64, error)
+	MyThrows(ctx context.Context, userID int, targetType string, targetIDs []int) (map[int]int, error)
+	ThrownForTarget(ctx context.Context, targetType string, targetID int) (int, error)
+	// ThrownTotalsAll 全站投币总数（主页经验重算用，一次查询）。
+	ThrownTotalsAll(ctx context.Context) (map[int]int, error)
+}
+
 type ShopService interface {
 	Create(ctx context.Context, in domain.ProductCreateInput) (int, error)
 	List(ctx context.Context, filter domain.ProductFilter) ([]*domain.Product, error)
@@ -207,15 +294,6 @@ type SueService interface {
 	ListPending(ctx context.Context) ([]domain.SueListItem, error)
 	MarkNoViolation(ctx context.Context, sueID int) error
 	MarkViolation(ctx context.Context, sueID int) error
-}
-
-// VoteService 投票领域服务。
-type VoteService interface {
-	SearchByTitle(ctx context.Context, keyword string, viewerUserID int) ([]domain.VoteSearchItem, error)
-	ToggleVote(ctx context.Context, userID, postID int) (bool, error)
-	HasVoted(ctx context.Context, userID, postID int) (bool, error)
-	GetPostRanking(ctx context.Context) ([]domain.PostRankItem, error)
-	GetUserRanking(ctx context.Context) ([]domain.UserRankItem, error)
 }
 
 // LotteryService 抽奖帖领域服务。

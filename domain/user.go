@@ -4,14 +4,20 @@ import "time"
 
 // User 领域用户实体。
 type User struct {
-	ID                         int
-	Phone                      string
-	Email                      string
-	Name                       string
-	Intro                      string
-	AvatarURL                  string
-	Identity                   string
-	Score                      int
+	ID        int
+	Phone     string
+	Email     string
+	Name      string
+	Intro     string
+	AvatarURL string
+	Identity  string
+	Score     int
+	// Experience 读者经验；NovelPoints 作者积分（单位：分，1 积分 = 10 分）；
+	// Coins 站内币余额（发帖/阅读/写作/评分赚来，投币时花掉，见 domain/coin.go）。
+	Experience  int
+	NovelPoints int
+	Coins       int
+	// CustomTitle 满级(Lv8, score>=5000)用户自定义称号;空=未自定义,对外显示用户名
 	CustomTitle                string
 	BanEnd                     time.Time
 	PunishNum                  int
@@ -138,13 +144,13 @@ type UserAPITokenCreateInput struct {
 
 // UserAPITokenCreateResult 创建 PAT 结果。PlainText 仅在此返回一次。
 type UserAPITokenCreateResult struct {
-	TokenID    int
-	PlainText  string // 完整明文 token，仅创建时返回
-	Prefix     string
-	Name       string
-	Scopes     string
-	IsActive   bool
-	CreatedAt  time.Time
+	TokenID   int
+	PlainText string // 完整明文 token，仅创建时返回
+	Prefix    string
+	Name      string
+	Scopes    string
+	IsActive  bool
+	CreatedAt time.Time
 }
 
 // UserAPITokenItem PAT 列表项（不含明文）。
@@ -169,12 +175,11 @@ type UserAPITokenPage struct {
 
 // UserAPITokenVerify PAT 验证结果，供智能体侧使用。
 type UserAPITokenVerify struct {
-	TokenID   int
-	UserID    int
-	Scopes    []string
-	IsActive  bool
+	TokenID  int
+	UserID   int
+	Scopes   []string
+	IsActive bool
 }
-
 
 // RefreshTokenRecord 刷新令牌记录。
 type RefreshTokenRecord struct {

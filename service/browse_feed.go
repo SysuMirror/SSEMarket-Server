@@ -51,7 +51,7 @@ func (s *postService) attachPersonalBrowseState(ctx context.Context, filter doma
 	for id := range userIDSet {
 		userIDs = append(userIDs, id)
 	}
-	savedSet, likedSet, authorMap := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
+	savedSet, likedSet, authorMap, thrownSet := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
 	hotCommentMap, _ := s.posts.FindHotPcommentsByPostIDs(ctx, postIDs)
 	// 把热门评论作者 ID 也加入查询集,复用 AuthorsByIDs 一次性查回。
 	hotAuthorIDs := make([]int, 0, len(hotCommentMap))
@@ -82,10 +82,11 @@ func (s *postService) attachPersonalBrowseState(ctx context.Context, filter doma
 			saved = true
 		}
 		item := domain.BrowseItem{
-			Post:    p,
-			Author:  author,
-			IsSaved: saved,
-			IsLiked: liked,
+			Post:     p,
+			Author:   author,
+			IsSaved:  saved,
+			IsLiked:  liked,
+			MyCoins:  thrownSet[p.ID],
 		}
 		if hc, ok := hotCommentMap[p.ID]; ok && hc != nil {
 			item.HotComment = hc

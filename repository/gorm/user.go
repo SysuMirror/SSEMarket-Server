@@ -751,8 +751,11 @@ func (r *userRepository) ListTopActive(ctx context.Context, limit int) ([]*domai
 		limit = 50
 	}
 	var rows []model.User
+	// 活跃度口径改为「获赞 + 收到的币」（投票已下线，获票数只作历史数据）。
 	err := r.session(ctx).
-		Order("(received_like_num + received_vote_num) DESC").
+		Order(`(received_like_num +
+			(SELECT COALESCE(SUM(coin_num + vote_num), 0) FROM posts WHERE posts.userID = users.userID) +
+			(SELECT COALESCE(SUM(coin_num), 0) FROM novels WHERE novels.user_id = users.userID)) DESC`).
 		Limit(limit).
 		Find(&rows).Error
 	if err != nil {

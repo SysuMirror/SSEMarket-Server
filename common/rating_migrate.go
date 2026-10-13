@@ -28,14 +28,16 @@ var officialRatingCategories = []struct {
 }
 
 func RunRatingMigration(db *gorm.DB) {
-	db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.RatingCategory{},
 		&model.RatingPost{},
 		&model.RatingStar{},
 		&model.RatingComment{},
 		&model.RatingPostLike{},
 		&model.RatingCommentLike{},
-	)
+	); err != nil {
+		log.Printf("[rating] automigrate failed: %v", err)
+	}
 
 	seedOfficialRatingCategories(db)
 

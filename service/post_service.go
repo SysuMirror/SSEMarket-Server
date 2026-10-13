@@ -32,6 +32,8 @@ type postService struct {
 	users repository.UserRepository
 	sues  repository.SueRepository
 	ranks RankService
+	// coins 币发放（每日首次发帖 +1）。允许为 nil（单测与未开通的场景），调用处判空。
+	coins CoinService
 }
 
 func NewPostService(
@@ -39,8 +41,9 @@ func NewPostService(
 	users repository.UserRepository,
 	sues repository.SueRepository,
 	ranks RankService,
+	coins CoinService,
 ) PostService {
-	return &postService{posts: posts, users: users, sues: sues, ranks: ranks}
+	return &postService{posts: posts, users: users, sues: sues, ranks: ranks, coins: coins}
 }
 
 func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilter) (int64, error) {
@@ -125,6 +128,12 @@ func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (
 	isLiked, _ := s.posts.IsLiked(ctx, viewerUserID, postID)
 	isSaved, _ := s.posts.IsSaved(ctx, viewerUserID, postID)
 	isWatched, _ := s.posts.IsWatched(ctx, viewerUserID, postID)
+	// 我在这帖上累计投了几个币（含历史投票折算），投币按钮态用。
+	myCoins := 0
+	if s.coins != nil {
+		thrown, _ := s.coins.MyThrows(ctx, viewerUserID, domain.CoinTargetPost, []int{postID})
+		myCoins = thrown[postID]
+	}
 
 	return &domain.PostDetail{
 		Post:      post,
@@ -133,6 +142,7 @@ func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (
 		IsLiked:   isLiked,
 		IsWatched: isWatched,
 		BrowseNum: browseNum,
+		MyCoins:   myCoins,
 	}, nil
 }
 
@@ -187,6 +197,12 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) (*d
 	}
 	common.AddPostID(post.ID)
 	InvalidateHomeBrowse()
+
+	// 币：每日首次发帖 +1（幂等键含日期，当天第二帖不再给）。
+	// 放在置顶逻辑之前：置顶失败不影响已经拿到的币。
+	if s.coins != nil {
+		_, _ = s.coins.GrantFirstPost(ctx, in.UserID)
+	}
 
 	if len(in.Tags) > 0 {
 		tag, err := s.posts.FindTagByName(ctx, in.Tags[0])
@@ -547,10 +563,10 @@ func (s *postService) ListTags(ctx context.Context) ([]*domain.Tag, error) {
 
 // fetchBrowseInteractionSets 并行批量查询 browse 所需的个人态数据。
 //
-// 使用 errgroup 同时发起 3 路 SQL，将原本串行的 SavedSet + LikedSet + AuthorsByIDs
+// 使用 errgroup 同时发起 4 路 SQL，将原本串行的 SavedSet + LikedSet + AuthorsByIDs + 投币数
 // 合并为一次等待，缩短 attachPersonalBrowseState 的尾延迟。
 func (s *postService) fetchBrowseInteractionSets(ctx context.Context, viewerID int, postIDs, userIDs []int) (
-	savedSet map[int]struct{}, likedSet map[int]struct{}, authorMap map[int]*domain.User,
+	savedSet map[int]struct{}, likedSet map[int]struct{}, authorMap map[int]*domain.User, thrownSet map[int]int,
 ) {
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -565,6 +581,12 @@ func (s *postService) fetchBrowseInteractionSets(ctx context.Context, viewerID i
 		authorMap, _ = s.posts.AuthorsByIDs(ctx, userIDs)
 		return nil
 	})
+	g.Go(func() error {
+		if s.coins != nil {
+			thrownSet, _ = s.coins.MyThrows(ctx, viewerID, domain.CoinTargetPost, postIDs)
+		}
+		return nil
+	})
 	_ = g.Wait()
 	if savedSet == nil {
 		savedSet = map[int]struct{}{}
@@ -575,7 +597,10 @@ func (s *postService) fetchBrowseInteractionSets(ctx context.Context, viewerID i
 	if authorMap == nil {
 		authorMap = map[int]*domain.User{}
 	}
-	return savedSet, likedSet, authorMap
+	if thrownSet == nil {
+		thrownSet = map[int]int{}
+	}
+	return savedSet, likedSet, authorMap, thrownSet
 }
 
 func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts []*domain.Post, isSaveMode bool) ([]domain.BrowseItem, error) {
@@ -591,7 +616,7 @@ func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts 
 	for id := range userIDSet {
 		userIDs = append(userIDs, id)
 	}
-	savedSet, likedSet, authorMap := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
+	savedSet, likedSet, authorMap, thrownSet := s.fetchBrowseInteractionSets(ctx, viewerID, postIDs, userIDs)
 
 	items := make([]domain.BrowseItem, 0, len(posts))
 	for _, p := range posts {
@@ -602,10 +627,11 @@ func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts 
 			saved = true
 		}
 		items = append(items, domain.BrowseItem{
-			Post:    p,
-			Author:  author,
-			IsSaved: saved,
-			IsLiked: liked,
+			Post:     p,
+			Author:   author,
+			IsSaved:  saved,
+			IsLiked:  liked,
+			MyCoins:  thrownSet[p.ID],
 		})
 	}
 	return items, nil
@@ -637,7 +663,7 @@ func postToDomainFromModel(p model.Post) *domain.Post {
 		Content:     p.Ptext,
 		CommentNum:  p.CommentNum,
 		LikeNum:     p.LikeNum,
-		VoteNum:     p.VoteNum,
+		CoinNum:     p.CoinNum + p.VoteNum, // 历史票数并入投币数，见 domain.Post.CoinNum
 		BrowseNum:   p.BrowseNum,
 		PostTime:    p.PostTime,
 		Heat:        p.Heat,

@@ -741,6 +741,8 @@ func GetInfo(c *gin.Context) {
 		info["email"] = user.Email
 		info["emailNotificationBlocked"] = user.ISEmailNotificationBlocked
 		info["emailpush"] = user.ISEmailNotificationBlocked
+		// 币余额属于个人资产口径，只在本人查看自己主页时返回（前端据此决定是否展示）。
+		info["coins"] = user.Coins
 	}
 	c.JSON(http.StatusOK, info)
 }

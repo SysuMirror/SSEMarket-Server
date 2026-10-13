@@ -20,10 +20,12 @@ var (
 	Admins        AdminService
 	WorkbenchApps WorkbenchAppService
 	Sues          SueService
-	Votes         VoteService
 	Lotteries     LotteryService
 	Sso           SsoService
 	Quest         QuestService
+	Novels        NovelService
+	NovelPoints   NovelPointsService
+	Coins         CoinService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -38,13 +40,17 @@ func InitServices(db *gorm.DB) {
 	noticeRepo := gormrepo.NewNoticeRepository(db)
 	adminRepo := gormrepo.NewAdminRepository(db)
 	sueRepo := gormrepo.NewSueRepository(db)
-	voteRepo := gormrepo.NewVoteRepository(db)
 	lotteryRepo := gormrepo.NewLotteryRepository(db)
 	rankRepo := gormrepo.NewRankRepository(db)
+	novelRepo := gormrepo.NewNovelRepository(db)
 
-	Users = NewUserService(userRepo)
+	// 币体系要先建：投币时要解析被投内容的作者与可见性，所以帖子库和书本库一起注进来；
+	// 发帖奖励与主页经验重算也都依赖它，Users / Posts 必须排在后面。
+	Coins = NewCoinService(gormrepo.NewCoinRepository(db), postRepo, novelRepo)
+
+	Users = NewUserService(userRepo, Coins)
 	Ranks = NewRankService(rankRepo)
-	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks)
+	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks, Coins)
 	Comments = NewCommentService(commentRepo, postRepo)
 	Chats = NewChatService(chatRepo)
 	Ratings = NewRatingService(ratingRepo)
@@ -54,7 +60,6 @@ func InitServices(db *gorm.DB) {
 	Admins = NewAdminService(adminRepo)
 	WorkbenchApps = NewWorkbenchAppService(gormrepo.NewWorkbenchAppRepository(db))
 	Sues = NewSueService(sueRepo)
-	Votes = NewVoteService(voteRepo, postRepo, Ranks)
 	Lotteries = NewLotteryService(lotteryRepo, postRepo)
 
 	ssoBindingRepo := gormrepo.NewSsoBindingRepository(db)
@@ -62,4 +67,8 @@ func InitServices(db *gorm.DB) {
 
 	questRepo := gormrepo.NewQuestRepository(db)
 	Quest = NewQuestService(questRepo, postRepo, userRepo)
+
+	ledgerRepo := gormrepo.NewLedgerRepository(db)
+	NovelPoints = NewNovelPointsService(ledgerRepo, novelRepo)
+	Novels = NewNovelService(novelRepo, NovelPoints, Coins)
 }
