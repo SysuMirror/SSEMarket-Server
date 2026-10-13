@@ -282,6 +282,54 @@ func chatMsgToDomain(m *model.ChatMsg) *domain.ChatHistoryItem {
 	}
 }
 
+func emojiToDomain(e *model.Emoji) *domain.Emoji {
+	if e == nil {
+		return nil
+	}
+	return &domain.Emoji{
+		ID:          e.EmojiID,
+		PackID:      e.PackID,
+		Name:        e.Name,
+		URL:         e.URL,
+		IsBuiltin:   e.IsBuiltin,
+		OwnerUserID: e.OwnerUserID,
+		IsDeleted:   e.IsDeleted,
+		CreatedAt:   e.CreatedAt,
+	}
+}
+
+func emojisToDomain(rows []model.Emoji) []*domain.Emoji {
+	out := make([]*domain.Emoji, 0, len(rows))
+	for i := range rows {
+		out = append(out, emojiToDomain(&rows[i]))
+	}
+	return out
+}
+
+func emojiPackToDomain(p *model.EmojiPack) *domain.EmojiPack {
+	if p == nil {
+		return nil
+	}
+	return &domain.EmojiPack{
+		ID:           p.PackID,
+		Title:        p.Title,
+		OwnerUserID:  p.OwnerUserID,
+		IsPersonal:   p.IsPersonal,
+		IsPublic:     p.IsPublic,
+		CoverEmojiID: p.CoverEmojiID,
+		IsDeleted:    p.IsDeleted,
+		CreatedAt:    p.CreatedAt,
+	}
+}
+
+func emojiPacksToDomain(rows []model.EmojiPack) []*domain.EmojiPack {
+	out := make([]*domain.EmojiPack, 0, len(rows))
+	for i := range rows {
+		out = append(out, emojiPackToDomain(&rows[i]))
+	}
+	return out
+}
+
 func sueToDomain(s *model.Sue) *domain.Sue {
 	if s == nil {
 		return nil

@@ -296,6 +296,20 @@ type SueService interface {
 	MarkViolation(ctx context.Context, sueID int) error
 }
 
+// EmojiService 表情包领域服务（内置组：小汐/SSE娘 / 个人表情组 / 可分享的表情包组）。
+type EmojiService interface {
+	GetPanel(ctx context.Context, userID int) (*domain.EmojiPanel, error)
+	UploadStickers(ctx context.Context, userID int, items []domain.EmojiStickerInput) ([]*domain.Emoji, error)
+	CreatePack(ctx context.Context, userID int, title string, isPublic bool, items []domain.EmojiStickerInput) (*domain.EmojiPack, []*domain.Emoji, error)
+	AddPack(ctx context.Context, userID, packID int) error
+	RemovePack(ctx context.Context, userID, packID int) error
+	DeleteSticker(ctx context.Context, userID, emojiID int) error
+	DeletePack(ctx context.Context, userID, packID int) error
+	AddFromChat(ctx context.Context, userID, emojiID int) (*domain.Emoji, error)
+	Search(ctx context.Context, userID int, keyword string) (*domain.EmojiSearchResult, error)
+	Resolve(ctx context.Context, ids []int) ([]*domain.Emoji, error)
+}
+
 // LotteryService 抽奖帖领域服务。
 type LotteryService interface {
 	Create(ctx context.Context, in domain.LotteryCreateInput) (int, error)

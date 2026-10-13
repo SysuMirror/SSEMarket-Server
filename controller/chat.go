@@ -563,7 +563,8 @@ func buildRelevantUserJSON(ctx context.Context, userID int) ([]byte, error) {
 		if err != nil && err != redis.Nil {
 			return nil, err
 		}
-		preview := peer.LastMessagePreview
+		// 会话预览不暴露原始 token：[emoji:<id>] 还原成 [表情]。
+		preview := domain.StripEmojiTokens(peer.LastMessagePreview)
 		if len([]rune(preview)) > 80 {
 			preview = string([]rune(preview)[:80]) + "…"
 		}

@@ -184,6 +184,18 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/getChatHistory", controller.GetChatHistory)
 	auth.GET("/api/auth/getChatNotice", controller.GetChatNotice)
 	auth.POST("/api/auth/recallChatMessage", controller.RecallChatMessage)
+
+	// 表情包板块（内置组：小汐/SSE娘 / 个人表情组 / 可分享的表情包组 / 搜索）
+	auth.POST("/api/auth/emoji/panel", controller.EmojiPanel)
+	auth.POST("/api/auth/emoji/upload", controller.EmojiUpload)
+	auth.POST("/api/auth/emoji/pack/create", controller.EmojiPackCreate)
+	auth.POST("/api/auth/emoji/pack/add", controller.EmojiPackAdd)
+	auth.POST("/api/auth/emoji/pack/remove", controller.EmojiPackRemove)
+	auth.POST("/api/auth/emoji/pack/delete", controller.EmojiPackDelete)
+	auth.POST("/api/auth/emoji/delete", controller.EmojiStickerDelete)
+	auth.POST("/api/auth/emoji/addFromChat", controller.EmojiAddFromChat)
+	auth.POST("/api/auth/emoji/search", controller.EmojiSearch)
+	auth.POST("/api/auth/emoji/resolve", controller.EmojiResolve)
 	//商城板块
 	auth.POST("/api/auth/postProduct", controller.PostProduct)
 	auth.POST("/api/auth/getProducts", controller.GetProducts)

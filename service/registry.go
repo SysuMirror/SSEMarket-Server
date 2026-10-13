@@ -26,6 +26,7 @@ var (
 	Novels        NovelService
 	NovelPoints   NovelPointsService
 	Coins         CoinService
+	Emojis        EmojiService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -53,6 +54,7 @@ func InitServices(db *gorm.DB) {
 	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks, Coins)
 	Comments = NewCommentService(commentRepo, postRepo)
 	Chats = NewChatService(chatRepo)
+	Emojis = NewEmojiService(gormrepo.NewEmojiRepository(db))
 	Ratings = NewRatingService(ratingRepo)
 	Shops = NewShopService(shopRepo, userRepo)
 	Resumes = NewResumeService(resumeRepo)

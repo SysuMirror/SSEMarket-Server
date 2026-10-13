@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"loginTest/config"
+	"loginTest/domain"
 	"loginTest/model"
 	"loginTest/observability"
 
@@ -102,6 +103,11 @@ func InitDB() *gorm.DB {
 	// 站内币体系：流水 + 投币记录（与小说的经验/积分互不相通）。
 	autoMigrate(db, &model.CoinLedger{})
 	autoMigrate(db, &model.CoinThrow{})
+	// 表情包体系：组（内置/个人/分享） / 单张表情 / 用户添加的组。
+	autoMigrate(db, &model.EmojiPack{})
+	autoMigrate(db, &model.Emoji{})
+	autoMigrate(db, &model.UserEmojiPack{})
+	seedBuiltinEmoji(db)
 	RunRatingMigration(db)
 	db.Exec("UPDATE resumes SET view_num = download_num * 3 WHERE view_num = 0 AND download_num > 0")
 
@@ -221,6 +227,51 @@ func ensureLotteryParticipantUniqueIndex(db *gorm.DB) {
 		ADD UNIQUE INDEX lottery_user_prize (lotteryID, userID, prizeID)
 	`).Error; err != nil {
 		log.Printf("[lottery] ensure unique index lottery_user_prize: %v", err)
+	}
+}
+
+// seedBuiltinEmoji 内置表情种子：内置组「小汐（SSE娘）」（ownerUserID=0）
+// + domain.BuiltinEmojiFiles 一一对应。
+// 幂等：内置组按存在与否、内置表情按名字跳过，Pod 重启不会重复插；
+// 已存在的内置组标题会同步成 domain.BuiltinPackTitle（内置组改名只改常量，重启即生效）。
+// 内置表情的 URL 存裸文件名（如 乖巧.png），前端从 public/emoji/ 解析成资源地址。
+func seedBuiltinEmoji(db *gorm.DB) {
+	var pack model.EmojiPack
+	err := db.Where("ownerUserID = ? AND isDeleted = ?", 0, false).First(&pack).Error
+	if err != nil {
+		pack = model.EmojiPack{Title: domain.BuiltinPackTitle, OwnerUserID: 0, IsPublic: true}
+		if err := db.Create(&pack).Error; err != nil {
+			log.Printf("[emoji] seed builtin pack failed: %v", err)
+			return
+		}
+	} else if pack.Title != domain.BuiltinPackTitle {
+		// 改过 BuiltinPackTitle 常量（如「默认表情」→「小汐（SSE娘）」）后，老库的组名跟着改。
+		if err := db.Model(&model.EmojiPack{}).Where("packID = ?", pack.PackID).
+			Update("title", domain.BuiltinPackTitle).Error; err != nil {
+			log.Printf("[emoji] rename builtin pack failed: %v", err)
+		}
+	}
+	for _, file := range domain.BuiltinEmojiFiles {
+		name := domain.BuiltinEmojiName(file)
+		var cnt int64
+		if err := db.Model(&model.Emoji{}).
+			Where("isBuiltin = ? AND name = ?", true, name).
+			Count(&cnt).Error; err != nil {
+			log.Printf("[emoji] seed check %s failed: %v", file, err)
+			continue
+		}
+		if cnt > 0 {
+			continue
+		}
+		sticker := model.Emoji{PackID: pack.PackID, Name: name, URL: file, IsBuiltin: true}
+		if err := db.Create(&sticker).Error; err != nil {
+			log.Printf("[emoji] seed %s failed: %v", file, err)
+			continue
+		}
+		if pack.CoverEmojiID == 0 {
+			pack.CoverEmojiID = sticker.EmojiID
+			db.Model(&model.EmojiPack{}).Where("packID = ?", pack.PackID).Update("coverEmojiID", sticker.EmojiID)
+		}
 	}
 }
 
