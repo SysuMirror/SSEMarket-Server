@@ -12,3 +12,12 @@ ssl
 .idea
 .DS_Store
 *.DS_Store
+# 各种bak备份文件
+*.bak*
+# env备份
+.env.bak*
+# compose配置（看你需求，如果compose.yml不需要提交就加这行）
+compose.yml
+compose.yml.bak*
+# 文档目录（如果docs里这个文档不上传）
+docs/OAuth2-*.md
