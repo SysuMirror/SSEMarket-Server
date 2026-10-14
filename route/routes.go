@@ -15,6 +15,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	r.GET("/ready", controller.Ready)
 	// 内部运维通道（nginx 不路由；X-Internal-Token 守卫 + 白名单收件人在 controller 内）
 	r.POST("/internal/mail", controller.InternalMail)
+	// 内部加精通道（秋坞 post-curator → 精华帖 is_high_quality，X-Internal-Token 守卫）
+	r.POST("/internal/featured", controller.InternalFeatured)
 
 	r.Use(middleware.CORSMiddleware())
 	// 这里把路由分成了三组，其中auth是需要token验证的，也就是需要用户登录

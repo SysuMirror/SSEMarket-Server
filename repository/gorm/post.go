@@ -179,7 +179,7 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 				base = base.Where("(title LIKE ? OR ptext LIKE ?) AND tag = ?", "%"+searchinfo+"%", "%"+searchinfo+"%", tag)
 			}
 		}
-	} else if partition == "优质贴" {
+	} else if partition == "精华帖" || partition == "优质贴" { // 精华帖=is_high_quality 查询入参；优质贴=旧名，兼容保留
 		base = base.Where("is_high_quality = ?", 1)
 	} else {
 		base = base.Where("`partition` = ?", partition)
@@ -477,7 +477,7 @@ func (r *postRepository) buildBrowseQuery(ctx context.Context, filter domain.Bro
 			}
 			return q
 		}
-		if partition == "优质贴" {
+		if partition == "精华帖" || partition == "优质贴" { // 精华帖=is_high_quality 查询入参；优质贴=旧名，兼容保留
 			q := applyVisibility(r.session(ctx).Model(&model.Post{}).Where("is_high_quality = ?", 1), viewerUserID)
 			return applyTimeRange(q, filter.TimeFrom, filter.TimeTo)
 		}
