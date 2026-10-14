@@ -96,6 +96,24 @@ type SsoService interface {
 	Unbind(ctx context.Context, userID int, password string) error
 }
 
+// StaffService 职位账号（开发人员匿名 @）领域服务。
+// 匿名性红线：任何出参都不得携带 domain.StaffAlias.StaffUserID；
+// 对前端只给 StaffAliasPublic（alias / title / 职位小号 userID）。
+type StaffService interface {
+	// ListPublicAliases @ 下拉候选（前端编辑器的 @ 入口用）。
+	ListPublicAliases(ctx context.Context) ([]domain.StaffAliasPublic, error)
+	// ThreadAliasesForUser 当前用户在该帖子线程内被 @ 到的职位身份
+	// （「以职位身份回复」的开关数据源；普通用户恒为空，开销一次索引查询）。
+	ThreadAliasesForUser(ctx context.Context, userID, postID int) ([]domain.StaffAliasPublic, error)
+	// ShellsForNames 把 @ 解析出的昵称里属于职位的部分映射为职位小号（resolveMentions 渲染用）。
+	ShellsForNames(ctx context.Context, names []string) (map[string]*domain.User, error)
+	// MatchedAliasesForTokens 正文 @ 解析出的昵称里命中的职位行（小号已确保派生）。
+	// 调用方（评论服务）负责据此把通知转发给真实开发者。
+	MatchedAliasesForTokens(ctx context.Context, tokens []string) ([]*domain.StaffAlias, error)
+	// AuthorizeAliasReply 校验「以职位身份回复」：确为本人职位 + 该线程确实 @ 过这个职位。
+	AuthorizeAliasReply(ctx context.Context, userID, postID, asUserID int) (*domain.StaffAlias, error)
+}
+
 // CommentService 评论领域服务。
 type CommentService interface {
 	ListForPost(ctx context.Context, postID int, postType string, viewerUserID int) ([]*domain.PcommentWithMeta, error)

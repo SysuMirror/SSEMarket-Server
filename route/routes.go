@@ -94,6 +94,9 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("api/auth/updateCcommentDeny", controller.UpdateCcommentDeny)
 	auth.POST("api/auth/updatePcommentDeny", controller.UpdatePcommentDeny)
 	auth.POST("/api/auth/updateSave", controller.UpdateSave)
+	// 职位账号（开发人员匿名 @）：@ 下拉候选 + 当前线程内可用的「以职位身份回复」
+	auth.POST("/api/auth/staff/alias/list", controller.StaffAliasList)
+	auth.POST("/api/auth/staff/alias/threadAliases", controller.StaffAliasThreadAliases)
 	auth.POST("/api/auth/toggleWatch", controller.ToggleWatch)
 	auth.POST("/api/auth/resolveMentions", controller.ResolveMentions)
 	auth.POST("/api/auth/updateBrowseNum", controller.UpdateBrowseNum)

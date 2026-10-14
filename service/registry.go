@@ -26,6 +26,7 @@ var (
 	Novels        NovelService
 	NovelPoints   NovelPointsService
 	Coins         CoinService
+	Staffs        StaffService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -51,7 +52,10 @@ func InitServices(db *gorm.DB) {
 	Users = NewUserService(userRepo, Coins)
 	Ranks = NewRankService(rankRepo)
 	Posts = NewPostService(postRepo, userRepo, sueRepo, Ranks, Coins)
-	Comments = NewCommentService(commentRepo, postRepo)
+	// 职位账号先建：评论服务要靠它把 @职位 的通知转发给真实开发者、
+	// 并校验「以职位身份回复」（Staffs 自身只依赖 staffRepo，无环）。
+	Staffs = NewStaffService(gormrepo.NewStaffRepository(db))
+	Comments = NewCommentService(commentRepo, postRepo, Staffs)
 	Chats = NewChatService(chatRepo)
 	Ratings = NewRatingService(ratingRepo)
 	Shops = NewShopService(shopRepo, userRepo)

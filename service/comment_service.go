@@ -20,10 +20,11 @@ const commentWeight = float64(6)
 type commentService struct {
 	comments repository.CommentRepository
 	posts    repository.PostRepository
+	staff    StaffService
 }
 
-func NewCommentService(comments repository.CommentRepository, posts repository.PostRepository) CommentService {
-	return &commentService{comments: comments, posts: posts}
+func NewCommentService(comments repository.CommentRepository, posts repository.PostRepository, staff StaffService) CommentService {
+	return &commentService{comments: comments, posts: posts, staff: staff}
 }
 
 func (s *commentService) ListForPost(ctx context.Context, postID int, postType string, viewerUserID int) ([]*domain.PcommentWithMeta, error) {
@@ -289,8 +290,14 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		return nil, domain.ErrNotFound
 	}
 
+	// 「以职位身份回复」：被 @ 的开发者可选用职位小号对外发言（对外只见职位，不见本人）。
+	authorID, effectiveAuthor, err := s.resolveEffectiveAuthor(ctx, in.UserID, in.PostID, in.AsStaffUserID, author)
+	if err != nil {
+		return nil, err
+	}
+
 	pc := &domain.Pcomment{
-		UserID:    in.UserID,
+		UserID:    authorID,
 		PostID:    in.PostID,
 		Content:   content,
 		CreatedAt: time.Now(),
@@ -301,15 +308,16 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 
 	var notifyReceiver *domain.User
 	if post.UserID != in.UserID {
-		_ = s.comments.CreateNotice(ctx, post.UserID, in.UserID, "pcomment", content, pc.ID)
+		// 通知的发起人一律用对外身份（职位小号），避免把真实开发者暴露给收信人
+		_ = s.comments.CreateNotice(ctx, post.UserID, authorID, "pcomment", content, pc.ID)
 		notifyReceiver, _ = s.comments.FindUserByID(ctx, post.UserID)
 	}
-	skipNotify := map[int]struct{}{in.UserID: {}}
+	skipNotify := map[int]struct{}{in.UserID: {}, authorID: {}}
 	if post.UserID != in.UserID {
 		skipNotify[post.UserID] = struct{}{}
 	}
-	s.notifyMentions(ctx, in.UserID, content, "pcomment", pc.ID, skipNotify)
-	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, in.UserID, content, skipNotify)
+	s.notifyMentions(ctx, authorID, content, "pcomment", pc.ID, skipNotify)
+	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -320,17 +328,37 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
 
-	subs, err := s.buildSubcomments(ctx, pc.ID, in.UserID, map[int]*domain.User{in.UserID: author})
+	// 抽奖参与是个人行为，挂在真实账号下（由 controller 判断），职位身份发言不参与
+
+	subs, err := s.buildSubcomments(ctx, pc.ID, authorID, map[int]*domain.User{authorID: effectiveAuthor})
 	if err != nil {
 		return nil, err
 	}
 	return &domain.PcommentCreateResult{
 		Pcomment:                pc,
-		Author:                  author,
+		Author:                  effectiveAuthor,
 		Subcomments:             subs,
 		NotifyReceiver:          notifyReceiver,
 		PostWatchEmailReceivers: postWatchReceivers,
 	}, nil
+}
+
+// resolveEffectiveAuthor 解析本次发言的对外身份：
+// AsStaffUserID==0 时就是本人；否则校验「以职位身份回复」并改用职位小号。
+// 返回 (对外 userID, 对外 user 实体, error)。
+func (s *commentService) resolveEffectiveAuthor(ctx context.Context, userID, postID, asStaffUserID int, author *domain.User) (int, *domain.User, error) {
+	if asStaffUserID == 0 || asStaffUserID == userID {
+		return userID, author, nil
+	}
+	alias, err := s.staff.AuthorizeAliasReply(ctx, userID, postID, asStaffUserID)
+	if err != nil {
+		return 0, nil, domain.ErrForbidden
+	}
+	shell, err := s.comments.FindUserByID(ctx, alias.AliasUserID)
+	if err != nil || shell == nil {
+		return 0, nil, domain.ErrForbidden
+	}
+	return alias.AliasUserID, shell, nil
 }
 
 func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) (*domain.CcommentCreateResult, error) {
@@ -356,8 +384,14 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		return nil, domain.ErrNotFound
 	}
 
+	// 「以职位身份回复」：被 @ 的开发者可选用职位小号对外发言（对外只见职位，不见本人）。
+	authorID, _, err := s.resolveEffectiveAuthor(ctx, in.UserID, in.PostID, in.AsStaffUserID, author)
+	if err != nil {
+		return nil, err
+	}
+
 	cc := &domain.Ccomment{
-		UserID:         in.UserID,
+		UserID:         authorID,
 		PcommentID:     in.PcommentID,
 		Content:        content,
 		CreatedAt:      time.Now(),
@@ -373,13 +407,15 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 	}
 
 	var notifies []*domain.CcommentNotifyInfo
-	if pc.UserID != in.UserID {
-		_ = s.comments.CreateNotice(ctx, pc.UserID, in.UserID, "ccomment", content, cc.ID)
+	// 自查口径用对外身份：开发者以职位小号回复自己职位的一级评论时不算「回复了别人」
+	if pc.UserID != in.UserID && pc.UserID != authorID {
+		// 通知的发起人一律用对外身份（职位小号），避免把真实开发者暴露给收信人
+		_ = s.comments.CreateNotice(ctx, pc.UserID, authorID, "ccomment", content, cc.ID)
 		if receiver, err := s.comments.FindUserByID(ctx, pc.UserID); err == nil {
 			notifies = append(notifies, &domain.CcommentNotifyInfo{Receiver: receiver})
 		}
 	}
-	skipNotify := map[int]struct{}{in.UserID: {}, pc.UserID: {}}
+	skipNotify := map[int]struct{}{in.UserID: {}, authorID: {}, pc.UserID: {}}
 	if post.UserID != 0 {
 		skipNotify[post.UserID] = struct{}{}
 	}
@@ -389,15 +425,15 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 			return nil, err
 		}
 		skipNotify[replyCC.UserID] = struct{}{}
-		if replyCC.UserID != in.UserID && pc.UserID != replyCC.UserID {
-			_ = s.comments.CreateNotice(ctx, replyCC.UserID, in.UserID, "ccomment", content, cc.ID)
+		if replyCC.UserID != in.UserID && replyCC.UserID != authorID && pc.UserID != replyCC.UserID {
+			_ = s.comments.CreateNotice(ctx, replyCC.UserID, authorID, "ccomment", content, cc.ID)
 			if receiver, err := s.comments.FindUserByID(ctx, replyCC.UserID); err == nil {
 				notifies = append(notifies, &domain.CcommentNotifyInfo{Receiver: receiver})
 			}
 		}
 	}
-	s.notifyMentions(ctx, in.UserID, content, "ccomment", cc.ID, skipNotify)
-	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, in.UserID, content, skipNotify)
+	s.notifyMentions(ctx, authorID, content, "ccomment", cc.ID, skipNotify)
+	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
 		return nil, err
@@ -674,6 +710,7 @@ func deleteHeatDelta(commentTime time.Time, subCount int64, isPcomment bool) flo
 }
 
 // notifyMentions 解析正文 @昵称 并向匹配用户发通知（昵称须与 name 全量相等，后接空格或行末）。
+// 命中职位账号（开发人员匿名 @）时通知转发给真实开发者，小号本身不收通知。
 func (s *commentService) notifyMentions(ctx context.Context, authorID int, content, noticeType string, targetID int, skip map[int]struct{}) {
 	tokens := util.ParseMentionTokens(content)
 	if len(tokens) == 0 {
@@ -683,7 +720,28 @@ func (s *commentService) notifyMentions(ctx context.Context, authorID int, conte
 	if err != nil {
 		return
 	}
+	usersByID := make(map[int]*domain.User, len(users))
 	for _, u := range users {
+		if u != nil && u.ID != 0 {
+			usersByID[u.ID] = u
+		}
+	}
+	// 职位账号：小号按普通用户踢出通知列表，改为通知其背后的真实开发者
+	if s.staff != nil {
+		if aliases, err := s.staff.MatchedAliasesForTokens(ctx, tokens); err == nil {
+			for _, a := range aliases {
+				delete(usersByID, a.AliasUserID)
+				if a.StaffUserID != authorID {
+					if _, ok := skip[a.StaffUserID]; !ok {
+						_ = s.comments.CreateNotice(ctx, a.StaffUserID, authorID, noticeType, content, targetID)
+					}
+				}
+				skip[a.StaffUserID] = struct{}{}
+				skip[a.AliasUserID] = struct{}{}
+			}
+		}
+	}
+	for _, u := range usersByID {
 		if u == nil || u.ID == 0 {
 			continue
 		}
@@ -730,7 +788,33 @@ func (s *commentService) ResolveMentionUsers(ctx context.Context, names []string
 	if len(names) == 0 {
 		return nil, nil
 	}
-	return s.comments.FindUsersByExactNames(ctx, names)
+	users, err := s.comments.FindUsersByExactNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	// 职位账号（开发人员匿名 @）：把 @职位名 解析成职位小号（小号没建好时现场派生）。
+	// 返回的是小号实体，前端 @ 渲染成链接、点进主页都是职位身份。
+	if s.staff != nil {
+		shells, err := s.staff.ShellsForNames(ctx, names)
+		if err == nil && len(shells) > 0 {
+			seen := make(map[int]struct{}, len(users))
+			for _, u := range users {
+				if u != nil {
+					seen[u.ID] = struct{}{}
+				}
+			}
+			for _, shell := range shells {
+				if shell == nil || shell.ID == 0 {
+					continue
+				}
+				if _, ok := seen[shell.ID]; ok {
+					continue
+				}
+				users = append(users, shell)
+			}
+		}
+	}
+	return users, nil
 }
 
 func authorForComment(m map[int]*domain.User, userID int) *domain.User {
