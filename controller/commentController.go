@@ -34,6 +34,9 @@ type CommentResponse struct {
 	SubComments     []Subcomment
 	IsLiked         bool
 	IsDenied        bool
+	// IsOwn 当前查看者可删除这条评论：本人发的，或本人「以职位身份」发的（对外是小号）。
+	// 前端据此显示删除入口，避免把真实开发者身份暴露给其它用户。
+	IsOwn bool `json:"IsOwn"`
 }
 
 type Commentsmsg struct {
@@ -59,6 +62,8 @@ type Subcomment struct {
 	IsDenied        bool      `json:"isDenied"`
 	UserTargetName  string    `json:"userTargetName"`
 	ShowMenu        bool      `json:"showMenu"`
+	// IsOwn 含义同 CommentResponse.IsOwn
+	IsOwn bool `json:"isOwn"`
 }
 
 func pcommentWithMetaToResponse(item *domain.PcommentWithMeta) CommentResponse {
@@ -86,6 +91,7 @@ func pcommentWithMetaToResponse(item *domain.PcommentWithMeta) CommentResponse {
 		SubComments:     subs,
 		IsLiked:         item.IsLiked,
 		IsDenied:        item.IsDenied,
+		IsOwn:           item.IsOwn,
 	}
 }
 
@@ -111,6 +117,7 @@ func ccommentWithMetaToSubcomment(item *domain.CcommentWithMeta) Subcomment {
 		IsDenied:        item.IsDenied,
 		UserTargetName:  item.Ccomment.UserTargetName,
 		ShowMenu:        false,
+		IsOwn:           item.IsOwn,
 	}
 }
 
@@ -301,6 +308,8 @@ func PostPcomment(c *gin.Context) {
 		DenyNum:        result.Pcomment.DenyNum,
 		SubComments:    subs,
 		IsLiked:        false,
+		// 刚发出来的评论当然归本人可删（职位身份发言时也是本人，对外署名是小号）
+		IsOwn: true,
 	})
 }
 

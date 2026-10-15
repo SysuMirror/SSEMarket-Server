@@ -677,6 +677,11 @@ func (s *userService) CalculateAndSaveScores(ctx context.Context) {
 		if user.ID == 0 {
 			continue
 		}
+		// 职位小号（开发人员匿名 @）不参与经验重算：它的 score=5000（满级）与称号是
+		// staff_aliases 给的固定口径，按发帖/评论重算会在几小时内把它刷成 0。
+		if domain.IsStaffShellEmail(user.Email) {
+			continue
+		}
 		postIDs, err := s.users.ListPostIDsByUserID(ctx, user.ID)
 		if err != nil {
 			continue

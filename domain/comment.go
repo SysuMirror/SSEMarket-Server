@@ -31,6 +31,9 @@ type CcommentWithMeta struct {
 	Author   *User
 	IsLiked  bool
 	IsDenied bool
+	// IsOwn 当前查看者能否管理（删除）这条评论：本人发的，或本人「以职位身份」发的
+	// （对外作者是小号，前端按 phone 判不出本人，故由服务端判定，见 service/staff_service.go）。
+	IsOwn bool
 }
 
 // PcommentWithMeta 带作者、子评论与互动状态的一级评论。
@@ -40,6 +43,8 @@ type PcommentWithMeta struct {
 	Subcomments []*CcommentWithMeta
 	IsLiked     bool
 	IsDenied    bool
+	// IsOwn 含义同 CcommentWithMeta.IsOwn。
+	IsOwn bool
 }
 
 // PcommentCreateInput 发表一级评论入参。

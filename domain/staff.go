@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -37,6 +38,13 @@ const (
 // StaffAliasShellEmail 职位小号的固定邮箱（users.email 唯一索引兜底，重复派生会被挡下）。
 func StaffAliasShellEmail(aliasID int) string {
 	return fmt.Sprintf("staff-%d@%s", aliasID, StaffAliasEmailDomain)
+}
+
+// IsStaffShellEmail 判断邮箱是否属于职位小号（staff-<aliasID>@staff.internal）。
+// 职位小号的等级/称号是「满级 + 职称」的固定口径，不参与按发帖/评论重算的经验刷新，
+// 否则每小时重算会把 5000 刷成 0（见 service.CalculateAndSaveScores）。
+func IsStaffShellEmail(email string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(email)), "@"+StaffAliasEmailDomain)
 }
 
 // ValidateStaffAliasRow 校验管理员手工插入的职位行（启动同步与懒同步共用一套口径）。

@@ -198,3 +198,26 @@ func (s *staffService) AuthorizeAliasReply(ctx context.Context, userID, postID, 
 	}
 	return target, nil
 }
+
+// AliasShellUserIDsForUser 该真实账号名下的职位小号集合（staff_user_id 索引一次查询）。
+// 普通用户没有职位行 → 返回空 map，评论列表的判定与改动前完全一致。
+func (s *staffService) AliasShellUserIDsForUser(ctx context.Context, userID int) (map[int]struct{}, error) {
+	if userID <= 0 {
+		return nil, nil
+	}
+	aliases, err := s.staff.FindAliasesByStaffUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(aliases) == 0 {
+		return nil, nil
+	}
+	s.ensureShells(ctx, aliases)
+	out := make(map[int]struct{}, len(aliases))
+	for _, a := range aliases {
+		if a != nil && a.AliasUserID > 0 {
+			out[a.AliasUserID] = struct{}{}
+		}
+	}
+	return out, nil
+}
