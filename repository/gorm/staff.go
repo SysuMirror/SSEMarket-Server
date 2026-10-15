@@ -142,16 +142,34 @@ func staffShellPassword(aliasID int) string {
 	return string(hash)
 }
 
+// func (r *staffRepository) CreateShellUser(ctx context.Context, aliasID int, alias, title string) (int, error) {
+// 	u := model.User{
+// 		Name:     alias,
+// 		Email:    domain.StaffAliasShellEmail(aliasID),
+// 		Password: staffShellPassword(aliasID),
+// 		// 等级自动满级（前端 Lv8 阈值 score>=5000），称号即职称
+// 		Score:       domain.StaffAliasScore,
+// 		CustomTitle: title,
+// 		// 职位小号不参与邮件通知；没有手机号，无短信/找回路径
+// 		ISEmailNotificationBlocked: true,
+// 	}
+// 	if err := r.session(ctx).Create(&u).Error; err != nil {
+// 		return 0, err
+// 	}
+// 	return u.UserID, nil
+// }
+
 func (r *staffRepository) CreateShellUser(ctx context.Context, aliasID int, alias, title string) (int, error) {
+	// 和普通注册创建用户保持完全一致的初始化
 	u := model.User{
-		Name:     alias,
-		Email:    domain.StaffAliasShellEmail(aliasID),
-		Password: staffShellPassword(aliasID),
-		// 等级自动满级（前端 Lv8 阈值 score>=5000），称号即职称
-		Score:       domain.StaffAliasScore,
-		CustomTitle: title,
-		// 职位小号不参与邮件通知；没有手机号，无短信/找回路径
+		Name:                       alias,
+		Email:                      domain.StaffAliasShellEmail(aliasID),
+		Password:                   staffShellPassword(aliasID),
+		Score:                      domain.StaffAliasScore,
+		CustomTitle:                title,
 		ISEmailNotificationBlocked: true,
+		// ========== 重点：照搬普通注册用户这里的 Banend 赋值 ==========
+		Banend: time.Now(),
 	}
 	if err := r.session(ctx).Create(&u).Error; err != nil {
 		return 0, err
