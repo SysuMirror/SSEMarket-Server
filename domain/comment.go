@@ -43,10 +43,13 @@ type PcommentWithMeta struct {
 }
 
 // PcommentCreateInput 发表一级评论入参。
+// AsStaffUserID>0 表示「以职位身份回复」：必须是本人在该线程被 @ 到的职位小号，
+// 服务端校验通过后评论对外归属职位小号（见 service/staff_service.go）。
 type PcommentCreateInput struct {
-	UserID  int
-	PostID  int
-	Content string
+	UserID        int
+	PostID        int
+	Content       string
+	AsStaffUserID int
 }
 
 // PcommentCreateResult 发表一级评论结果。
@@ -59,6 +62,7 @@ type PcommentCreateResult struct {
 }
 
 // CcommentCreateInput 发表二级评论入参。
+// AsStaffUserID 含义同 PcommentCreateInput（以职位身份回复楼中楼）。
 type CcommentCreateInput struct {
 	UserID          int
 	PostID          int
@@ -66,6 +70,7 @@ type CcommentCreateInput struct {
 	Content         string
 	UserTargetName  string
 	ReplyCcommentID int
+	AsStaffUserID   int
 }
 
 // CcommentNotifyInfo 二级评论通知（供 controller 发邮件）。

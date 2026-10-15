@@ -204,6 +204,8 @@ type PcommentMsg struct {
 	UserTelephone string
 	PostID        int
 	Content       string
+	// AsStaffUserID>0 表示以职位小号身份回复（开发人员匿名 @，见 service/staff_service.go）
+	AsStaffUserID int `json:"asStaffUserID"`
 }
 
 func PostPcomment(c *gin.Context) {
@@ -233,9 +235,10 @@ func PostPcomment(c *gin.Context) {
 	}
 
 	result, err := service.Comments.CreatePcomment(c.Request.Context(), domain.PcommentCreateInput{
-		UserID:  user.ID,
-		PostID:  msg.PostID,
-		Content: msg.Content,
+		UserID:        user.ID,
+		PostID:        msg.PostID,
+		Content:       msg.Content,
+		AsStaffUserID: msg.AsStaffUserID,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -256,12 +259,15 @@ func PostPcomment(c *gin.Context) {
 		emailNotifyIfEnabled(u, 1, msg.Content)
 	}
 
-	_ = service.Lotteries.ParticipateByComment(c.Request.Context(), domain.LotteryParticipateInput{
-		UserID:    user.ID,
-		PostID:    msg.PostID,
-		CommentID: result.Pcomment.ID,
-		Content:   msg.Content,
-	})
+	// 抽奖参与挂在真实账号下；以职位小号身份发言时不参与（对外保持匿名、小号不抽奖）
+	if result.Pcomment.UserID == user.ID {
+		_ = service.Lotteries.ParticipateByComment(c.Request.Context(), domain.LotteryParticipateInput{
+			UserID:    user.ID,
+			PostID:    msg.PostID,
+			CommentID: result.Pcomment.ID,
+			Content:   msg.Content,
+		})
+	}
 
 	// 入延迟归档队列：评论创建 1h 后触发该帖重新归档（worker 会读完整帖子+所有评论）
 	// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
@@ -276,11 +282,19 @@ func PostPcomment(c *gin.Context) {
 	for _, sc := range result.Subcomments {
 		subs = append(subs, ccommentWithMetaToSubcomment(sc))
 	}
+	// 作者口径取服务层解析的对外身份（以职位小号回复时这里是小号，不回传真实开发者）
+	responseAuthor := result.Author
+	if responseAuthor == nil {
+		responseAuthor = user
+	}
 	c.JSON(http.StatusOK, CommentResponse{
 		PcommentID:     result.Pcomment.ID,
-		Author:         user.Name,
-		AuthorAvatar:   user.AvatarURL,
-		AuthorIdentity: user.Identity,
+		AuthorID:       result.Pcomment.UserID,
+		Author:         responseAuthor.Name,
+		AuthorAvatar:   responseAuthor.AvatarURL,
+		AuthorIdentity: responseAuthor.Identity,
+		AuthorScore:    responseAuthor.Score,
+		AuthorTitle:    responseAuthor.CustomTitle,
 		CommentTime:    result.Pcomment.CreatedAt,
 		Content:        result.Pcomment.Content,
 		LikeNum:        result.Pcomment.LikeNum,
@@ -297,6 +311,8 @@ type CcommentMsg struct {
 	Content        string `json:"content"`
 	UserTargetName string `json:"userTargetName"`
 	CcommentID     int    `json:"ccommentID"`
+	// AsStaffUserID>0 表示以职位小号身份回复（开发人员匿名 @，见 service/staff_service.go）
+	AsStaffUserID int `json:"asStaffUserID"`
 }
 
 func PostCcomment(c *gin.Context) {
@@ -337,6 +353,7 @@ func PostCcomment(c *gin.Context) {
 		Content:         content,
 		UserTargetName:  msg.UserTargetName,
 		ReplyCcommentID: msg.CcommentID,
+		AsStaffUserID:   msg.AsStaffUserID,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
