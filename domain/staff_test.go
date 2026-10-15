@@ -11,6 +11,27 @@ func TestStaffAliasShellEmail(t *testing.T) {
 	}
 }
 
+func TestIsStaffShellEmail(t *testing.T) {
+	cases := []struct {
+		name  string
+		email string
+		want  bool
+	}{
+		{"职位小号邮箱", "staff-7@staff.internal", true},
+		{"大小写混写", "Staff-7@STAFF.Internal", true},
+		{"前后空格", " staff-7@staff.internal ", true},
+		{"真人邮箱", "dev@example.com", false},
+		{"昵称里带 staff 的真人邮箱", "stafflover@example.com", false},
+		{"同名域但不是小号前缀", "someone@staff.internal.example.com", false},
+		{"空邮箱", "", false},
+	}
+	for _, tc := range cases {
+		if got := IsStaffShellEmail(tc.email); got != tc.want {
+			t.Fatalf("%s: IsStaffShellEmail(%q) = %v, want %v", tc.name, tc.email, got, tc.want)
+		}
+	}
+}
+
 func TestValidateStaffAliasRow(t *testing.T) {
 	cases := []struct {
 		name    string

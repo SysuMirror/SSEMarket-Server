@@ -112,6 +112,10 @@ type StaffService interface {
 	MatchedAliasesForTokens(ctx context.Context, tokens []string) ([]*domain.StaffAlias, error)
 	// AuthorizeAliasReply 校验「以职位身份回复」：确为本人职位 + 该线程确实 @ 过这个职位。
 	AuthorizeAliasReply(ctx context.Context, userID, postID, asUserID int) (*domain.StaffAlias, error)
+	// AliasShellUserIDsForUser 该真实账号名下的职位小号 userID 集合（普通用户恒为空）。
+	// 评论列表用它判定「这条对外署名是小号的评论，其实是当前用户发的」，
+	// 从而让开发人员能像普通用户一样删除自己的职位身份回复。
+	AliasShellUserIDsForUser(ctx context.Context, userID int) (map[int]struct{}, error)
 }
 
 // CommentService 评论领域服务。

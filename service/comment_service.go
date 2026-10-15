@@ -130,9 +130,17 @@ func (s *commentService) buildCommentResponse(ctx context.Context, tree *dto.Com
 		return nil, err
 	}
 
+	// 「以职位身份回复」的评论对外署名是职位小号，前端按 phone 判不出本人；
+	// 由服务端判定哪些评论属于当前用户（本人发的，或本人名下职位小号发的），
+	// 这样开发人员能像普通用户一样删除自己的职位身份回复。
+	ownShells, err := s.staff.AliasShellUserIDsForUser(ctx, viewerUserID)
+	if err != nil {
+		ownShells = nil // 判定失败不阻断评论列表：退化成「只认本人」
+	}
+
 	out := make([]*domain.PcommentWithMeta, 0, len(tree.Pcomments))
 	for _, pc := range tree.Pcomments {
-		subs, err := s.buildSubcommentsFromCache(tree.Subs[pc.ID], userMap, ccLikeMap, ccDenyMap)
+		subs, err := s.buildSubcommentsFromCache(tree.Subs[pc.ID], userMap, ccLikeMap, ccDenyMap, viewerUserID, ownShells)
 		if err != nil {
 			return nil, err
 		}
@@ -142,12 +150,25 @@ func (s *commentService) buildCommentResponse(ctx context.Context, tree *dto.Com
 			Subcomments: subs,
 			IsLiked:     likeMap[pc.ID],
 			IsDenied:    denyMap[pc.ID],
+			IsOwn:       isOwnComment(pc.UserID, viewerUserID, ownShells),
 		})
 	}
 	return out, nil
 }
 
-func (s *commentService) buildSubcommentsFromCache(ccomments []*domain.Ccomment, userMap map[int]*domain.User, ccLikeMap, ccDenyMap map[int]bool) ([]*domain.CcommentWithMeta, error) {
+// isOwnComment 这条评论对外是否属于当前查看者：本人，或本人「以职位身份」发言时的小号。
+func isOwnComment(authorID, viewerUserID int, ownShells map[int]struct{}) bool {
+	if authorID == viewerUserID {
+		return true
+	}
+	if len(ownShells) == 0 {
+		return false
+	}
+	_, ok := ownShells[authorID]
+	return ok
+}
+
+func (s *commentService) buildSubcommentsFromCache(ccomments []*domain.Ccomment, userMap map[int]*domain.User, ccLikeMap, ccDenyMap map[int]bool, viewerUserID int, ownShells map[int]struct{}) ([]*domain.CcommentWithMeta, error) {
 	if len(ccomments) == 0 {
 		return []*domain.CcommentWithMeta{}, nil
 	}
@@ -158,6 +179,7 @@ func (s *commentService) buildSubcommentsFromCache(ccomments []*domain.Ccomment,
 			Author:   authorForComment(userMap, cc.UserID),
 			IsLiked:  ccLikeMap[cc.ID],
 			IsDenied: ccDenyMap[cc.ID],
+			IsOwn:    isOwnComment(cc.UserID, viewerUserID, ownShells),
 		})
 	}
 	return out, nil
@@ -212,6 +234,9 @@ func (s *commentService) buildSubcomments(ctx context.Context, pcommentID, viewe
 			Author:   authorForComment(userMap, cc.UserID),
 			IsLiked:  ccLikeMap[cc.ID],
 			IsDenied: ccDenyMap[cc.ID],
+			// 创建路径里 viewerUserID 就是本次发言的对外身份（本人或职位小号），
+			// 这些子评论都是它发的
+			IsOwn: cc.UserID == viewerUserID,
 		})
 	}
 	return out, nil
