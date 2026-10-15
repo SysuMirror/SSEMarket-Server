@@ -204,7 +204,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/resume/detail", controller.ResumeDetail)
 	auth.POST("/api/auth/resume/download", controller.ResumeDownload)
 	auth.POST("/api/auth/resume/preview", controller.ResumePreview)
-	auth.GET("/api/auth/resume/preview/stream/:resumeID", controller.ResumePreviewStream)
+	// 简历文件流挂 noauth（OptionalAuth）：登录 Bearer 或 30min 签名下载链接在控制器内校验
+	noauth.GET("/api/auth/resume/preview/stream/:resumeID", controller.ResumePreviewStream)
 	auth.POST("/api/auth/resume/update", controller.ResumeUpdate)
 	auth.POST("/api/auth/resume/delete", controller.ResumeDelete)
 

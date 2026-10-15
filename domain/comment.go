@@ -71,6 +71,7 @@ type CcommentCreateInput struct {
 	UserTargetName  string
 	ReplyCcommentID int
 	AsStaffUserID   int
+	TargetUserID    int
 }
 
 // CcommentNotifyInfo 二级评论通知（供 controller 发邮件）。

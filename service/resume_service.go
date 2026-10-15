@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -11,14 +13,21 @@ import (
 
 const (
 	resumeMaxPerUser = 5
+	// 官方发帖账号与参数：新简历上架后以该账号在「实习就业」分区自动发帖公告。
+	officialAccountEmail  = "ssemarket@163.com"
+	resumePostPartition   = "实习就业"
+	resumePostTitlePrefix = "【新简历】"
+	resumePostURLBase     = "https://ssemarket.cn/new/resume/"
 )
 
 type resumeService struct {
 	resumes repository.ResumeRepository
+	users   repository.UserRepository
+	posts   PostService
 }
 
-func NewResumeService(resumes repository.ResumeRepository) ResumeService {
-	return &resumeService{resumes: resumes}
+func NewResumeService(resumes repository.ResumeRepository, users repository.UserRepository, posts PostService) ResumeService {
+	return &resumeService{resumes: resumes, users: users, posts: posts}
 }
 
 func (s *resumeService) CanUpload(ctx context.Context, userID int) error {
@@ -53,7 +62,43 @@ func (s *resumeService) Create(ctx context.Context, in domain.ResumeCreateInput)
 	if err := s.resumes.Create(ctx, r); err != nil {
 		return 0, err
 	}
+	go s.announceNewResume(r)
 	return r.ID, nil
+}
+
+// announceNewResume 以官方账号发帖公告新简历；best-effort，任何失败只记日志不影响上传。
+func (s *resumeService) announceNewResume(resume *domain.Resume) {
+	defer func() { _ = recover() }()
+	if resume == nil || resume.ID == 0 {
+		return
+	}
+	ctx := context.Background()
+	official, err := s.users.FindByEmail(ctx, officialAccountEmail)
+	if err != nil || official == nil || official.ID == 0 {
+		fmt.Printf("[ResumeAnnounce] official account %s not found: %v\n", officialAccountEmail, err)
+		return
+	}
+
+	title := resume.Title
+	if utf8.RuneCountInString(title) > 60 {
+		title = string([]rune(title)[:60]) + "…"
+	}
+	var b strings.Builder
+	b.WriteString("有同学发布了一份新简历，欢迎大家围观交流。\n\n")
+	b.WriteString("简历标题：" + resume.Title + "\n")
+	if desc := strings.TrimSpace(resume.Description); desc != "" {
+		b.WriteString("\n" + desc + "\n")
+	}
+	b.WriteString("\n查看简历：" + resumePostURLBase + strconv.Itoa(resume.ID))
+
+	if _, err := s.posts.Create(ctx, domain.PostCreateInput{
+		UserID:    official.ID,
+		Title:     resumePostTitlePrefix + title,
+		Content:   b.String(),
+		Partition: resumePostPartition,
+	}); err != nil {
+		fmt.Printf("[ResumeAnnounce] create post for resume %d failed: %v\n", resume.ID, err)
+	}
 }
 
 func (s *resumeService) List(ctx context.Context, filter domain.ResumeFilter) ([]*domain.Resume, error) {

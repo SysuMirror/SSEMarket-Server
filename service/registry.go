@@ -59,7 +59,7 @@ func InitServices(db *gorm.DB) {
 	Chats = NewChatService(chatRepo)
 	Ratings = NewRatingService(ratingRepo)
 	Shops = NewShopService(shopRepo, userRepo)
-	Resumes = NewResumeService(resumeRepo)
+	Resumes = NewResumeService(resumeRepo, userRepo, Posts)
 	Notices = NewNoticeService(noticeRepo)
 	Admins = NewAdminService(adminRepo)
 	WorkbenchApps = NewWorkbenchAppService(gormrepo.NewWorkbenchAppRepository(db))

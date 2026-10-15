@@ -313,6 +313,7 @@ type CcommentMsg struct {
 	CcommentID     int    `json:"ccommentID"`
 	// AsStaffUserID>0 表示以职位小号身份回复（开发人员匿名 @，见 service/staff_service.go）
 	AsStaffUserID int `json:"asStaffUserID"`
+	TargetUserID  int `json:"targetUserID"`
 }
 
 func PostCcomment(c *gin.Context) {
@@ -354,6 +355,7 @@ func PostCcomment(c *gin.Context) {
 		UserTargetName:  msg.UserTargetName,
 		ReplyCcommentID: msg.CcommentID,
 		AsStaffUserID:   msg.AsStaffUserID,
+		TargetUserID:    msg.TargetUserID,
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {

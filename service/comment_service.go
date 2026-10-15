@@ -316,7 +316,7 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 	if post.UserID != in.UserID {
 		skipNotify[post.UserID] = struct{}{}
 	}
-	s.notifyMentions(ctx, authorID, content, "pcomment", pc.ID, skipNotify)
+	s.notifyMentions(ctx, authorID, content, "pcomment", pc.ID, skipNotify, "", 0)
 	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
@@ -432,7 +432,17 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 			}
 		}
 	}
-	s.notifyMentions(ctx, authorID, content, "ccomment", cc.ID, skipNotify)
+	// 回复场景：前端携带被回复人 uid，用于正文 @昵称 同名时精确通知被回复人
+	if in.TargetUserID != 0 {
+		skipNotify[in.TargetUserID] = struct{}{}
+	}
+	preciseName, preciseUserID := "", in.TargetUserID
+	if preciseUserID > 0 {
+		if tu, err := s.comments.FindUserByID(ctx, preciseUserID); err == nil && tu != nil {
+			preciseName = tu.Name
+		}
+	}
+	s.notifyMentions(ctx, authorID, content, "ccomment", cc.ID, skipNotify, preciseName, preciseUserID)
 	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
 	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
@@ -711,7 +721,8 @@ func deleteHeatDelta(commentTime time.Time, subCount int64, isPcomment bool) flo
 
 // notifyMentions 解析正文 @昵称 并向匹配用户发通知（昵称须与 name 全量相等，后接空格或行末）。
 // 命中职位账号（开发人员匿名 @）时通知转发给真实开发者，小号本身不收通知。
-func (s *commentService) notifyMentions(ctx context.Context, authorID int, content, noticeType string, targetID int, skip map[int]struct{}) {
+// preciseName/preciseUserID 用于回复场景：当正文 @ 的就是被回复人昵称且重名时，只通知被回复人，不广播给其他同名者。
+func (s *commentService) notifyMentions(ctx context.Context, authorID int, content, noticeType string, targetID int, skip map[int]struct{}, preciseName string, preciseUserID int) {
 	tokens := util.ParseMentionTokens(content)
 	if len(tokens) == 0 {
 		return
@@ -743,6 +754,10 @@ func (s *commentService) notifyMentions(ctx context.Context, authorID int, conte
 	}
 	for _, u := range usersByID {
 		if u == nil || u.ID == 0 {
+			continue
+		}
+		// 回复场景：该 @ 恰为被回复人昵称且用户不是被回复人本人 → 跳过，避免误发给同名者
+		if preciseUserID > 0 && u.Name == preciseName && u.ID != preciseUserID {
 			continue
 		}
 		if u.ID == authorID {

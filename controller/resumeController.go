@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -12,6 +15,8 @@ import (
 	"loginTest/response"
 	"loginTest/service"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,13 +24,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
 )
 
 const (
 	resumeMaxUploadSize = 10 << 20 // 10 MB
 	resumeMaxPerUser    = 5
 	resumeCOSPrefix     = "resume/"
-	resumeURLExpire     = 30 * time.Minute
+	// resumeLocalDir 本地存储根目录（容器内）；COS 已被 451 拦截，简历文件改存本地盘。
+	resumeLocalDir = "public/resume"
+	// resumeDownloadURLTTL 签名下载链接有效期，对齐原 COS 预签名链接的 30 分钟模型。
+	resumeDownloadURLTTL = 30 * time.Minute
 )
 
 var resumeAllowedExt = map[string]bool{
@@ -230,33 +239,109 @@ func newResumeCosKey(ext string) (string, error) {
 	return fmt.Sprintf("%s%s/%d%s", resumeCOSPrefix, hex.EncodeToString(b), time.Now().UnixNano(), ext), nil
 }
 
+// resumeLocalPath 把 cosKey（resume/<hash>/<file>）映射为本地盘路径，带前缀与越界校验。
+func resumeLocalPath(cosKey string) (string, bool) {
+	if cosKey == "" {
+		return "", false
+	}
+	rel := strings.TrimPrefix(cosKey, resumeCOSPrefix)
+	if rel == cosKey {
+		return "", false
+	}
+	clean := filepath.Clean(rel)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+		return "", false
+	}
+	return filepath.Join(resumeLocalDir, clean), true
+}
+
+func resumeAttachmentHeader(filename string) string {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == "" {
+		ext = ".bin"
+	}
+	return fmt.Sprintf(`attachment; filename="resume%s"; filename*=UTF-8''%s`, ext, url.PathEscape(filename))
+}
+
+// resumeStreamFile 流式返回简历文件：优先本地盘，本地缺失时回退 COS。
+func resumeStreamFile(c *gin.Context, resume *domain.Resume, ext, contentType, attachmentName string) {
+	var body io.ReadCloser
+	if path, ok := resumeLocalPath(resume.CosKey); ok {
+		if f, err := os.Open(path); err == nil {
+			if st, serr := f.Stat(); serr == nil && st.Mode().IsRegular() {
+				body = f
+			} else {
+				_ = f.Close()
+			}
+		}
+	}
+	if body == nil {
+		b, ct, err := api.GetObject(resume.CosKey)
+		if err != nil {
+			response.Response(c, http.StatusInternalServerError, 500, nil, "读取文件失败")
+			return
+		}
+		body = b
+		if ct != "" {
+			contentType = resumeContentType(ext, ct)
+		}
+	}
+	defer body.Close()
+
+	c.Header("Content-Type", contentType)
+	if attachmentName != "" {
+		c.Header("Content-Disposition", resumeAttachmentHeader(attachmentName))
+	} else {
+		c.Header("Content-Disposition", "inline")
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "SAMEORIGIN")
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, body)
+}
+
+// resumeSignedDownloadURL 生成短时效签名下载链接（浏览器裸导航可下载，等价原 COS 预签名 URL）。
+func resumeSignedDownloadURL(resumeID int) string {
+	exp := time.Now().Add(resumeDownloadURLTTL).Unix()
+	return fmt.Sprintf("/api/auth/resume/preview/stream/%d?dl=1&xexp=%d&xsig=%s", resumeID, exp, resumeDownloadSig(resumeID, exp))
+}
+
+func resumeDownloadSig(resumeID int, exp int64) string {
+	mac := hmac.New(sha256.New, []byte(viper.GetString("crypto.jwtKey")))
+	fmt.Fprintf(mac, "resume-dl:%d:%d", resumeID, exp)
+	return hex.EncodeToString(mac.Sum(nil))[:32]
+}
+
+// resumeSigValid 校验下载签名；无效一律按未登录处理（fail-closed）。
+func resumeSigValid(c *gin.Context, resumeID int) bool {
+	expStr := c.Query("xexp")
+	sig := c.Query("xsig")
+	if expStr == "" || sig == "" {
+		return false
+	}
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil || time.Now().Unix() > exp {
+		return false
+	}
+	expected := resumeDownloadSig(resumeID, exp)
+	return len(sig) == len(expected) && subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) == 1
+}
+
 func resumeFilePayloadDomain(resume *domain.Resume, uploader *domain.User, inline bool) (gin.H, error) {
 	var fileName string
-	var attachmentName string
+	fileURL := fmt.Sprintf("/api/auth/resume/preview/stream/%d", resume.ID)
 	if inline {
 		fileName = anonymousDisplayFileName(resume.FileName)
-		attachmentName = ""
 	} else {
 		fileName = downloadDisplayFileNameDomain(resume, uploader)
-		attachmentName = fileName
-	}
-	fileURL, err := resumeAccessURL(resume.CosKey, inline, attachmentName)
-	if err != nil {
-		return nil, err
+		fileURL = resumeSignedDownloadURL(resume.ID)
 	}
 	return gin.H{
 		"fileURL":    fileURL,
 		"fileName":   fileName,
 		"canPreview": resumeCanPreview(filepath.Ext(resume.FileName)),
 	}, nil
-}
-
-func resumeAccessURL(cosKey string, inline bool, attachmentFilename string) (string, error) {
-	url, err := api.GetPresignedURL(cosKey, resumeURLExpire, inline, attachmentFilename)
-	if err != nil {
-		return api.GetUrl(cosKey), nil
-	}
-	return url, nil
 }
 
 func ResumeUpload(c *gin.Context) {
@@ -326,11 +411,28 @@ func ResumeUpload(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "生成存储路径失败")
 		return
 	}
+	localPath, ok := resumeLocalPath(cosKey)
+	if !ok {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "生成存储路径失败")
+		return
+	}
 	if _, err = f.Seek(0, 0); err != nil {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "无法读取文件")
 		return
 	}
-	if err = api.UploadFile(cosKey, f); err != nil {
+	if err = os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "文件上传失败")
+		return
+	}
+	dst, err := os.Create(localPath)
+	if err != nil {
+		response.Response(c, http.StatusInternalServerError, 500, nil, "文件上传失败")
+		return
+	}
+	_, werr := io.Copy(dst, f)
+	cerr := dst.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(localPath)
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件上传失败")
 		return
 	}
@@ -346,7 +448,7 @@ func ResumeUpload(c *gin.Context) {
 		IsAnonymous: isAnonymous,
 	})
 	if err != nil {
-		_ = api.FileDelete(cosKey)
+		_ = os.Remove(localPath)
 		apperr.WriteMsg(c, err, "保存失败")
 		return
 	}
@@ -490,15 +592,16 @@ func ResumePreview(c *gin.Context) {
 	response.Success(c, payload, "获取预览链接成功")
 }
 
-// ResumePreviewStream 经服务端代理 PDF 流，响应 Content-Disposition: inline，供前端 blob 内嵌预览。
+// ResumePreviewStream 经服务端代理简历文件流；inline 供前端内嵌预览，?dl=1+签名 以附件下载（doc/docx 仅支持下载）。
 func ResumePreviewStream(c *gin.Context) {
-	if _, ok := requireLoginUser(c); !ok {
-		return
-	}
-
 	resumeID, err := strconv.Atoi(c.Param("resumeID"))
 	if err != nil || resumeID <= 0 {
 		response.Response(c, http.StatusBadRequest, 400, nil, "参数错误")
+		return
+	}
+
+	if GetTokenUserID(c) == 0 && !resumeSigValid(c, resumeID) {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")
 		return
 	}
 
@@ -513,25 +616,18 @@ func ResumePreviewStream(c *gin.Context) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(resume.FileName))
-	if !resumeCanPreview(ext) {
+	asDownload := c.Query("dl") == "1"
+	if !asDownload && !resumeCanPreview(ext) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "当前文件类型不支持在线预览")
 		return
 	}
 
-	body, contentType, err := api.GetObject(resume.CosKey)
-	if err != nil {
-		response.Response(c, http.StatusInternalServerError, 500, nil, "读取文件失败")
-		return
+	attachmentName := ""
+	if asDownload {
+		uploaderMap, _ := service.Resumes.UploadersByIDs(c.Request.Context(), []int{resume.UserID})
+		attachmentName = downloadDisplayFileNameDomain(resume, uploaderMap[resume.UserID])
 	}
-	defer body.Close()
-
-	c.Header("Content-Type", resumeContentType(ext, contentType))
-	c.Header("Content-Disposition", "inline")
-	c.Header("Cache-Control", "private, no-store")
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("X-Frame-Options", "SAMEORIGIN")
-	c.Status(http.StatusOK)
-	_, _ = io.Copy(c.Writer, body)
+	resumeStreamFile(c, resume, ext, resumeContentType(ext, ""), attachmentName)
 }
 
 func ResumeDownload(c *gin.Context) {
@@ -639,5 +735,8 @@ func ResumeDelete(c *gin.Context) {
 	}
 
 	_ = api.FileDelete(cosKey)
+	if p, ok := resumeLocalPath(cosKey); ok {
+		_ = os.Remove(p)
+	}
 	response.Success(c, nil, "简历已删除")
 }
