@@ -45,6 +45,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.GET("/api/auth/token/list", controller.ListAPITokens)
 	auth.POST("/api/auth/token/revoke", controller.RevokeAPIToken)
 	auth.POST("/api/auth/token/delete", controller.DeleteAPIToken)
+	// PAT 校验（供 MCP 网关等服务端以 PAT 换身份；无需登录态）
+	noauth.POST("/api/auth/token/verify", controller.VerifyAPIToken)
 
 	// 打分专区（独立数据与接口）
 	auth.POST("/api/auth/rating/category/list", controller.RatingCategoryList)

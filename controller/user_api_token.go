@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"loginTest/apperr"
 	"loginTest/domain"
@@ -13,6 +14,29 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+
+// VerifyAPIToken POST /api/auth/token/verify
+// PAT 校验：MCP 网关等服务端以 Bearer PAT 换取 (userID, scopes)。
+// 无需登录态；凭据错误一律 401，不区分"不存在/已吊销/停用"。
+func VerifyAPIToken(c *gin.Context) {
+	auth := c.GetHeader("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+	if token == "" {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "missing bearer token")
+		return
+	}
+	res, err := service.Users.VerifyAPIToken(c.Request.Context(), token)
+	if err != nil || res == nil || !res.IsActive {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "invalid or revoked token")
+		return
+	}
+	response.Success(c, gin.H{
+		"user_id":   res.UserID,
+		"scopes":    res.Scopes,
+		"is_active": res.IsActive,
+	}, "ok")
+}
 
 // ListAPITokenScopes GET /api/auth/token/scopes
 // 返回当前支持的所有 scope 列表，供前端勾选。
