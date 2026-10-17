@@ -882,7 +882,6 @@ var apiTokenScopes = []domain.UserAPITokenScope{
 	{Name: "agent:chat", Description: "小秋通用对话：凭 token 即可直接调用智能体对话工具"},
 	{Name: "forum:read", Description: "论坛检索：搜索帖子、查看评论"},
 	{Name: "forum:write", Description: "论坛发帖：以你的身份发布新帖"},
-	{Name: "web:search", Description: "联网搜索：调用小秋的站外搜索能力（当日配额制）"},
 }
 
 const (
