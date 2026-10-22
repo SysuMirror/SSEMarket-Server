@@ -48,15 +48,28 @@ func (s *presenceService) Heartbeat(ctx context.Context, userID int, scene strin
 	now := time.Now()
 	cutoff := now.Add(-domain.PresenceWindow).UnixMilli()
 	member := strconv.Itoa(userID)
+	newSceneKey := OnlineKeyForScene(scene, targetID)
+	currentKey := util.GetPresenceCurrentKey(userID)
 
-	pipe := core.MyRedis.Pipeline()
+	// 上一次心跳所在的场景。切换内容时必须先把它从旧内容的 ZSET 里移除，
+	// 否则用户在 150 秒窗口内会被到过的每个帖子/小说同时计数（表现为所有页面人数一样）。
+	prevSceneKey, _ := core.MyRedis.Get(opCtx, currentKey).Result()
+
+	pipe := core.MyRedis.TxPipeline()
+	if prevSceneKey != "" && prevSceneKey != newSceneKey {
+		pipe.ZRem(opCtx, prevSceneKey, member)
+	}
 	addPresenceMember(pipe, opCtx, util.PrefixPresenceOnline, member, now, cutoff)
 	onlineCmd := pipe.ZCard(opCtx, util.PrefixPresenceOnline)
 
 	var viewersCmd *redis.IntCmd
-	if key := OnlineKeyForScene(scene, targetID); key != "" {
-		addPresenceMember(pipe, opCtx, key, member, now, cutoff)
-		viewersCmd = pipe.ZCard(opCtx, key)
+	if newSceneKey != "" {
+		addPresenceMember(pipe, opCtx, newSceneKey, member, now, cutoff)
+		viewersCmd = pipe.ZCard(opCtx, newSceneKey)
+		pipe.Set(opCtx, currentKey, newSceneKey, domain.PresenceKeyTTL)
+	} else {
+		// 回到首页/搜索等无具体内容的页面：清掉「当前场景」标记。
+		pipe.Del(opCtx, currentKey)
 	}
 
 	if _, err := pipe.Exec(opCtx); err != nil {
