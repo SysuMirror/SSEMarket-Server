@@ -18,7 +18,9 @@ type User struct {
 	NovelPoints int
 	Coins       int
 	// CustomTitle 满级(Lv8, score>=5000)用户自定义称号;空=未自定义,对外显示用户名
-	CustomTitle                string
+	CustomTitle string
+	// ReceivedLikeNum 收到的赞总数（用户卡片/排行榜展示用）。
+	ReceivedLikeNum            int
 	BanEnd                     time.Time
 	PunishNum                  int
 	HideProfilePosts           bool

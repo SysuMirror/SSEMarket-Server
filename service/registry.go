@@ -27,6 +27,8 @@ var (
 	NovelPoints   NovelPointsService
 	Coins         CoinService
 	Staffs        StaffService
+	Presence      PresenceService
+	UserSearch    UserSearchService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -75,4 +77,6 @@ func InitServices(db *gorm.DB) {
 	ledgerRepo := gormrepo.NewLedgerRepository(db)
 	NovelPoints = NewNovelPointsService(ledgerRepo, novelRepo)
 	Novels = NewNovelService(novelRepo, NovelPoints, Coins)
+	Presence = NewPresenceService()
+	UserSearch = NewUserSearchService(userRepo)
 }

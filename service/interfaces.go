@@ -329,3 +329,19 @@ type LotteryService interface {
 	AutoDrawDue(ctx context.Context)
 	IsLotteryPost(ctx context.Context, postID int) (bool, error)
 }
+
+// PresenceService 在线状态：站点与按内容聚合的实时在线人数。
+// 实现基于 Redis ZSET 滑动窗口，不存在于数据库。
+type PresenceService interface {
+	// Heartbeat 记录一次用户心跳（站点 + 可选场景/内容），返回最新人数。
+	Heartbeat(ctx context.Context, userID int, scene string, targetID int) domain.PresenceSnapshot
+	// Snapshot 只读取当前人数，不写入活跃记录。
+	Snapshot(ctx context.Context, scene string, targetID int) domain.PresenceSnapshot
+}
+
+// UserSearchService 搜索页「用户卡片」：按用户名/简介匹配，并在相关度超过阈值时展示。
+type UserSearchService interface {
+	// Search 返回最多 limit 个用户卡片；viewerUserID 用于判断「隐藏历史发帖」
+	// 是否对当前浏览者生效（本人仍可看到自己的帖子）。
+	Search(ctx context.Context, keyword string, limit, viewerUserID int) ([]domain.UserSearchResult, error)
+}

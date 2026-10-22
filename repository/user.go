@@ -70,4 +70,12 @@ type UserRepository interface {
 
 	// ListTopActive 按活跃度（获赞+获票）取 Top N，供缓存预热。
 	ListTopActive(ctx context.Context, limit int) ([]*domain.User, error)
+
+	// SearchCandidateUsers 搜索页用户卡片的候选集：用户名/简介命中关键词或其任一单元。
+	// keyword/terms 由 domain 层转义与提取，repository 只负责 SQL 预筛。
+	SearchCandidateUsers(ctx context.Context, keyword string, terms []string, limit int) ([]*domain.User, error)
+	// ListPublicPostCards 用户卡片的三格帖子预览（只取公开、非匿名帖，按时间倒序）。
+	ListPublicPostCards(ctx context.Context, userID, limit int) ([]domain.UserSearchPostCard, error)
+	// CountPublicPosts 用户公开、非匿名帖总数（用户卡片上的「N 个帖子」）。
+	CountPublicPosts(ctx context.Context, userID int) (int64, error)
 }

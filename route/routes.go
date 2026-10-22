@@ -124,6 +124,13 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/coin/ledger", controller.CoinLedger)
 	auth.POST("/api/auth/coin/visit", controller.CoinVisit)
 
+	// 在线状态（保活心跳）：站点在线人数 + 按帖子/小说/音乐/简历聚合的同时在线人数
+	auth.POST("/api/auth/presence/heartbeat", controller.PresenceHeartbeat)
+	auth.GET("/api/auth/presence/stats", controller.PresenceStats)
+
+	// 搜索页「用户」卡片：用户名命中或相关度超过阈值时展示
+	auth.POST("/api/auth/search/users", controller.SearchUsers)
+
 	// 排行榜：帖子榜与作者榜都按投币数排
 	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
 	auth.GET("/api/auth/userRanking", controller.GetUserRanking)
