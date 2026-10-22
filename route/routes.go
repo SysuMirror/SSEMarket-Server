@@ -1,6 +1,8 @@
 package route
 
 import (
+	"time"
+
 	"loginTest/api"
 	"loginTest/controller"
 	"loginTest/middleware"
@@ -125,11 +127,12 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/coin/visit", controller.CoinVisit)
 
 	// 在线状态（保活心跳）：站点在线人数 + 按帖子/小说/音乐/简历聚合的同时在线人数
-	auth.POST("/api/auth/presence/heartbeat", controller.PresenceHeartbeat)
-	auth.GET("/api/auth/presence/stats", controller.PresenceStats)
+	// 限流按路由独立挂载，控制器不感知限流规则。
+	auth.POST("/api/auth/presence/heartbeat", middleware.UserRateLimit("presence-heartbeat", 30, time.Minute), controller.PresenceHeartbeat)
+	auth.GET("/api/auth/presence/stats", middleware.UserRateLimit("presence-stats", 60, time.Minute), controller.PresenceStats)
 
 	// 搜索页「用户」卡片：用户名命中或相关度超过阈值时展示
-	auth.POST("/api/auth/search/users", controller.SearchUsers)
+	auth.POST("/api/auth/search/users", middleware.UserRateLimit("search-users", 30, time.Minute), controller.SearchUsers)
 
 	// 排行榜：帖子榜与作者榜都按投币数排
 	auth.GET("/api/auth/postRanking", controller.GetPostRanking)
