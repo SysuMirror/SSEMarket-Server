@@ -16,8 +16,27 @@ const (
 	PrefixPostBrowse      = "post:browse:"       // 帖子浏览列表（home/history/save/rating）
 	PrefixProductList     = "product:list:"      // 商品列表（home/个人商品）
 	PrefixPostBrowseCount = "post:browse:count:" // 帖子浏览数独立Key
-	PrefixUserSession     = "user:session:"       // JWT 用户快照缓存
+	PrefixUserSession     = "user:session:"      // JWT 用户快照缓存
+	// 在线状态（presence）：全站在线 ZSET + 按场景/内容聚合的在线 ZSET
+	PrefixPresence        = "presence:"
+	PrefixPresenceOnline  = PrefixPresence + "online"
+	PrefixPresenceCurrent = PrefixPresence + "current:"
 )
+
+// GetPresenceCurrentKey 记录某用户「当前所在场景」的 Key。
+// 切换帖子/小说/音乐/简历时据此把用户从上一个内容的在线集合里移除，
+// 避免同一个用户在同一段时间内被多个内容重复计数。
+func GetPresenceCurrentKey(userID int) string {
+	return PrefixPresenceCurrent + fmt.Sprintf("%d", userID)
+}
+
+// GetPresenceSceneKey 生成某场景/内容的在线 ZSET Key（scene 为空或 targetID<=0 时返回空串）。
+func GetPresenceSceneKey(scene string, targetID int) string {
+	if scene == "" || targetID <= 0 {
+		return ""
+	}
+	return PrefixPresence + "scene:" + scene + ":" + fmt.Sprintf("%d", targetID)
+}
 
 // GetPostBrowseCountKey 生成帖子浏览数缓存Key（适配ShowDetails函数，postID为int）
 func GetPostBrowseCountKey(postID int) string {

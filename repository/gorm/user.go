@@ -767,3 +767,88 @@ func (r *userRepository) ListTopActive(ctx context.Context, limit int) ([]*domai
 	}
 	return out, nil
 }
+
+// SearchCandidateUsers 搜索页用户候选的 SQL 预筛。
+//
+// 只做「用户名/简介 LIKE 关键词或任一单元」的粗筛，真正的相关度阈值由
+// domain.ScoreUserSearch 在 service 层计算；这里按经验值/获赞数排序，
+// 让 SQL 的 LIMIT 尽量留下更可能被展示的用户。
+func (r *userRepository) SearchCandidateUsers(ctx context.Context, keyword string, terms []string, limit int) ([]*domain.User, error) {
+	if limit <= 0 {
+		limit = domain.UserSearchMaxLimit * 3
+	}
+	pattern := "%" + domain.EscapeUserSearchLike(keyword) + "%"
+	conditions := make([]string, 0, 2+2*len(terms))
+	args := make([]any, 0, 2+2*len(terms))
+	// MySQL 默认转义符是反斜杠；显式写法兼容 sql_mode 调整。
+	conditions = append(conditions, "name LIKE ? ESCAPE '!'", "intro LIKE ? ESCAPE '!'")
+	args = append(args, pattern, pattern)
+	for _, term := range terms {
+		if term == "" || term == keyword {
+			continue
+		}
+		p := "%" + domain.EscapeUserSearchLike(term) + "%"
+		conditions = append(conditions, "name LIKE ? ESCAPE '!'", "intro LIKE ? ESCAPE '!'")
+		args = append(args, p, p)
+	}
+	var users []model.User
+	err := r.session(ctx).
+		Where(strings.Join(conditions, " OR "), args...).
+		Order("score DESC, userID ASC").
+		Limit(limit).
+		Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*domain.User, 0, len(users))
+	for i := range users {
+		if users[i].UserID == 0 {
+			continue
+		}
+		out = append(out, userToDomain(&users[i]))
+	}
+	return out, nil
+}
+
+func (r *userRepository) ListPublicPostCards(ctx context.Context, userID, limit int) ([]domain.UserSearchPostCard, error) {
+	if userID <= 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 3
+	}
+	var posts []model.Post
+	err := r.session(ctx).
+		Where("userID = ? AND is_private = ? AND is_anonymous = ?", userID, false, false).
+		Order("post_time DESC, postID DESC").
+		Limit(limit).
+		Find(&posts).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.UserSearchPostCard, 0, len(posts))
+	for _, p := range posts {
+		out = append(out, domain.UserSearchPostCard{
+			PostID:    p.PostID,
+			Title:     p.Title,
+			Partition: p.Partition,
+			Photos:    p.Photos,
+			LikeNum:   p.LikeNum,
+			BrowseNum: p.BrowseNum,
+			PostTime:  p.PostTime,
+		})
+	}
+	return out, nil
+}
+
+func (r *userRepository) CountPublicPosts(ctx context.Context, userID int) (int64, error) {
+	if userID <= 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.session(ctx).
+		Model(&model.Post{}).
+		Where("userID = ? AND is_private = ? AND is_anonymous = ?", userID, false, false).
+		Count(&count).Error
+	return count, err
+}
