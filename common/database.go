@@ -58,6 +58,8 @@ func InitDB() *gorm.DB {
 	log.Printf("[db] pool max_open=%d max_idle=%d conn_max_lifetime=%s", maxOpen, maxIdle, connLifetime)
 
 	autoMigrate(db, &model.User{})
+	// 全站皮肤/外观设置：每个用户一行，没有行 = 全默认。
+	autoMigrate(db, &model.UserThemeSetting{})
 	ensureUserEmailUniqueIndex(db)
 	autoMigrate(db, &model.UsedEmail{})
 	autoMigrate(db, &model.Post{})

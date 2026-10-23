@@ -345,3 +345,12 @@ type UserSearchService interface {
 	// 是否对当前浏览者生效（本人仍可看到自己的帖子）。
 	Search(ctx context.Context, keyword string, limit, viewerUserID int) ([]domain.UserSearchResult, error)
 }
+
+// ThemeService 全站皮肤/外观设置。
+// 活动时间窗由 domain 的静态注册表计算，本服务只负责用户选择的读写与校验。
+type ThemeService interface {
+	// GetUserSettings 读取某用户的外观设置；没有保存过时返回默认值。
+	GetUserSettings(ctx context.Context, userID int) (*domain.ThemeSettings, error)
+	// SaveUserSettings 校验并保存外观设置（theme_mode / 开场画面 / 背景）。
+	SaveUserSettings(ctx context.Context, userID int, in domain.ThemeSettings) (*domain.ThemeSettings, error)
+}

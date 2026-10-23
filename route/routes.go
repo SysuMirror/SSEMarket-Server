@@ -116,6 +116,10 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/updateUserInfo", controller.UpdateUserInfo)
 	auth.POST("/api/auth/setCustomTitle", controller.SetCustomTitle)
 	noauth.POST("/api/auth/uploadZip", controller.UploadZip)
+
+	// 全站皮肤：活动时间窗（游客可读）+ 当前用户外观设置（带 token 时一并返回）
+	noauth.GET("/api/auth/theme/state", controller.ThemeState)
+	auth.POST("/api/auth/theme/settings", controller.ThemeSaveSettings)
 	auth.POST("/api/auth/submitFeedback", controller.SubmitFeedback)
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)
