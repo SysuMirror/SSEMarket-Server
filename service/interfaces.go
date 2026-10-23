@@ -353,4 +353,6 @@ type ThemeService interface {
 	GetUserSettings(ctx context.Context, userID int) (*domain.ThemeSettings, error)
 	// SaveUserSettings 校验并保存外观设置（theme_mode / 开场画面 / 背景）。
 	SaveUserSettings(ctx context.Context, userID int, in domain.ThemeSettings) (*domain.ThemeSettings, error)
+	// ListThemeEvents 读取 theme_events 表里所有启用的活动时间窗。
+	ListThemeEvents(ctx context.Context) ([]domain.ThemeEvent, error)
 }

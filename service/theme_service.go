@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
+	"time"
 
 	"loginTest/domain"
 	"loginTest/repository"
@@ -20,7 +22,7 @@ func NewThemeService(themes repository.ThemeRepository) ThemeService {
 // 避免一条脏数据让前端背景/换肤整体失效。保留用户的开场/背景开关选择。
 func sanitizeStoredSettings(s *domain.ThemeSettings) {
 	def := domain.DefaultThemeSettings(s.UserID)
-	if s.ThemeMode == "" || !domain.IsKnownThemeMode(s.ThemeMode) {
+	if s.ThemeMode == "" || !domain.IsValidThemeMode(s.ThemeMode) {
 		s.ThemeMode = def.ThemeMode
 	}
 	if s.BackgroundSource == "" || !domain.IsKnownThemeBackgroundSource(s.BackgroundSource) {
@@ -52,6 +54,25 @@ func (s *themeService) GetUserSettings(ctx context.Context, userID int) (*domain
 	}
 	sanitizeStoredSettings(stored)
 	return stored, nil
+}
+
+// ListThemeEvents 读取活动时间窗；结束时间不晚于开始时间的脏行直接跳过并打日志，
+// 避免一条错误配置把整个活动判断带偏。
+func (s *themeService) ListThemeEvents(ctx context.Context) ([]domain.ThemeEvent, error) {
+	events, err := s.themes.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	valid := make([]domain.ThemeEvent, 0, len(events))
+	for _, event := range events {
+		if !event.Valid() {
+			log.Printf("[theme] 忽略无效活动行: theme_id=%q starts=%s ends=%s",
+				event.ThemeID, event.StartsAt.Format(time.RFC3339), event.EndsAt.Format(time.RFC3339))
+			continue
+		}
+		valid = append(valid, event)
+	}
+	return valid, nil
 }
 
 func (s *themeService) SaveUserSettings(ctx context.Context, userID int, in domain.ThemeSettings) (*domain.ThemeSettings, error) {

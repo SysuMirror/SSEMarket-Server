@@ -4,8 +4,9 @@
 
 后端只做两件事：
 
-1. **活动时间窗**：`domain/theme.go` 的 `themeEvents` 注册表（北京时间）。
-   `GET /api/auth/theme/state` 返回活动是否进行中、起止时间、服务器时间。
+1. **活动时间窗**：`theme_events` 表（一行一期活动，管理员直接 INSERT），
+   时间按北京时间墙钟填写。`GET /api/auth/theme/state` 返回活动是否进行中、
+   起止时间、服务器时间；表为空时 `event` 为 `null`。
 2. **用户外观设置**：`user_theme_settings` 表（每人一行，没有行 = 全默认）。
    `POST /api/auth/theme/settings` 保存皮肤选择 / 开场画面 / 背景设置。
 
@@ -66,15 +67,33 @@
   相对路径 / `data:` / `javascript:` / 协议相对地址一律 400。
 - 没有保存过设置的用户读取时直接得到默认值（不会写空行）。
 
-## 3. 新增一套节日皮肤
+## 3. 新增一期 / 一套节日皮肤
 
-1. 后端：在 `domain/theme.go` 的 `themeEvents` 里加一条时间窗，`ThemeID` 与前端
-   `src/skins/<id>.ts` 的 `id` 完全一致。`IsKnownThemeMode` 会自动接受新 ID。
-2. 前端：按 `newSSE/newSSE/src/skins/README.md` 加图片、定义和配色。
-3. 不需要数据库迁移（活动时间窗不落库）。
-4. 活动结束无需改代码：`auto` 用户自动回默认；手动选过的用户保留。
+1. 后端：往 `theme_events` 插一行（不需要改代码、不需要迁移）：
+
+   ```sql
+   INSERT INTO theme_events (theme_id, name, starts_at, ends_at, enabled)
+   VALUES ('programmers-day-2026', '2026 程序员节',
+           '2026-10-24 00:00:00', '2026-10-25 00:00:00', 1);
+   ```
+
+   - `starts_at` / `ends_at` 是**北京时间墙钟**（DATETIME），服务器时区无关；
+   - 窗口左闭右开 `[starts_at, ends_at)`；
+   - 同一个 `theme_id` 可插多期，`(theme_id, starts_at)` 唯一；
+   - `enabled=0` 可临时停用，不必删行；
+   - 两期重叠时取开始时间最晚的一期。
+2. 前端：按 `newSSE/newSSE/src/skins/README.md` 加图片、定义和配色，
+   `src/skins/<id>.ts` 的 `id` 与 `theme_id` 完全一致。
+3. 活动结束无需改代码：`auto` 用户自动回默认；手动选过的用户保留。
 
 ## 4. 迁移
 
-`common/database.go` 已加 `autoMigrate(db, &model.UserThemeSetting{})`。
-手动兜底脚本见 `docs/migrations/20261023_theme_skin.sql`。
+`common/database.go` 已加：
+
+```go
+autoMigrate(db, &model.ThemeEvent{})
+autoMigrate(db, &model.UserThemeSetting{})
+```
+
+手动兜底脚本见 `docs/migrations/20261023_theme_skin.sql`。表建好后直接 INSERT
+活动行即可；代码不会自动插入任何活动。

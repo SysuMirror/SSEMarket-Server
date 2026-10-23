@@ -49,6 +49,32 @@ func (r *themeRepository) Find(ctx context.Context, userID int) (*domain.ThemeSe
 	return &settings, nil
 }
 
+// themeEventFromRow 把表里的 DATETIME 墙钟解释成北京时间（+08:00），
+// 与服务器本地时区无关；管理员按北京时间插入即可。
+func themeEventFromRow(row *model.ThemeEvent) domain.ThemeEvent {
+	return domain.ThemeEvent{
+		ThemeID:  row.ThemeID,
+		Name:     row.Name,
+		StartsAt: domain.ThemeWallClock(row.StartsAt),
+		EndsAt:   domain.ThemeWallClock(row.EndsAt),
+	}
+}
+
+func (r *themeRepository) ListEvents(ctx context.Context) ([]domain.ThemeEvent, error) {
+	var rows []model.ThemeEvent
+	if err := r.db.WithContext(ctx).
+		Where("enabled = ?", true).
+		Order("starts_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	events := make([]domain.ThemeEvent, 0, len(rows))
+	for i := range rows {
+		events = append(events, themeEventFromRow(&rows[i]))
+	}
+	return events, nil
+}
+
 func (r *themeRepository) Save(ctx context.Context, settings domain.ThemeSettings) (*domain.ThemeSettings, error) {
 	if settings.UserID <= 0 {
 		return nil, domain.ErrBadRequest

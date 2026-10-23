@@ -3,31 +3,31 @@ package domain
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
 // 全站皮肤（主题）体系。
 //
-// 设计目标：节日皮肤是「可复用的前端资源包 + 一段活动时间窗」，
-// 后端只负责回答两件事：
-//  1. 现在是否处于某个节日皮肤的活动时间内（ThemeState 接口）；
-//  2. 某个用户选了哪套皮肤、开场画面与背景怎么展示（UserThemeSetting 表）。
+// 后端只负责两件事：
+//  1. 从 theme_events 表读取活动时间窗，回答「现在是否处于某期节日活动内」；
+//  2. 保存某个用户的皮肤选择、开场画面与背景设置（user_theme_settings）。
 //
-// 真正的视觉资源（图片、配色、贴纸）都在前端仓库里，后端不存图片路径。
-// 新增一套皮肤只需要：
-//   - 在后端 themeEvents 里加一条活动时间窗（本文件）；
-//   - 在前端 src/skins/ 里加一份皮肤定义（见前端 src/skins/README.md）。
+// 活动时间窗不写死在代码里：管理员直接 INSERT theme_events 一行即可，
+// 想加场/改期/停用都只动数据。真正的视觉资源（图片、配色、贴纸）仍在前端
+// src/skins/ 中，后端不存图片路径。
 //
 // 皮肤选择口径（theme_mode）：
-//   - auto：跟随活动时间窗——活动期间自动使用活动皮肤，活动结束后自动回到默认；
+//   - auto：跟随活动时间窗——活动期间自动使用活动皮肤，结束后自动回到默认；
 //   - default：强制默认皮肤（活动期间也不换）；
-//   - <themeID>：强制使用某套皮肤（活动结束后用户仍可手动保留这套皮肤）。
+//   - <themeID>：强制使用某套皮肤（活动结束后用户仍可手动保留）。
 const (
 	ThemeModeAuto    = "auto"
 	ThemeModeDefault = "default"
 
 	// ProgrammersDay2026ThemeID 2026 程序员节皮肤的稳定 ID，前后端必须一致。
+	// 时间窗不在代码里，只是常用 ID 的别名，方便测试/文档引用。
 	ProgrammersDay2026ThemeID = "programmers-day-2026"
 
 	// 背景来源：default = 当前皮肤自带背景（默认皮肤没有则用网站底色）；
@@ -39,7 +39,20 @@ const (
 // themeLocation 活动时间窗按北京时间计算，不依赖服务器本地时区。
 var themeLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
-// ThemeEvent 一套节日皮肤的活动时间窗。
+// ThemeLocation 返回活动时间窗使用的时区（北京时间）。
+func ThemeLocation() *time.Location {
+	return themeLocation
+}
+
+// ThemeWallClock 把数据库 DATETIME 的「墙钟分量」解释成北京时间。
+//
+// MySQL DATETIME 不带时区，驱动按服务器 loc 读出来的 time.Time 可能带 UTC 等
+// 位置；这里只取年月日时分秒，重新装到 +08:00，保证管理员按北京时间填写即可。
+func ThemeWallClock(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), themeLocation)
+}
+
+// ThemeEvent 一期节日皮肤活动（theme_events 表的一行）。
 type ThemeEvent struct {
 	ThemeID  string
 	Name     string
@@ -52,64 +65,75 @@ func (e ThemeEvent) ActiveAt(now time.Time) bool {
 	return !now.Before(e.StartsAt) && now.Before(e.EndsAt)
 }
 
-// themeEvents 活动时间窗注册表。新增节日皮肤只加一条。
-// 注意：时间为北京时间；结束时间取次日 00:00，避免 23:59:59 的边界争议。
-var themeEvents = []ThemeEvent{
-	{
-		ThemeID:  ProgrammersDay2026ThemeID,
-		Name:     "2026 程序员节",
-		StartsAt: time.Date(2026, 10, 24, 0, 0, 0, 0, themeLocation),
-		EndsAt:   time.Date(2026, 10, 25, 0, 0, 0, 0, themeLocation),
-	},
+// Valid 基础校验：必须有皮肤 ID 且结束时间晚于开始时间。
+func (e ThemeEvent) Valid() bool {
+	return strings.TrimSpace(e.ThemeID) != "" && e.EndsAt.After(e.StartsAt)
 }
 
-// ThemeEvents 返回全部已注册的活动（副本），供只读展示/测试使用。
-func ThemeEvents() []ThemeEvent {
-	out := make([]ThemeEvent, len(themeEvents))
-	copy(out, themeEvents)
-	return out
-}
+// PickFeaturedThemeEvent 从多期活动里挑出「当前要展示的一期」。
+//
+//   - 有进行中的活动：取开始时间最晚的一期（多期重叠时以最近的为准），ok=true；
+//   - 没有进行中的：取最近已结束的一期；连已结束的都没有则取最近将开始的一期，ok=false；
+//   - 没有任何活动：返回 nil。
+//
+// 返回的 bool 表示这一期当前是否 active，供前端展示状态；前端仍会用
+// startsAt/endsAt 自行跨零点切换，不依赖单次接口结果。
+func PickFeaturedThemeEvent(events []ThemeEvent, now time.Time) (*ThemeEvent, bool) {
+	if len(events) == 0 {
+		return nil, false
+	}
 
-// FindThemeEvent 按 ID 查找活动；未知 ID 返回 false。
-func FindThemeEvent(themeID string) (ThemeEvent, bool) {
-	for _, e := range themeEvents {
-		if e.ThemeID == themeID {
-			return e, true
+	var active *ThemeEvent
+	for i := range events {
+		if !events[i].Valid() || !events[i].ActiveAt(now) {
+			continue
+		}
+		if active == nil || events[i].StartsAt.After(active.StartsAt) {
+			active = &events[i]
 		}
 	}
-	return ThemeEvent{}, false
-}
-
-// FeaturedThemeEvent 返回当前要展示的那套活动皮肤：
-// 优先返回正在进行的活动；若当前没有活动，返回最近一场（用于展示倒计时/已结束状态）。
-// 目前只有一套皮肤；未来多套时按开始时间排序即可。
-func FeaturedThemeEvent(now time.Time) (ThemeEvent, bool) {
-	if len(themeEvents) == 0 {
-		return ThemeEvent{}, false
+	if active != nil {
+		return active, true
 	}
-	for _, e := range themeEvents {
-		if e.ActiveAt(now) {
-			return e, true
+
+	var latestEnded *ThemeEvent
+	var nextUpcoming *ThemeEvent
+	for i := range events {
+		e := &events[i]
+		if !e.Valid() {
+			continue
+		}
+		if !e.StartsAt.After(now) {
+			// 已开始但不在活动窗口内（已结束）
+			if latestEnded == nil || e.StartsAt.After(latestEnded.StartsAt) {
+				latestEnded = e
+			}
+			continue
+		}
+		if nextUpcoming == nil || e.StartsAt.Before(nextUpcoming.StartsAt) {
+			nextUpcoming = e
 		}
 	}
-	// 没有进行中的活动：返回开始时间最晚的一场（通常是下一场/刚结束的一场）。
-	best := themeEvents[0]
-	for _, e := range themeEvents[1:] {
-		if e.StartsAt.After(best.StartsAt) {
-			best = e
-		}
+	if latestEnded != nil {
+		return latestEnded, false
 	}
-	return best, false
+	if nextUpcoming != nil {
+		return nextUpcoming, false
+	}
+	return nil, false
 }
 
-// IsKnownThemeMode 校验用户的皮肤选择：auto / default / 已注册的皮肤 ID。
-func IsKnownThemeMode(mode string) bool {
+// themeIDPattern 皮肤 ID 只允许小写字母/数字/连字符（如 programmers-day-2026）。
+// 不校验它是否真的存在于活动表：用户手动保留的皮肤在活动行删除后仍应能保存。
+var themeIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+// IsValidThemeMode 校验用户的皮肤选择：auto / default / 合法皮肤 ID。
+func IsValidThemeMode(mode string) bool {
 	switch mode {
 	case ThemeModeAuto, ThemeModeDefault:
 		return true
 	}
-	_, ok := FindThemeEvent(mode)
-	return ok
+	return themeIDPattern.MatchString(mode)
 }
 
 // IsKnownThemeBackgroundSource 校验背景来源。
@@ -158,7 +182,7 @@ func NormalizeThemeSettings(s *ThemeSettings) error {
 	if s.ThemeMode == "" {
 		s.ThemeMode = ThemeModeAuto
 	}
-	if !IsKnownThemeMode(s.ThemeMode) {
+	if !IsValidThemeMode(s.ThemeMode) {
 		return ErrThemeModeInvalid
 	}
 

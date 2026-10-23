@@ -32,9 +32,13 @@ type themeSettingsReq struct {
 }
 
 func themeEventData(ev domain.ThemeEvent, active bool, now time.Time) gin.H {
+	name := ev.Name
+	if name == "" {
+		name = ev.ThemeID
+	}
 	return gin.H{
 		"themeId":    ev.ThemeID,
-		"name":       ev.Name,
+		"name":       name,
 		"active":     active,
 		"startsAt":   ev.StartsAt.Format(time.RFC3339),
 		"endsAt":     ev.EndsAt.Format(time.RFC3339),
@@ -65,11 +69,20 @@ func ThemeState(c *gin.Context) {
 	// 响应包含当前用户的个性化设置，禁止任何中间层缓存。
 	c.Header("Cache-Control", "no-store")
 	now := time.Now()
-	event, active := domain.FeaturedThemeEvent(now)
+
+	events, err := service.Themes.ListThemeEvents(c.Request.Context())
+	if err != nil {
+		apperr.WriteMsg(c, err, "读取活动时间窗失败")
+		return
+	}
+	// 没有配置任何活动时 event=null，前端按「无活动」处理，不影响手动换肤。
+	var eventData any
+	if event, active := domain.PickFeaturedThemeEvent(events, now); event != nil {
+		eventData = themeEventData(*event, active, now)
+	}
 
 	settings := (*domain.ThemeSettings)(nil)
 	if user, ok := viewerFromAuth(c); ok {
-		var err error
 		settings, err = service.Themes.GetUserSettings(c.Request.Context(), user.ID)
 		if err != nil {
 			apperr.WriteMsg(c, err, "读取外观设置失败")
@@ -79,7 +92,7 @@ func ThemeState(c *gin.Context) {
 
 	data := gin.H{
 		"serverTime": now.Format(time.RFC3339),
-		"event":      themeEventData(event, active, now),
+		"event":      eventData,
 		"settings":   themeSettingsData(settings),
 	}
 	response.Success(c, data, "")

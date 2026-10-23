@@ -16,4 +16,8 @@ type ThemeRepository interface {
 
 	// Save 新建或覆盖某用户的外观设置（按 user_id 幂等 upsert）。
 	Save(ctx context.Context, settings domain.ThemeSettings) (*domain.ThemeSettings, error)
+
+	// ListEvents 读取所有启用的活动时间窗（按 starts_at 倒序）。
+	// 时间窗由管理员直接 INSERT theme_events 维护，没有写死的默认值。
+	ListEvents(ctx context.Context) ([]domain.ThemeEvent, error)
 }
