@@ -29,6 +29,7 @@ func themeSettingsFromRow(row *model.UserThemeSetting) domain.ThemeSettings {
 		BackgroundEnabled:   row.BackgroundEnabled,
 		BackgroundSource:    row.BackgroundSource,
 		CustomBackgroundURL: row.CustomBackgroundURL,
+		PostCardOpacity:     row.PostCardOpacity,
 		UpdatedAt:           row.UpdatedAt,
 	}
 }
@@ -87,6 +88,7 @@ func (r *themeRepository) Save(ctx context.Context, settings domain.ThemeSetting
 		BackgroundEnabled:   settings.BackgroundEnabled,
 		BackgroundSource:    settings.BackgroundSource,
 		CustomBackgroundURL: settings.CustomBackgroundURL,
+		PostCardOpacity:     settings.PostCardOpacity,
 		UpdatedAt:           now,
 	}
 	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
@@ -97,6 +99,7 @@ func (r *themeRepository) Save(ctx context.Context, settings domain.ThemeSetting
 			"background_enabled",
 			"background_source",
 			"custom_background_url",
+			"post_card_opacity",
 			"updated_at",
 		}),
 	}).Create(&row).Error

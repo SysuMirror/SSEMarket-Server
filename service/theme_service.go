@@ -28,6 +28,9 @@ func sanitizeStoredSettings(s *domain.ThemeSettings) {
 	if s.BackgroundSource == "" || !domain.IsKnownThemeBackgroundSource(s.BackgroundSource) {
 		s.BackgroundSource = def.BackgroundSource
 	}
+	if !domain.IsValidThemePostCardOpacity(s.PostCardOpacity) {
+		s.PostCardOpacity = def.PostCardOpacity
+	}
 	url, err := domain.NormalizeThemeBackgroundURL(s.CustomBackgroundURL)
 	if err != nil {
 		url = ""

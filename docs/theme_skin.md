@@ -8,7 +8,7 @@
    时间按北京时间墙钟填写。`GET /api/auth/theme/state` 返回活动是否进行中、
    起止时间、服务器时间；表为空时 `event` 为 `null`。
 2. **用户外观设置**：`user_theme_settings` 表（每人一行，没有行 = 全默认）。
-   `POST /api/auth/theme/settings` 保存皮肤选择 / 开场画面 / 背景设置。
+   `POST /api/auth/theme/settings` 保存皮肤选择 / 开场画面 / 背景 / 帖子卡片透明度。
 
 **后端不存任何皮肤图片路径。** 皮肤素材（开场画面、背景、贴纸）是前端
 `public/skins/<skinID>/` 的静态资源；用户上传的背景才存图床绝对 URL。
@@ -37,7 +37,8 @@
       "splashEnabled": true,
       "backgroundEnabled": true,
       "backgroundSource": "default",
-      "customBackgroundUrl": ""
+      "customBackgroundUrl": "",
+      "postCardOpacity": 70
     }
   },
   "msg": ""
@@ -55,7 +56,8 @@
   "splashEnabled": true,
   "backgroundEnabled": true,
   "backgroundSource": "default | custom",
-  "customBackgroundUrl": "https://<图床绝对地址>"
+  "customBackgroundUrl": "https://<图床绝对地址>",
+  "postCardOpacity": 70
 }
 ```
 
@@ -65,6 +67,9 @@
 - `backgroundSource=default`：用当前皮肤自带背景（默认皮肤没有则无图）；
 - `backgroundSource=custom`：用 `customBackgroundUrl`，**只接受 http(s) 绝对地址**。
   相对路径 / `data:` / `javascript:` / 协议相对地址一律 400。
+- `postCardOpacity`：全站卡片不透明度 30-100（默认 70），只在开启全站背景
+  时有视觉效果——数值越小，所有卡片（帖子、设置分组等）越透明、背景图越明显。
+  旧客户端不传该字段时后端回退默认值 70。
 - 没有保存过设置的用户读取时直接得到默认值（不会写空行）。
 
 ## 3. 新增一期 / 一套节日皮肤

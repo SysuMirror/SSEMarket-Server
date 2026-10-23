@@ -143,15 +143,22 @@ func TestNormalizeThemeSettingsDefaultsAndValidation(t *testing.T) {
 	if s.ThemeMode != domain.ThemeModeAuto || !s.SplashEnabled || !s.BackgroundEnabled || s.BackgroundSource != domain.ThemeBackgroundSourceDefault {
 		t.Fatalf("默认设置不符合预期: %+v", s)
 	}
+	if s.PostCardOpacity != domain.ThemePostCardOpacityDefault {
+		t.Fatalf("默认卡片透明度应为 %d，实际 %d", domain.ThemePostCardOpacityDefault, s.PostCardOpacity)
+	}
 
 	s.ThemeMode = ""
 	s.BackgroundSource = ""
 	s.CustomBackgroundURL = ""
+	s.PostCardOpacity = 0 // 旧客户端不传该字段
 	if err := domain.NormalizeThemeSettings(&s); err != nil {
 		t.Fatalf("空值应回填默认: %v", err)
 	}
 	if s.ThemeMode != domain.ThemeModeAuto || s.BackgroundSource != domain.ThemeBackgroundSourceDefault {
 		t.Errorf("空值回填结果不对: %+v", s)
+	}
+	if s.PostCardOpacity != domain.ThemePostCardOpacityDefault {
+		t.Errorf("卡片透明度空值应回填默认 %d，实际 %d", domain.ThemePostCardOpacityDefault, s.PostCardOpacity)
 	}
 
 	bad := domain.ThemeSettings{ThemeMode: "Not A Skin", BackgroundSource: domain.ThemeBackgroundSourceDefault}
@@ -161,5 +168,13 @@ func TestNormalizeThemeSettingsDefaultsAndValidation(t *testing.T) {
 	bad = domain.ThemeSettings{ThemeMode: domain.ThemeModeAuto, BackgroundSource: "remote"}
 	if err := domain.NormalizeThemeSettings(&bad); err != domain.ErrThemeBackgroundSourceInvalid {
 		t.Errorf("非法背景来源应返回 ErrThemeBackgroundSourceInvalid，实际 %v", err)
+	}
+	bad = domain.ThemeSettings{ThemeMode: domain.ThemeModeAuto, BackgroundSource: domain.ThemeBackgroundSourceDefault, PostCardOpacity: 10}
+	if err := domain.NormalizeThemeSettings(&bad); err != domain.ErrThemePostCardOpacityInvalid {
+		t.Errorf("卡片透明度低于下限应返回 ErrThemePostCardOpacityInvalid，实际 %v", err)
+	}
+	bad.PostCardOpacity = 120
+	if err := domain.NormalizeThemeSettings(&bad); err != domain.ErrThemePostCardOpacityInvalid {
+		t.Errorf("卡片透明度高于上限应返回 ErrThemePostCardOpacityInvalid，实际 %v", err)
 	}
 }

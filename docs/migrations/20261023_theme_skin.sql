@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS `theme_events` (
   KEY `idx_theme_event_ends` (`ends_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='节日皮肤活动时间窗（一行一期）';
 
+-- 增量（2026-10-24）：帖子卡片透明度。新库已包含在上面的 CREATE TABLE 里；
+-- 已建过表的库执行下面一行即可（AutoMigrate 启动时也会自动加列，二选一）。
+-- ALTER TABLE `user_theme_settings`
+--   ADD COLUMN `post_card_opacity` TINYINT UNSIGNED NOT NULL DEFAULT 70
+--   COMMENT '帖子卡片不透明度 30-100，仅开启全站背景时生效';
+
 -- 示例：需要时手动执行（代码不会自动插入）
 -- INSERT INTO `theme_events` (`theme_id`, `name`, `starts_at`, `ends_at`, `enabled`)
 -- VALUES ('programmers-day-2026', '2026 程序员节',
@@ -44,6 +50,8 @@ CREATE TABLE IF NOT EXISTS `user_theme_settings` (
     COMMENT 'default=皮肤自带背景 / custom=图床上传图片',
   `custom_background_url` VARCHAR(2048) NOT NULL DEFAULT ''
     COMMENT '图床返回的 http(s) 绝对地址；不接受 public 相对路径',
+  `post_card_opacity` TINYINT UNSIGNED NOT NULL DEFAULT 70
+    COMMENT '帖子卡片不透明度 30-100，仅开启全站背景时生效',
   `updated_at` DATETIME NULL,
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户全站皮肤/外观设置';

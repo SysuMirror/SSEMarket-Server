@@ -29,6 +29,8 @@ type themeSettingsReq struct {
 	BackgroundEnabled   bool   `json:"backgroundEnabled"`
 	BackgroundSource    string `json:"backgroundSource"`
 	CustomBackgroundURL string `json:"customBackgroundUrl"`
+	// 旧客户端不传时为 0，domain 会回退默认值（82）。
+	PostCardOpacity int `json:"postCardOpacity"`
 }
 
 func themeEventData(ev domain.ThemeEvent, active bool, now time.Time) gin.H {
@@ -56,6 +58,7 @@ func themeSettingsData(s *domain.ThemeSettings) gin.H {
 		"backgroundEnabled":   s.BackgroundEnabled,
 		"backgroundSource":    s.BackgroundSource,
 		"customBackgroundUrl": s.CustomBackgroundURL,
+		"postCardOpacity":     s.PostCardOpacity,
 	}
 	if !s.UpdatedAt.IsZero() {
 		data["updatedAt"] = s.UpdatedAt.Format(time.RFC3339)
@@ -117,12 +120,14 @@ func ThemeSaveSettings(c *gin.Context) {
 		BackgroundEnabled:   req.BackgroundEnabled,
 		BackgroundSource:    req.BackgroundSource,
 		CustomBackgroundURL: req.CustomBackgroundURL,
+		PostCardOpacity:     req.PostCardOpacity,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrThemeModeInvalid),
 			errors.Is(err, domain.ErrThemeBackgroundSourceInvalid),
-			errors.Is(err, domain.ErrThemeBackgroundURLInvalid):
+			errors.Is(err, domain.ErrThemeBackgroundURLInvalid),
+			errors.Is(err, domain.ErrThemePostCardOpacityInvalid):
 			response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")

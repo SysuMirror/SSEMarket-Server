@@ -34,6 +34,12 @@ const (
 	// custom = 用户自己上传的图床图片。
 	ThemeBackgroundSourceDefault = "default"
 	ThemeBackgroundSourceCustom  = "custom"
+
+	// 帖子卡片不透明度（百分比）：有全站背景时让背景图透出来。
+	// 下限 30 防止卡片完全透明影响阅读；100 = 完全不透明（等价关闭该效果）。
+	ThemePostCardOpacityDefault = 70
+	ThemePostCardOpacityMin     = 30
+	ThemePostCardOpacityMax     = 100
 )
 
 // themeLocation 活动时间窗按北京时间计算，不依赖服务器本地时区。
@@ -149,11 +155,13 @@ type ThemeSettings struct {
 	BackgroundEnabled   bool
 	BackgroundSource    string
 	CustomBackgroundURL string
-	UpdatedAt           time.Time
+	// PostCardOpacity 帖子卡片不透明度（30-100）；只在开启全站背景时有视觉效果。
+	PostCardOpacity int
+	UpdatedAt       time.Time
 }
 
 // DefaultThemeSettings 没有保存过设置时的默认值：
-// 跟随活动（活动当天自动换肤）、开场画面开、背景开、用皮肤自带背景。
+// 跟随活动（活动当天自动换肤）、开场画面开、背景开、用皮肤自带背景、卡片 70% 不透明。
 func DefaultThemeSettings(userID int) ThemeSettings {
 	return ThemeSettings{
 		UserID:            userID,
@@ -161,7 +169,13 @@ func DefaultThemeSettings(userID int) ThemeSettings {
 		SplashEnabled:     true,
 		BackgroundEnabled: true,
 		BackgroundSource:  ThemeBackgroundSourceDefault,
+		PostCardOpacity:   ThemePostCardOpacityDefault,
 	}
+}
+
+// IsValidThemePostCardOpacity 帖子卡片不透明度是否在允许范围内。
+func IsValidThemePostCardOpacity(opacity int) bool {
+	return opacity >= ThemePostCardOpacityMin && opacity <= ThemePostCardOpacityMax
 }
 
 // 外观设置相关业务错误。
@@ -169,6 +183,7 @@ var (
 	ErrThemeModeInvalid             = errors.New("皮肤选项不合法")
 	ErrThemeBackgroundSourceInvalid = errors.New("背景来源不合法")
 	ErrThemeBackgroundURLInvalid    = errors.New("背景图片地址不合法，只支持 http/https 图片直链")
+	ErrThemePostCardOpacityInvalid  = errors.New("帖子卡片透明度需在 30-100 之间")
 )
 
 const themeBackgroundURLMaxLen = 2048
@@ -199,6 +214,14 @@ func NormalizeThemeSettings(s *ThemeSettings) error {
 		return err
 	}
 	s.CustomBackgroundURL = normalizedURL
+
+	// 旧客户端不传该字段时为 0：回退默认值，保持向后兼容。
+	if s.PostCardOpacity == 0 {
+		s.PostCardOpacity = ThemePostCardOpacityDefault
+	}
+	if !IsValidThemePostCardOpacity(s.PostCardOpacity) {
+		return ErrThemePostCardOpacityInvalid
+	}
 	return nil
 }
 
