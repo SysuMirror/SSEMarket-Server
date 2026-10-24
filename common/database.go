@@ -65,6 +65,9 @@ func InitDB() *gorm.DB {
 	autoMigrate(db, &model.Badge{})
 	autoMigrate(db, &model.UserBadge{})
 	autoMigrate(db, &model.UserBadgePref{})
+	// 用户自定义皮肤库（桌面/手机双图）与「添加别人的皮肤」关系表。
+	autoMigrate(db, &model.UserSkin{})
+	autoMigrate(db, &model.UserSkinLibrary{})
 	ensureUserEmailUniqueIndex(db)
 	autoMigrate(db, &model.UsedEmail{})
 	autoMigrate(db, &model.Post{})

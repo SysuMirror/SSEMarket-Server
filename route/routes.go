@@ -129,6 +129,17 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/badges/prefs", controller.BadgeSavePrefs)
 	noauth.GET("/api/badges/user/:userID", controller.UserBadges)
 	noauth.GET("/api/badges/worn", controller.WornBadges)
+
+	// 用户自定义皮肤：皮肤库 / 双图上传 / 公开搜索 / 分享链接添加
+	auth.GET("/api/auth/skins/mine", controller.MyUserSkins)
+	auth.POST("/api/auth/skins/create", controller.CreateUserSkin)
+	auth.GET("/api/auth/skins/search", controller.SearchUserSkins)
+	auth.POST("/api/auth/skins/visibility", controller.SetUserSkinVisibility)
+	auth.POST("/api/auth/skins/delete", controller.DeleteUserSkin)
+	auth.POST("/api/auth/skins/add", controller.AddUserSkin)
+	auth.POST("/api/auth/skins/remove", controller.RemoveUserSkin)
+	auth.POST("/api/auth/skins/addByToken", controller.AddUserSkinByToken)
+	noauth.GET("/api/skins/share/:token", controller.ShareSkinInfo)
 	auth.POST("/api/auth/submitFeedback", controller.SubmitFeedback)
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)

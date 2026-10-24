@@ -22,6 +22,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	pathpkg "path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -121,7 +123,7 @@ func Post(c *gin.Context) {
 			// 入延迟归档队列（1h 后由 server-task 消费；若 1h 内删除则由 DeletePost 取消）
 			// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
 			if createdPost != nil && createdPost.ID != 0 {
-			RagNotify("upsert", "post", createdPost.ID)
+				RagNotify("upsert", "post", createdPost.ID)
 				// if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
 				// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
 				// }
@@ -176,18 +178,18 @@ type PostResponse struct {
 	IsLiked       bool
 	IsWatched     bool
 	// Coin 该帖被投币总数；MyCoins 我在这帖上累计投了几个（0–2，投币按钮态用）。
-	Coin    int `json:"Coin"`
-	MyCoins int `json:"MyCoins"`
-	Photos  string
-	Tag     string
-	PostKind string `json:"PostKind"`
-	IsPrivate     bool
-	IsAnonymous   bool `json:"isAnonymous"`
-	IsOwner       bool `json:"isOwner"`
+	Coin        int `json:"Coin"`
+	MyCoins     int `json:"MyCoins"`
+	Photos      string
+	Tag         string
+	PostKind    string `json:"PostKind"`
+	IsPrivate   bool
+	IsAnonymous bool `json:"isAnonymous"`
+	IsOwner     bool `json:"isOwner"`
 	// IsPinned 是否当前为置顶态(主页用于显示置顶徽章)。
-	IsPinned         bool `json:"isPinned"`
-	PinnedAt         *time.Time `json:"pinnedAt,omitempty"`
-	PinnedExpiresAt  *time.Time `json:"pinnedExpiresAt,omitempty"`
+	IsPinned        bool       `json:"isPinned"`
+	PinnedAt        *time.Time `json:"pinnedAt,omitempty"`
+	PinnedExpiresAt *time.Time `json:"pinnedExpiresAt,omitempty"`
 	// HotComment 该帖点赞最多的一级评论(并列按字数倒序),无评论时为 nil。
 	HotComment *HotCommentResponse `json:"hotComment,omitempty"`
 }
@@ -798,18 +800,18 @@ type PostDetailsResponse struct {
 	IsLiked       bool
 	IsWatched     bool
 	// Coin 该帖被投币总数（含历史投票折算）；MyCoins 我累计投了几个（0–2）。
-	Coin          int `json:"Coin"`
-	MyCoins       int `json:"MyCoins"`
-	Photos        string
-	Tag           string
-	IsPrivate     bool
-	IsAnonymous   bool `json:"isAnonymous"`
-	IsOwner       bool `json:"isOwner"`
-	IsLottery     bool
+	Coin        int `json:"Coin"`
+	MyCoins     int `json:"MyCoins"`
+	Photos      string
+	Tag         string
+	IsPrivate   bool
+	IsAnonymous bool `json:"isAnonymous"`
+	IsOwner     bool `json:"isOwner"`
+	IsLottery   bool
 	// IsPinned 是否当前为置顶态(用于已发帖列表显示置顶/取消置顶按钮)。
-	IsPinned         bool `json:"isPinned"`
-	PinnedAt         *time.Time `json:"pinnedAt,omitempty"`
-	PinnedExpiresAt  *time.Time `json:"pinnedExpiresAt,omitempty"`
+	IsPinned        bool       `json:"isPinned"`
+	PinnedAt        *time.Time `json:"pinnedAt,omitempty"`
+	PinnedExpiresAt *time.Time `json:"pinnedExpiresAt,omitempty"`
 }
 
 type PostDetailsMsg struct {
@@ -993,10 +995,16 @@ func UploadPhotos(c *gin.Context) {
 		return
 	}
 
+	// imaging 不支持编码 WebP：先解码（blank import 注册 webp codec），
+	// 落盘时统一转成 PNG，避免用户上传 WebP 时失败。
+	saveFilename := filename
+	if strings.EqualFold(pathpkg.Ext(filename), ".webp") {
+		saveFilename = strings.TrimSuffix(filename, pathpkg.Ext(filename)) + ".png"
+	}
 	// 对图像进行缩略图处理
 	resizedImage := imaging.Fit(img, 1920, 1920, imaging.Lanczos)
 	// 这里似乎只支持绝对路径，这里要根据服务器修改
-	resizedPath := "public/resized/" + filename
+	resizedPath := "public/resized/" + saveFilename
 	if err := os.MkdirAll("public/resized", 0o755); err != nil {
 		log.Printf("[UploadPhotos] MkdirAll resized failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图目录创建失败" + err.Error()})
@@ -1008,7 +1016,7 @@ func UploadPhotos(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
 		return
 	}
-	fileURL, err := api.UploadImage("/src/images/resized/"+filename, resizedPath)
+	fileURL, err := api.UploadImage("/src/images/resized/"+saveFilename, resizedPath)
 	if err != nil {
 		log.Printf("[UploadPhotos] COS UploadImage(resized) failed: path=%s err=%v", resizedPath, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图上传失败" + err.Error()})

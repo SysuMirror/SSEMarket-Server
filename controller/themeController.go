@@ -29,6 +29,8 @@ type themeSettingsReq struct {
 	BackgroundEnabled   bool   `json:"backgroundEnabled"`
 	BackgroundSource    string `json:"backgroundSource"`
 	CustomBackgroundURL string `json:"customBackgroundUrl"`
+	// 自定义皮肤库中选中的皮肤；0 = 不覆盖。
+	CustomSkinID int `json:"customSkinId"`
 	// 旧客户端不传时为 0，domain 会回退默认值（82）。
 	PostCardOpacity int `json:"postCardOpacity"`
 }
@@ -58,6 +60,7 @@ func themeSettingsData(s *domain.ThemeSettings) gin.H {
 		"backgroundEnabled":   s.BackgroundEnabled,
 		"backgroundSource":    s.BackgroundSource,
 		"customBackgroundUrl": s.CustomBackgroundURL,
+		"customSkinId":        s.CustomSkinID,
 		"postCardOpacity":     s.PostCardOpacity,
 	}
 	if !s.UpdatedAt.IsZero() {
@@ -85,11 +88,17 @@ func ThemeState(c *gin.Context) {
 	}
 
 	settings := (*domain.ThemeSettings)(nil)
+	var customSkinData any
 	if user, ok := viewerFromAuth(c); ok {
 		settings, err = service.Themes.GetUserSettings(c.Request.Context(), user.ID)
 		if err != nil {
 			apperr.WriteMsg(c, err, "读取外观设置失败")
 			return
+		}
+		if settings != nil && settings.CustomSkinID > 0 {
+			if skin, skinErr := service.UserSkins.GetActiveForUser(c.Request.Context(), user.ID, settings.CustomSkinID); skinErr == nil {
+				customSkinData = userSkinData(*skin)
+			}
 		}
 	}
 
@@ -97,6 +106,7 @@ func ThemeState(c *gin.Context) {
 		"serverTime": now.Format(time.RFC3339),
 		"event":      eventData,
 		"settings":   themeSettingsData(settings),
+		"customSkin": customSkinData,
 	}
 	response.Success(c, data, "")
 }
@@ -120,6 +130,7 @@ func ThemeSaveSettings(c *gin.Context) {
 		BackgroundEnabled:   req.BackgroundEnabled,
 		BackgroundSource:    req.BackgroundSource,
 		CustomBackgroundURL: req.CustomBackgroundURL,
+		CustomSkinID:        req.CustomSkinID,
 		PostCardOpacity:     req.PostCardOpacity,
 	})
 	if err != nil {
@@ -127,7 +138,8 @@ func ThemeSaveSettings(c *gin.Context) {
 		case errors.Is(err, domain.ErrThemeModeInvalid),
 			errors.Is(err, domain.ErrThemeBackgroundSourceInvalid),
 			errors.Is(err, domain.ErrThemeBackgroundURLInvalid),
-			errors.Is(err, domain.ErrThemePostCardOpacityInvalid):
+			errors.Is(err, domain.ErrThemePostCardOpacityInvalid),
+			errors.Is(err, domain.ErrThemeCustomSkinInvalid):
 			response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")

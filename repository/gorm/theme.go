@@ -29,6 +29,7 @@ func themeSettingsFromRow(row *model.UserThemeSetting) domain.ThemeSettings {
 		BackgroundEnabled:   row.BackgroundEnabled,
 		BackgroundSource:    row.BackgroundSource,
 		CustomBackgroundURL: row.CustomBackgroundURL,
+		CustomSkinID:        row.CustomSkinID,
 		PostCardOpacity:     row.PostCardOpacity,
 		UpdatedAt:           row.UpdatedAt,
 	}
@@ -88,6 +89,7 @@ func (r *themeRepository) Save(ctx context.Context, settings domain.ThemeSetting
 		BackgroundEnabled:   settings.BackgroundEnabled,
 		BackgroundSource:    settings.BackgroundSource,
 		CustomBackgroundURL: settings.CustomBackgroundURL,
+		CustomSkinID:        settings.CustomSkinID,
 		PostCardOpacity:     settings.PostCardOpacity,
 		UpdatedAt:           now,
 	}
@@ -99,6 +101,7 @@ func (r *themeRepository) Save(ctx context.Context, settings domain.ThemeSetting
 			"background_enabled",
 			"background_source",
 			"custom_background_url",
+			"custom_skin_id",
 			"post_card_opacity",
 			"updated_at",
 		}),

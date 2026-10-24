@@ -12,10 +12,11 @@ import (
 
 type themeService struct {
 	themes repository.ThemeRepository
+	skins  repository.UserSkinRepository
 }
 
-func NewThemeService(themes repository.ThemeRepository) ThemeService {
-	return &themeService{themes: themes}
+func NewThemeService(themes repository.ThemeRepository, skins repository.UserSkinRepository) ThemeService {
+	return &themeService{themes: themes, skins: skins}
 }
 
 // sanitizeStoredSettings 兜底清洗库里的历史值：空值补默认、非法值回退，
@@ -30,6 +31,9 @@ func sanitizeStoredSettings(s *domain.ThemeSettings) {
 	}
 	if !domain.IsValidThemePostCardOpacity(s.PostCardOpacity) {
 		s.PostCardOpacity = def.PostCardOpacity
+	}
+	if s.CustomSkinID < 0 {
+		s.CustomSkinID = 0
 	}
 	url, err := domain.NormalizeThemeBackgroundURL(s.CustomBackgroundURL)
 	if err != nil {
@@ -56,6 +60,12 @@ func (s *themeService) GetUserSettings(ctx context.Context, userID int) (*domain
 		return nil, err
 	}
 	sanitizeStoredSettings(stored)
+	// 皮肤可能已被作者删除或移出皮肤库：读取时静默回退，避免背景空白。
+	if stored.CustomSkinID > 0 {
+		if _, err := s.skins.FindForUser(ctx, userID, stored.CustomSkinID); err != nil {
+			stored.CustomSkinID = 0
+		}
+	}
 	return stored, nil
 }
 
@@ -85,6 +95,11 @@ func (s *themeService) SaveUserSettings(ctx context.Context, userID int, in doma
 	in.UserID = userID
 	if err := domain.NormalizeThemeSettings(&in); err != nil {
 		return nil, err
+	}
+	if in.CustomSkinID > 0 {
+		if _, err := s.skins.FindForUser(ctx, userID, in.CustomSkinID); err != nil {
+			return nil, domain.ErrThemeCustomSkinInvalid
+		}
 	}
 	return s.themes.Save(ctx, in)
 }

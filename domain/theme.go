@@ -155,6 +155,8 @@ type ThemeSettings struct {
 	BackgroundEnabled   bool
 	BackgroundSource    string
 	CustomBackgroundURL string
+	// CustomSkinID 用户皮肤库中当前选中的自定义皮肤；>0 时覆盖其它背景来源。
+	CustomSkinID int
 	// PostCardOpacity 帖子卡片不透明度（30-100）；只在开启全站背景时有视觉效果。
 	PostCardOpacity int
 	UpdatedAt       time.Time
@@ -184,6 +186,7 @@ var (
 	ErrThemeBackgroundSourceInvalid = errors.New("背景来源不合法")
 	ErrThemeBackgroundURLInvalid    = errors.New("背景图片地址不合法，只支持 http/https 图片直链")
 	ErrThemePostCardOpacityInvalid  = errors.New("帖子卡片透明度需在 30-100 之间")
+	ErrThemeCustomSkinInvalid       = errors.New("自定义皮肤不存在或不在你的皮肤库中")
 )
 
 const themeBackgroundURLMaxLen = 2048
@@ -214,6 +217,9 @@ func NormalizeThemeSettings(s *ThemeSettings) error {
 		return err
 	}
 	s.CustomBackgroundURL = normalizedURL
+	if s.CustomSkinID < 0 {
+		return ErrThemeCustomSkinInvalid
+	}
 
 	// 旧客户端不传该字段时为 0：回退默认值，保持向后兼容。
 	if s.PostCardOpacity == 0 {

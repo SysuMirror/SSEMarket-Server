@@ -348,6 +348,20 @@ type UserSearchService interface {
 	Search(ctx context.Context, keyword string, limit, viewerUserID int) ([]domain.UserSearchResult, error)
 }
 
+// UserSkinService 用户自定义皮肤：上传、皮肤库、公开搜索、分享链接添加。
+type UserSkinService interface {
+	Create(ctx context.Context, ownerID int, in domain.UserSkinInput) (*domain.UserSkin, error)
+	ListLibrary(ctx context.Context, userID int) ([]domain.UserSkin, error)
+	SearchPublic(ctx context.Context, userID int, keyword string, limit int) ([]domain.UserSkin, error)
+	AddToLibrary(ctx context.Context, userID, skinID int) (*domain.UserSkin, error)
+	AddByShareToken(ctx context.Context, userID int, token string) (*domain.UserSkin, error)
+	RemoveFromLibrary(ctx context.Context, userID, skinID int) error
+	SetPublic(ctx context.Context, userID, skinID int, public bool) (*domain.UserSkin, error)
+	Delete(ctx context.Context, userID, skinID int) error
+	ResolveShareToken(ctx context.Context, token string) (*domain.UserSkin, error)
+	GetActiveForUser(ctx context.Context, userID, skinID int) (*domain.UserSkin, error)
+}
+
 // BadgeService 勋章系统：用户已获得的勋章、主页展示范围、对外挂载。
 // 勋章目录由管理员直接 INSERT badges 维护，发放在批量 SQL 脚本里完成。
 type BadgeService interface {

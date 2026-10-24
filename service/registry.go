@@ -31,6 +31,7 @@ var (
 	UserSearch    UserSearchService
 	Themes        ThemeService
 	Badges        BadgeService
+	UserSkins     UserSkinService
 )
 
 // InitServices 组装 Repository → Service 依赖链。
@@ -81,6 +82,8 @@ func InitServices(db *gorm.DB) {
 	Novels = NewNovelService(novelRepo, NovelPoints, Coins)
 	Presence = NewPresenceService()
 	UserSearch = NewUserSearchService(userRepo)
-	Themes = NewThemeService(gormrepo.NewThemeRepository(db))
+	skinRepo := gormrepo.NewUserSkinRepository(db)
+	UserSkins = NewUserSkinService(skinRepo)
+	Themes = NewThemeService(gormrepo.NewThemeRepository(db), skinRepo)
 	Badges = NewBadgeService(gormrepo.NewBadgeRepository(db))
 }
