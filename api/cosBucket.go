@@ -18,6 +18,17 @@ import (
 	"time"
 )
 
+// imagebedHTTPClient 复用连接，避免每次上传都重新建 TCP（图床经本机 frp 隧道）。
+var imagebedHTTPClient = &http.Client{
+	Timeout: 60 * time.Second,
+	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		MaxIdleConns:        8,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 type getFile struct {
 	Key        string `json:"key"`
 	Name       string `json:"Name"`
@@ -81,8 +92,8 @@ func UploadImage(_ string, localpath string) (string, error) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
+	started := time.Now()
+	resp, err := imagebedHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -121,6 +132,7 @@ func UploadImage(_ string, localpath string) (string, error) {
 		}
 		newURL = strings.TrimRight(base, "/") + newURL
 	}
+	log.Printf("[imagebed] upload %s -> %s in %s", filepath.Base(localpath), newURL, time.Since(started))
 	return newURL, nil
 }
 func AddFolder(key string) error {
