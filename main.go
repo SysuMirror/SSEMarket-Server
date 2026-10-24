@@ -42,6 +42,31 @@ var (
 	pprofMutex   sync.Mutex
 )
 
+// awardDueAnniversaries 扫描 registered_at，给已到周年日的用户补发周年勋章。
+// 幂等：同一用户同一周年只会插一条，重复执行安全。
+func awardDueAnniversaries() {
+	if service.Badges == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	n, err := service.Badges.AwardDueAnniversaries(ctx)
+	if err != nil {
+		log.Printf("[badge] 周年勋章自动发放失败: %v", err)
+		return
+	}
+	if n > 0 {
+		log.Printf("[badge] 自动发放周年勋章 %d 枚", n)
+	}
+}
+
+func startBadgeCron() {
+	c := cron.New()
+	// 每天 00:10（容器 TZ=Asia/Shanghai）检查一次；错过当天也会在下次自动补齐。
+	_, _ = c.AddFunc("10 0 * * *", awardDueAnniversaries)
+	c.Start()
+}
+
 func Copy() {
 	dbHost := viper.GetString("datasource.host")
 	dbPort := viper.GetInt("datasource.port")
@@ -143,6 +168,9 @@ func main() {
 	go Copy()
 	db := common.InitDB()
 	service.InitServices(db)
+	// 周年勋章：启动即补一次，之后每天 00:10 自动扫描到期用户。
+	go awardDueAnniversaries()
+	go startBadgeCron()
 	service.Ranks.RebuildRankStats(context.Background())
 	// 启动即全量重算一次积分,后续由 Copy() 内的 @every 1h cron 维持
 	go controller.CalculateAndSaveScores()

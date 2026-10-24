@@ -57,6 +57,8 @@ type UserService interface {
 	GetAvatarByPhone(ctx context.Context, phone string) (*domain.User, error)
 	GetInfo(ctx context.Context, phone string, userID int) (*domain.User, error)
 	UpdateUserInfo(ctx context.Context, in domain.UpdateUserInput, tokenUserID int) error
+	// UpdateProfileBanner 保存本人主页栏板背景（图床绝对地址 + 0-100 不透明度）。
+	UpdateProfileBanner(ctx context.Context, userID int, bannerURL string, opacity int) (*domain.User, error)
 	SetCustomTitle(ctx context.Context, userID int, title string) error
 	ToggleEmailNotification(ctx context.Context, userID int) error
 	CalculateAndSaveScores(ctx context.Context)
@@ -357,6 +359,9 @@ type BadgeService interface {
 	SavePrefs(ctx context.Context, userID int, in domain.BadgePrefsInput) (*domain.UserBadgesView, error)
 	// WornBadges 批量查询一批用户对外挂载的勋章，供帖子/评论昵称旁展示。
 	WornBadges(ctx context.Context, userIDs []int) (map[int]domain.WornBadge, error)
+	// AwardDueAnniversaries 扫描 registered_at，给今天/此前已到期的用户补发周年勋章。
+	// 每天由 cron 调用；也可手动触发，返回新插入条数。
+	AwardDueAnniversaries(ctx context.Context) (int64, error)
 }
 
 // ThemeService 全站皮肤/外观设置。

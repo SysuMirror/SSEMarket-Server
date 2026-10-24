@@ -24,6 +24,8 @@ type UserRepository interface {
 	UpdatePassword(ctx context.Context, userID int, hashedPassword string) error
 	UpdateCustomTitle(ctx context.Context, userID int, title string) error
 	UpdateAvatarURL(ctx context.Context, userID int, avatarURL string) error
+	// UpdateProfileBanner 保存个人主页栏板背景（图床绝对地址 + 0-100 不透明度）。
+	UpdateProfileBanner(ctx context.Context, userID int, url string, opacity int) error
 	ToggleEmailNotificationBlocked(ctx context.Context, userID int) error
 	UpdateScore(ctx context.Context, userID int, score int) error
 	ListAllUsers(ctx context.Context) ([]*domain.User, error)

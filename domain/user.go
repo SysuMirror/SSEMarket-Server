@@ -1,6 +1,15 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// 个人主页栏板设置业务错误。
+var (
+	ErrProfileBannerURLInvalid     = errors.New("主页背景只接受图床返回的 http(s) 绝对地址")
+	ErrProfileBannerOpacityInvalid = errors.New("主页背景不透明度需在 0-100 之间")
+)
 
 // User 领域用户实体。
 type User struct {
@@ -10,8 +19,14 @@ type User struct {
 	Name      string
 	Intro     string
 	AvatarURL string
-	Identity  string
-	Score     int
+	// ProfileBannerURL 个人主页顶部栏板图床地址；空 = 使用默认渐变。
+	ProfileBannerURL string
+	// ProfileBannerOpacity 栏板不透明度 0-100（默认 100）。
+	ProfileBannerOpacity int
+	// RegisteredAt 真正的注册时间；整行 Save 时必须带上，避免改资料把它清空。
+	RegisteredAt *time.Time
+	Identity     string
+	Score        int
 	// Experience 读者经验；NovelPoints 作者积分（单位：分，1 积分 = 10 分）；
 	// Coins 站内币余额（发帖/阅读/写作/评分赚来，投币时花掉，见 domain/coin.go）。
 	Experience  int

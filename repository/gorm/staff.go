@@ -161,6 +161,7 @@ func staffShellPassword(aliasID int) string {
 
 func (r *staffRepository) CreateShellUser(ctx context.Context, aliasID int, alias, title string) (int, error) {
 	// 和普通注册创建用户保持完全一致的初始化
+	now := time.Now()
 	u := model.User{
 		Name:                       alias,
 		Email:                      domain.StaffAliasShellEmail(aliasID),
@@ -168,8 +169,9 @@ func (r *staffRepository) CreateShellUser(ctx context.Context, aliasID int, alia
 		Score:                      domain.StaffAliasScore,
 		CustomTitle:                title,
 		ISEmailNotificationBlocked: true,
-		// ========== 重点：照搬普通注册用户这里的 Banend 赋值 ==========
-		Banend: time.Now(),
+		// ========== 重点：照搬普通注册用户这里的注册时间赋值 ==========
+		Banend:       now,
+		RegisteredAt: &now,
 	}
 	if err := r.session(ctx).Create(&u).Error; err != nil {
 		return 0, err

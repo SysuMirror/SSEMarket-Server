@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"loginTest/domain"
 )
@@ -23,4 +24,9 @@ type BadgeRepository interface {
 	// WornBadgesByUserIDs 批量取一批用户对外挂载的勋章。
 	// 只返回「偏好里填了、且确实拥有、且勋章启用」的记录。
 	WornBadgesByUserIDs(ctx context.Context, userIDs []int) (map[int]domain.WornBadge, error)
+
+	// AwardDueAnniversaries 按 users.registered_at 给已满 1..maxYears 年的用户
+	// 补发 anniversary-n（目录 code 为 anniversary-n），返回新插入的条数。
+	// 依赖 (user_id,badge_id)/(user_id,award_key) 唯一索引保证幂等。
+	AwardDueAnniversaries(ctx context.Context, maxYears int, now time.Time) (int64, error)
 }

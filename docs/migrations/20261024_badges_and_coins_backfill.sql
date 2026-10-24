@@ -3,12 +3,13 @@
 -- 内容：
 --   1. 写入 4 枚勋章目录（图片已上传图床，URL 为 data[0].url 原样保存）；
 --   2. 全站每位用户发放「2026 程序员节」勋章；
---   3. 按 users.banend 作为注册时间，补发已满 1/2/3 周年的纪念勋章；
+--   3. 按 users.registered_at 作为注册时间，补发已满 1/2/3 周年的纪念勋章；
 --   4. 全站每位用户 +10.24 币（users.coins 为 DECIMAL(12,2)），
 --      并写 coin_ledger 流水（dedup_key 保证重复执行不会多给）。
 --
--- 注意：本项目历史表结构没有 users.created_at，注册时把时间写在 users.banend 里
--- （见 repository/gorm/user.go Create），因此这里把 banend 当作注册时间。
+-- 注意：本项目历史表结构没有 users.created_at；早期误用 banend 作为注册时间，
+-- banend 会被封禁/解封改写。现已新增 users.registered_at，历史值已从备份回填，
+-- 本脚本按 registered_at 发放。
 -- 执行：mysql --default-character-set=utf8mb4 ...
 
 START TRANSACTION;
@@ -38,11 +39,12 @@ WHERE u.userID > 0;
 
 -- 3. 注册周年：按已满年限补发 1/2/3 周年 --------------------------------
 --    例：2023 年注册的用户会补发 1、2、3 周年三枚；2026 年注册的暂无。
+--    注意：注册时间以 users.registered_at 为准（banend 会被封禁/解封改写）。
 INSERT IGNORE INTO user_badges (user_id, badge_id, award_key, source, note, awarded_at, created_at)
 SELECT
   u.userID,
   b.badge_id,
-  CONCAT('anniversary:', DATE_FORMAT(u.banend, '%Y'), ':', y.n),
+  CONCAT('anniversary:', DATE_FORMAT(u.registered_at, '%Y'), ':', y.n),
   'auto',
   CONCAT('注册周年补发：满 ', y.n, ' 年'),
   NOW(),
@@ -51,9 +53,9 @@ FROM users u
 JOIN (SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3) y
 JOIN badges b ON b.code = CONCAT('anniversary-', y.n)
 WHERE u.userID > 0
-  AND u.banend IS NOT NULL
-  AND u.banend > '2000-01-01'
-  AND TIMESTAMPDIFF(YEAR, u.banend, NOW()) >= y.n;
+  AND u.registered_at IS NOT NULL
+  AND u.registered_at > '2000-01-01'
+  AND TIMESTAMPDIFF(YEAR, u.registered_at, NOW()) >= y.n;
 
 -- 4. 程序员节福利：每人 +10.24，写流水 + 加余额 --------------------------------
 CREATE TEMPORARY TABLE tmp_festival_coin_users (

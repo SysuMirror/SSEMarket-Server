@@ -603,6 +603,30 @@ func (s *userService) GetAvatarByPhone(ctx context.Context, phone string) (*doma
 	return s.users.FindByPhone(ctx, phone)
 }
 
+// UpdateProfileBanner 个人主页顶部栏板背景：只接受图床 http(s) 绝对地址，不透明度 0-100。
+func (s *userService) UpdateProfileBanner(ctx context.Context, userID int, bannerURL string, opacity int) (*domain.User, error) {
+	if userID <= 0 {
+		return nil, domain.ErrUnauthorized
+	}
+	if opacity < 0 || opacity > 100 {
+		return nil, domain.ErrProfileBannerOpacityInvalid
+	}
+	normalized, err := domain.NormalizeThemeBackgroundURL(bannerURL)
+	if err != nil {
+		return nil, domain.ErrProfileBannerURLInvalid
+	}
+	if err := s.users.UpdateProfileBanner(ctx, userID, normalized, opacity); err != nil {
+		return nil, err
+	}
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	InvalidateUserSession(ctx, userID)
+	InvalidateUserInfo(userID)
+	return u, nil
+}
+
 func (s *userService) GetInfo(ctx context.Context, phone string, userID int) (*domain.User, error) {
 	return s.users.FindByPhoneOrID(ctx, phone, userID)
 }

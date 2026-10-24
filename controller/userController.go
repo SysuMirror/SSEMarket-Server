@@ -725,16 +725,19 @@ func GetInfo(c *gin.Context) {
 		return
 	}
 	info := gin.H{
-		"userID":           user.ID,
-		"name":             user.Name,
-		"phone":            user.Phone,
-		"intro":            user.Intro,
-		"score":            user.Score,
-		"ban":              user.BanEnd,
-		"punishnum":        user.PunishNum,
-		"avatarURL":        user.AvatarURL,
-		"hideProfilePosts": user.HideProfilePosts,
-		"customTitle":      user.CustomTitle,
+		"userID":    user.ID,
+		"name":      user.Name,
+		"phone":     user.Phone,
+		"intro":     user.Intro,
+		"score":     user.Score,
+		"ban":       user.BanEnd,
+		"punishnum": user.PunishNum,
+		"avatarURL": user.AvatarURL,
+		// 主页栏板背景是公开展示信息：访问者也用主人设置的不透明度。
+		"profileBannerUrl":     user.ProfileBannerURL,
+		"profileBannerOpacity": user.ProfileBannerOpacity,
+		"hideProfilePosts":     user.HideProfilePosts,
+		"customTitle":          user.CustomTitle,
 	}
 	tokenUserID := GetTokenUserID(c)
 	if tokenUserID != 0 && tokenUserID == user.ID {
@@ -745,6 +748,49 @@ func GetInfo(c *gin.Context) {
 		info["coins"] = user.Coins
 	}
 	c.JSON(http.StatusOK, info)
+}
+
+type profileBannerReq struct {
+	BannerURL string `json:"bannerUrl"`
+	// 不传时保持默认 100；显式 0 表示完全透明。
+	BannerOpacity *int `json:"bannerOpacity"`
+}
+
+// ProfileBannerSave 保存本人个人主页顶部栏板背景（图床地址 + 不透明度）。
+func ProfileBannerSave(c *gin.Context) {
+	user, ok := viewerFromAuth(c)
+	if !ok {
+		response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")
+		return
+	}
+	var req profileBannerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "参数格式错误")
+		return
+	}
+	opacity := 100
+	if req.BannerOpacity != nil {
+		opacity = *req.BannerOpacity
+	}
+	saved, err := service.Users.UpdateProfileBanner(c.Request.Context(), user.ID, req.BannerURL, opacity)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrProfileBannerURLInvalid),
+			errors.Is(err, domain.ErrProfileBannerOpacityInvalid):
+			response.Response(c, http.StatusBadRequest, 400, nil, err.Error())
+		case errors.Is(err, domain.ErrUnauthorized):
+			response.Response(c, http.StatusUnauthorized, 401, nil, "请先登录")
+		case errors.Is(err, domain.ErrNotFound):
+			response.Response(c, http.StatusNotFound, 404, nil, "用户不存在")
+		default:
+			apperr.WriteMsg(c, err, "保存主页背景失败")
+		}
+		return
+	}
+	response.Success(c, gin.H{
+		"profileBannerUrl":     saved.ProfileBannerURL,
+		"profileBannerOpacity": saved.ProfileBannerOpacity,
+	}, "主页背景已保存")
 }
 
 type updateUser struct {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"loginTest/domain"
@@ -174,4 +176,43 @@ func (r *badgeRepository) WornBadgesByUserIDs(ctx context.Context, userIDs []int
 		}
 	}
 	return result, nil
+}
+
+// AwardDueAnniversaries 按 users.registered_at 补发已满 n 年的 anniversary-n。
+//
+// 设计要点：
+//   - 用 registered_at 而不是 banend（banend 会被封禁/解封改写）；
+//   - awarded_at 取「注册日 + n 年」，这样晚补发时勋章日期也是真实周年日；
+//   - 1..maxYears 用派生表展开，目录里没有对应 code 的年份自动跳过；
+//   - INSERT IGNORE 靠 (user_id,badge_id) / (user_id,award_key) 唯一索引幂等。
+func (r *badgeRepository) AwardDueAnniversaries(ctx context.Context, maxYears int, now time.Time) (int64, error) {
+	if maxYears <= 0 {
+		return 0, nil
+	}
+	parts := make([]string, 0, maxYears)
+	for i := 1; i <= maxYears; i++ {
+		parts = append(parts, fmt.Sprintf("SELECT %d AS n", i))
+	}
+	query := fmt.Sprintf(`
+INSERT IGNORE INTO user_badges (user_id, badge_id, award_key, source, note, awarded_at, created_at)
+SELECT
+  u.userID,
+  b.badge_id,
+  CONCAT('anniversary:', YEAR(u.registered_at), ':', y.n),
+  'auto',
+  CONCAT('注册周年自动发放：满 ', y.n, ' 年'),
+  DATE_ADD(u.registered_at, INTERVAL y.n YEAR),
+  ?
+FROM users u
+JOIN (%s) y
+JOIN badges b ON b.code = CONCAT('anniversary-', y.n) AND b.enabled = 1
+WHERE u.registered_at IS NOT NULL
+  AND u.registered_at >= '2020-01-01'
+  AND TIMESTAMPDIFF(YEAR, u.registered_at, ?) >= y.n
+`, strings.Join(parts, " UNION ALL "))
+	res := r.db.WithContext(ctx).Exec(query, now, now)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }

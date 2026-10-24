@@ -12,11 +12,18 @@ type User struct {
 	//Num       int       `gorm:"column:num;type:int"`
 	Intro string `gorm:"column:intro;type:varchar(255)"`
 	//IDpass    bool      `gorm:"column:idpass;type:tinyint(1)"`
-	Banend    time.Time `gorm:"column:banend;type:datetime"`
-	Punishnum int       `gorm:"column:punishnum;type:int"`
-	AvatarURL string    `gorm:"column:avatar_url;type:varchar(255)"`
-	Identity  string    `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
-	Score     int       `gorm:"column:score;type:int;default:0"`
+	Banend time.Time `gorm:"column:banend;type:datetime"`
+	// RegisteredAt 真正的注册时间（历史账号已从备份/最早活跃时间回填）。
+	// banend 会被封禁/解封改写，不能作为注册周年依据；新注册账号在 Create 时写入。
+	RegisteredAt *time.Time `gorm:"column:registered_at;type:datetime"`
+	Punishnum    int        `gorm:"column:punishnum;type:int"`
+	AvatarURL    string     `gorm:"column:avatar_url;type:varchar(255)"`
+	// ProfileBannerURL/ProfileBannerOpacity 个人主页顶部栏板背景（图床绝对地址 + 0-100 不透明度）。
+	// 访问者读取主页主人保存的值；不透明度低一点可以让全站皮肤背景透出来。
+	ProfileBannerURL     string `gorm:"column:profile_banner_url;type:varchar(1024);not null;default:''"`
+	ProfileBannerOpacity int    `gorm:"column:profile_banner_opacity;type:tinyint unsigned;not null;default:100"`
+	Identity             string `gorm:"column:identity;type:enum('student','teacher');default:'student'"`
+	Score                int    `gorm:"column:score;type:int;default:0"`
 	// Experience 读者经验（阅读/评论/签到等）；
 	// NovelPoints 作者积分，以「分」记账（1 积分 = 10 分），便于 0.1 积分也能整数记账。
 	Experience  int `gorm:"column:experience;type:int;default:0"`

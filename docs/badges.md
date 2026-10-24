@@ -68,18 +68,24 @@
    `programmers-day-2027`、`anniversary:2023:3`。同一个用户同一件事重复插入
    会被 `uk_user_badge_award` 挡住。
 
-## 4. 注册周年补发规则
+## 4. 注册周年发放规则
 
-本项目历史表结构没有 `users.created_at`，注册时间写在 `users.banend`
-（见 `repository/gorm/user.go` 的 `Create`）。补发脚本按：
+**注册时间以 `users.registered_at` 为准，不再使用 `banend`。**
+历史账号的 `banend` 会被封禁/解封改写（`now+天数` / `now-1h`），曾导致
+部分老用户漏发周年勋章。新注册账号在 `Create` 时写入 `registered_at`；
+历史账号已按「数据库备份里的原始 banend → 当前 banend → 最早活跃时间」
+取最早值回填（见 `docs/migrations/20261024_registered_at_backfill.sql`）。
+
+自动发放由服务启动时执行一次，之后每天 00:10（容器 `TZ=Asia/Shanghai`）
+扫描：
 
 ```sql
-TIMESTAMPDIFF(YEAR, u.banend, NOW()) >= n
+TIMESTAMPDIFF(YEAR, u.registered_at, NOW()) >= n
 ```
 
-给已满 n 年的用户发放 `anniversary-n`。当前提供 1/2/3 周年三枚；以后满 4 年
-时，按第 3 节新增 `anniversary-4` 再补发即可（脚本模板见
-`docs/migrations/20261024_badges_and_coins_backfill.sql`）。
+给已满 n 年的用户发放 `anniversary-n`，`awarded_at` 取「注册日 + n 年」。
+当前目录有 1/2/3 周年；以后加 `anniversary-4` 等只需 INSERT `badges`，
+cron 会自动覆盖（SQL 最多枚举到 10 周年）。
 
 ## 5. 前端展示语义
 

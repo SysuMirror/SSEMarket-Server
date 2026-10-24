@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"loginTest/domain"
 	"loginTest/repository"
@@ -152,6 +153,12 @@ func (s *badgeService) SavePrefs(ctx context.Context, userID int, in domain.Badg
 		return nil, err
 	}
 	return s.GetMyBadges(ctx, userID)
+}
+
+// AwardDueAnniversaries 扫描所有已填 registered_at 的用户，补发已到期的周年勋章。
+// 最多支持 10 周年；目录里没有的年份会被 SQL 自动跳过。
+func (s *badgeService) AwardDueAnniversaries(ctx context.Context) (int64, error) {
+	return s.badges.AwardDueAnniversaries(ctx, 10, time.Now())
 }
 
 func (s *badgeService) WornBadges(ctx context.Context, userIDs []int) (map[int]domain.WornBadge, error) {

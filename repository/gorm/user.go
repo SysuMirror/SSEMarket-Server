@@ -107,12 +107,14 @@ func (r *userRepository) ExistsUsedEmail(ctx context.Context, userID int, email 
 }
 
 func (r *userRepository) Create(ctx context.Context, name, phone, email, hashedPassword string) (*domain.User, error) {
+	now := time.Now()
 	user := model.User{
-		Name:     name,
-		Phone:    phone,
-		Email:    email,
-		Password: hashedPassword,
-		Banend:   time.Now(),
+		Name:         name,
+		Phone:        phone,
+		Email:        email,
+		Password:     hashedPassword,
+		Banend:       now,
+		RegisteredAt: &now,
 	}
 	if err := r.session(ctx).Create(&user).Error; err != nil {
 		return nil, err
@@ -259,6 +261,24 @@ func (r *userRepository) UpdatePassword(ctx context.Context, userID int, hashedP
 
 func (r *userRepository) UpdateAvatarURL(ctx context.Context, userID int, avatarURL string) error {
 	return r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).Update("AvatarURL", avatarURL).Error
+}
+
+func (r *userRepository) UpdateProfileBanner(ctx context.Context, userID int, url string, opacity int) error {
+	if userID <= 0 {
+		return domain.ErrBadRequest
+	}
+	res := r.session(ctx).Model(&model.User{}).Where("userID = ?", userID).
+		UpdateColumns(map[string]any{
+			"profile_banner_url":     url,
+			"profile_banner_opacity": opacity,
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *userRepository) ToggleEmailNotificationBlocked(ctx context.Context, userID int) error {
