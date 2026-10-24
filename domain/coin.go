@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"time"
 )
@@ -24,8 +25,12 @@ const (
 	CoinEventReadDaily  = "read_daily"  // 当日阅读累计满 30 分钟 +1 币
 	CoinEventWriteDaily = "write_daily" // 当日更新写作满 4000 字 +1 币
 	CoinEventRated      = "rated"       // 收到评分（作者 +1 币）
-	CoinEventThrow      = "coin_throw"  // 投币支出（负数）
-	CoinEventRefund     = "coin_refund" // 取消投币退款（正数）
+	// CoinEventProgrammersDay2026 2026 程序员节全站福利（每人 +10.24 币）。
+	CoinEventProgrammersDay2026 = "programmers_day_2026"
+	// CoinEventPostTipIncome 帖子作者收到的投币分成（每 1 币给作者 +0.1）。
+	CoinEventPostTipIncome = "post_tip_income"
+	CoinEventThrow         = "coin_throw"  // 投币支出（负数）
+	CoinEventRefund        = "coin_refund" // 取消投币退款（正数）
 
 	// 纯计数事件：只推进 settled_value 游标，不发放，也不出现在总览/流水里。
 	CoinAccumulateRead  = "acc_read"  // 当日阅读秒数累计
@@ -54,7 +59,18 @@ const (
 	// 投币：每人对每个内容最多 2 币，每个币给投币者 +10 主页经验。
 	CoinMaxPerTarget = 2
 	CoinExpPerCoin   = 10
+
+	// CoinAuthorTipPerCoin 帖子每收到 1 币，作者获得 0.1 币分成（小说不走这条规则）。
+	CoinAuthorTipPerCoin = 0.1
+
+	// CoinProgrammersDay2026Grant 2026 程序员节全站福利（每人 10.24 币）。
+	CoinProgrammersDay2026Grant = 10.24
 )
+
+// RoundCoin 币金额统一保留两位小数，避免浮点误差进入余额/流水。
+func RoundCoin(value float64) float64 {
+	return math.Round(value*100) / 100
+}
 
 // 投币目标类型。
 const (
@@ -117,6 +133,11 @@ func CoinDedupThrow(throwID, seq int) string {
 	return CoinEventThrow + ":" + strconv.Itoa(throwID) + ":" + strconv.Itoa(seq)
 }
 
+// CoinDedupPostTip 帖子作者投币分成：同一笔投币（throwID + 第几枚）只给一次。
+func CoinDedupPostTip(throwID, seq int) string {
+	return CoinEventPostTipIncome + ":" + strconv.Itoa(throwID) + ":" + strconv.Itoa(seq)
+}
+
 // CoinDedupRefund 取消投币的退款流水：同一笔投币最多退一次。
 // refundSeq 取当前 thrown_total —— 两次退款之间必然隔了一次投币，序号只会更大。
 func CoinDedupRefund(throwID, refundSeq int) string {
@@ -152,6 +173,10 @@ func CoinEventLabel(eventType string) string {
 		return "投币"
 	case CoinEventRefund:
 		return "取消投币"
+	case CoinEventProgrammersDay2026:
+		return "程序员节发放"
+	case CoinEventPostTipIncome:
+		return "帖子获投币分成"
 	default:
 		return eventType
 	}
@@ -165,7 +190,7 @@ type CoinLedger struct {
 	TargetID     int       `json:"targetID"`
 	EventType    string    `json:"event"`
 	Label        string    `json:"label"`
-	Amount       int       `json:"amount"`
+	Amount       float64   `json:"amount"`
 	SettledValue int       `json:"settledValue"`
 	DedupKey     string    `json:"-"`
 	CreatedAt    time.Time `json:"createdAt"`
@@ -178,13 +203,14 @@ type CoinGrantInput struct {
 	TargetID   int
 	EventType  string
 	DedupKey   string
-	Amount     int
+	Amount     float64
 }
 
 // CoinThrowInput 投币入参。
 type CoinThrowInput struct {
-	UserID     int
-	AuthorID   int // 被投币内容的作者，仅用于「不能给自己投币」判定
+	UserID int
+	// AuthorID 被投币内容的作者：用于帖子分成（每 1 币 +0.1）；自身不能给自己投币由服务层拦截。
+	AuthorID   int
 	TargetType string
 	TargetID   int
 	Coins      int
@@ -192,12 +218,12 @@ type CoinThrowInput struct {
 
 // CoinThrowResult 投币结果。
 type CoinThrowResult struct {
-	Coins      int    `json:"coins"`     // 这次投了几个币
-	Total      int    `json:"total"`     // 这个内容上我累计投了几个币
-	Exp        int    `json:"exp"`       // 这次换来的主页经验
-	CoinsLeft  int    `json:"coinsLeft"` // 投币后剩余币
-	TargetType string `json:"targetType"`
-	TargetID   int    `json:"targetID"`
+	Coins      int     `json:"coins"`     // 这次投了几个币
+	Total      int     `json:"total"`     // 这个内容上我累计投了几个币
+	Exp        int     `json:"exp"`       // 这次换来的主页经验
+	CoinsLeft  float64 `json:"coinsLeft"` // 投币后剩余币（保留两位小数）
+	TargetType string  `json:"targetType"`
+	TargetID   int     `json:"targetID"`
 }
 
 // CoinTask 一项「今天怎么赚币」的进度，前端直接渲染成清单。
@@ -213,10 +239,10 @@ type CoinTask struct {
 
 // CoinSummary 我的币总览。
 type CoinSummary struct {
-	Coins       int        `json:"coins"`
+	Coins       float64    `json:"coins"`
 	Day         string     `json:"day"`
 	Tasks       []CoinTask `json:"tasks"`
 	ThrownTotal int        `json:"thrownTotal"` // 累计投出去多少币
 	ThrownExp   int        `json:"thrownExp"`   // 投币换来的主页经验（= 投币数 × 10）
-	Received    int        `json:"received"`    // 累计收到的币（发帖/阅读/写作/评分）
+	Received    float64    `json:"received"`    // 累计收到的币（发帖/阅读/写作/评分/投币分成）
 }

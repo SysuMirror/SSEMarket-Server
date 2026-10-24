@@ -16,7 +16,8 @@ type User struct {
 	// Coins 站内币余额（发帖/阅读/写作/评分赚来，投币时花掉，见 domain/coin.go）。
 	Experience  int
 	NovelPoints int
-	Coins       int
+	// Coins 站内币余额，保留两位小数（DECIMAL(12,2)）。
+	Coins float64
 	// CustomTitle 满级(Lv8, score>=5000)用户自定义称号;空=未自定义,对外显示用户名
 	CustomTitle string
 	// ReceivedLikeNum 收到的赞总数（用户卡片/排行榜展示用）。

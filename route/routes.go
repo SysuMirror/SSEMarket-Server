@@ -122,6 +122,12 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	// 全站皮肤：活动时间窗（游客可读）+ 当前用户外观设置（带 token 时一并返回）
 	noauth.GET("/api/auth/theme/state", controller.ThemeState)
 	auth.POST("/api/auth/theme/settings", controller.ThemeSaveSettings)
+
+	// 勋章系统：我的勋章 / 展示偏好（auth），主页勋章墙与批量对外挂载（noauth）
+	auth.GET("/api/auth/badges", controller.MyBadges)
+	auth.POST("/api/auth/badges/prefs", controller.BadgeSavePrefs)
+	noauth.GET("/api/badges/user/:userID", controller.UserBadges)
+	noauth.GET("/api/badges/worn", controller.WornBadges)
 	auth.POST("/api/auth/submitFeedback", controller.SubmitFeedback)
 	auth.GET("/api/auth/getAllFeedback", controller.GetAllFeedback)
 	auth.GET("/api/auth/calculateHeat", controller.CalculateHeat)

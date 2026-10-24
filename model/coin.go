@@ -19,8 +19,8 @@ type CoinLedger struct {
 	TargetID   int    `gorm:"index:idx_coin_target,priority:2;column:target_id;type:int;not null;default:0"`
 
 	EventType string `gorm:"index:idx_coin_event;column:event_type;type:varchar(32);not null"`
-	// Amount 正数=发币，负数=投币支出。
-	Amount int `gorm:"column:amount;type:int;not null;default:0"`
+	// Amount 正数=发币，负数=投币支出；保留两位小数（10.24 节日福利、0.1×投币数分成）。
+	Amount float64 `gorm:"column:amount;type:decimal(12,2);not null;default:0"`
 
 	SettledValue int    `gorm:"column:settled_value;type:int;not null;default:0"`
 	DedupKey     string `gorm:"uniqueIndex:uk_coin_dedup;column:dedup_key;type:varchar(128);not null"`

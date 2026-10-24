@@ -21,9 +21,10 @@ type User struct {
 	// NovelPoints 作者积分，以「分」记账（1 积分 = 10 分），便于 0.1 积分也能整数记账。
 	Experience  int `gorm:"column:experience;type:int;default:0"`
 	NovelPoints int `gorm:"column:novel_points;type:int;default:0"`
-	// Coins 站内币余额（发帖/阅读/写作/评分赚来，投币时花掉）。
-	// 收支流水见 coin_ledger，投币记录见 coin_throws，与经验/积分互不相通。
-	Coins int `gorm:"column:coins;type:int;default:0"`
+	// Coins 站内币余额（发帖/阅读/写作/评分/帖子被投币分成赚来，投币时花掉）。
+	// 使用 DECIMAL(12,2)：固定两位小数，支持 10.24 节日福利与 0.1×投币数 的作者分成；
+	// 收支流水见 coin_ledger，投币记录见 coin_throw，与经验/积分互不相通。
+	Coins float64 `gorm:"column:coins;type:decimal(12,2);not null;default:0"`
 	// CustomTitle 满级(Lv8, score>=5000)用户自定义称号;空=未自定义,对外显示用户名
 	CustomTitle                string `gorm:"column:custom_title;type:varchar(32)"`
 	ReceivedLikeNum            int    `gorm:"column:received_like_num;type:int;default:0"`

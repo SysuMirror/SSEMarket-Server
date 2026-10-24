@@ -346,6 +346,19 @@ type UserSearchService interface {
 	Search(ctx context.Context, keyword string, limit, viewerUserID int) ([]domain.UserSearchResult, error)
 }
 
+// BadgeService 勋章系统：用户已获得的勋章、主页展示范围、对外挂载。
+// 勋章目录由管理员直接 INSERT badges 维护，发放在批量 SQL 脚本里完成。
+type BadgeService interface {
+	// GetMyBadges 当前用户全部已获得勋章 + 展示偏好。
+	GetMyBadges(ctx context.Context, userID int) (*domain.UserBadgesView, error)
+	// GetPublicBadges 他人主页可见的勋章（按用户的主页展示偏好过滤）。
+	GetPublicBadges(ctx context.Context, userID int) (*domain.PublicUserBadges, error)
+	// SavePrefs 保存对外挂载（0=不挂）与主页展示勋章列表（nil=全部）。
+	SavePrefs(ctx context.Context, userID int, in domain.BadgePrefsInput) (*domain.UserBadgesView, error)
+	// WornBadges 批量查询一批用户对外挂载的勋章，供帖子/评论昵称旁展示。
+	WornBadges(ctx context.Context, userIDs []int) (map[int]domain.WornBadge, error)
+}
+
 // ThemeService 全站皮肤/外观设置。
 // 活动时间窗由 domain 的静态注册表计算，本服务只负责用户选择的读写与校验。
 type ThemeService interface {

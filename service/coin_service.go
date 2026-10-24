@@ -27,6 +27,8 @@ var coinEarnEvents = []string{
 	domain.CoinEventReadDaily,
 	domain.CoinEventWriteDaily,
 	domain.CoinEventRated,
+	domain.CoinEventProgrammersDay2026,
+	domain.CoinEventPostTipIncome,
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +47,7 @@ func (s *coinService) GrantDailyVisit(ctx context.Context, userID int) (int, err
 		DedupKey:  domain.CoinDedupDay(domain.CoinEventVisitDaily, userID, domain.CoinLedgerDay(time.Now())),
 		Amount:    domain.CoinVisitDaily,
 	})
-	return granted, err
+	return int(granted), err
 }
 
 // GrantFirstPost 每日首次发帖 +1 币。
@@ -60,7 +62,7 @@ func (s *coinService) GrantFirstPost(ctx context.Context, userID int) (int, erro
 		DedupKey:  domain.CoinDedupDay(domain.CoinEventPostDaily, userID, domain.CoinLedgerDay(time.Now())),
 		Amount:    domain.CoinPostDaily,
 	})
-	return granted, err
+	return int(granted), err
 }
 
 // AddReadSeconds 当日阅读秒数累计，满 30 分钟给一次币。
@@ -83,7 +85,7 @@ func (s *coinService) AddReadSeconds(ctx context.Context, userID, seconds int) (
 		DedupKey:  domain.CoinDedupDay(domain.CoinEventReadDaily, userID, day),
 		Amount:    domain.CoinReadDaily,
 	})
-	return granted, err
+	return int(granted), err
 }
 
 // AddWriteWords 当日更新写作字数累计，满 4000 字给一次币。
@@ -106,7 +108,7 @@ func (s *coinService) AddWriteWords(ctx context.Context, authorID, words int) (i
 		DedupKey:  domain.CoinDedupDay(domain.CoinEventWriteDaily, authorID, day),
 		Amount:    domain.CoinWriteDaily,
 	})
-	return granted, err
+	return int(granted), err
 }
 
 // GrantRated 收到评分：作者 +1 币（同一读者对同一本书只算一次）。
@@ -122,7 +124,7 @@ func (s *coinService) GrantRated(ctx context.Context, authorID, novelID, raterID
 		DedupKey:   domain.CoinDedupRated(authorID, novelID, raterID),
 		Amount:     domain.CoinRated,
 	})
-	return granted, err
+	return int(granted), err
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +140,9 @@ func (s *coinService) Throw(ctx context.Context, userID int, targetType string, 
 	if targetID <= 0 || coins <= 0 {
 		return nil, domain.ErrBadRequest
 	}
+	// 帖子作者按每 1 币 0.1 的比例拿分成；AuthorID 由服务层解析后传入 repository，
+	// 不让 repository 反向依赖帖子/小说仓储。
+	authorID := 0
 	switch targetType {
 	case domain.CoinTargetPost:
 		if s.posts == nil {
@@ -154,6 +159,7 @@ func (s *coinService) Throw(ctx context.Context, userID int, targetType string, 
 		if post.UserID == userID {
 			return nil, domain.ErrCoinSelf
 		}
+		authorID = post.UserID
 	case domain.CoinTargetNovel:
 		if s.novels == nil {
 			return nil, domain.ErrNotFound
@@ -173,6 +179,7 @@ func (s *coinService) Throw(ctx context.Context, userID int, targetType string, 
 	}
 	result, err := s.coins.Throw(ctx, domain.CoinThrowInput{
 		UserID:     userID,
+		AuthorID:   authorID,
 		TargetType: targetType,
 		TargetID:   targetID,
 		Coins:      coins,
@@ -294,7 +301,7 @@ func (s *coinService) Summary(ctx context.Context, userID int) (*domain.CoinSumm
 		},
 		{
 			Event: domain.CoinEventRated, Label: "作品收到评分（作者收益）",
-			Target: domain.CoinRated, Progress: ratedCoins, Reward: domain.CoinRated,
+			Target: domain.CoinRated, Progress: int(ratedCoins), Reward: domain.CoinRated,
 			Done: false, Available: true,
 		},
 	}

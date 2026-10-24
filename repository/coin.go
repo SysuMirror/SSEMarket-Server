@@ -15,8 +15,8 @@ import (
 //     余额不足不会被扣成负数，每人每内容最多 2 币由唯一索引 + 行锁保证；
 //   - AccumulateDaily 只推进 settled_value 游标，用于「当日累计」类任务判定。
 type CoinRepository interface {
-	// Grant 发币（幂等）。
-	Grant(ctx context.Context, in domain.CoinGrantInput) (granted int, deduped bool, err error)
+	// Grant 发币（幂等）。金额保留两位小数。
+	Grant(ctx context.Context, in domain.CoinGrantInput) (granted float64, deduped bool, err error)
 
 	// AccumulateDaily 把 Delta 累到当日游标上；首次跨过 threshold 时返回 crossed=true。
 	AccumulateDaily(ctx context.Context, userID int, eventType, dedupKey string, delta, threshold int) (total int, crossed bool, err error)
@@ -29,8 +29,8 @@ type CoinRepository interface {
 	// 一个都没投过返回 domain.ErrCoinNotThrown。
 	Cancel(ctx context.Context, userID int, targetType string, targetID int) (*domain.CoinThrowResult, error)
 
-	// Balance 当前币余额。
-	Balance(ctx context.Context, userID int) (int, error)
+	// Balance 当前币余额（两位小数）。
+	Balance(ctx context.Context, userID int) (float64, error)
 
 	// ExistsDedup 该幂等键是否已存在（判断「今天这项任务已经拿过」）。
 	ExistsDedup(ctx context.Context, dedupKey string) (bool, error)
@@ -38,8 +38,8 @@ type CoinRepository interface {
 	// AccumulatedByDedup 某条累计行当前的游标值。
 	AccumulatedByDedup(ctx context.Context, dedupKey string) (int, error)
 
-	// SumSigned 指定事件的金额合计（含负数）。
-	SumSigned(ctx context.Context, userID int, eventTypes ...string) (int, error)
+	// SumSigned 指定事件的金额合计（含负数，两位小数）。
+	SumSigned(ctx context.Context, userID int, eventTypes ...string) (float64, error)
 
 	// ThrownByMe 我在这些内容上各投了几个币。
 	ThrownByMe(ctx context.Context, userID int, targetType string, targetIDs []int) (map[int]int, error)

@@ -32,6 +32,8 @@ var coinDisplayEvents = []string{
 	domain.CoinEventReadDaily,
 	domain.CoinEventWriteDaily,
 	domain.CoinEventRated,
+	domain.CoinEventProgrammersDay2026,
+	domain.CoinEventPostTipIncome,
 	domain.CoinEventThrow,
 	domain.CoinEventRefund,
 }
@@ -62,11 +64,11 @@ func coinLedgerRow(in domain.CoinGrantInput) *model.CoinLedger {
 }
 
 // Grant 发币：写流水 + 加余额，幂等键冲突时整笔不生效（deduped=true）。
-func (r *coinRepository) Grant(ctx context.Context, in domain.CoinGrantInput) (int, bool, error) {
+func (r *coinRepository) Grant(ctx context.Context, in domain.CoinGrantInput) (float64, bool, error) {
 	if in.DedupKey == "" || in.UserID <= 0 || in.Amount == 0 {
 		return 0, false, domain.ErrBadRequest
 	}
-	granted := 0
+	granted := 0.0
 	deduped := false
 	err := r.session(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, err := lockCoinUser(tx, in.UserID); err != nil {
@@ -83,7 +85,7 @@ func (r *coinRepository) Grant(ctx context.Context, in domain.CoinGrantInput) (i
 			UpdateColumn("coins", gorm.Expr("coins + ?", in.Amount)).Error; err != nil {
 			return err
 		}
-		granted = in.Amount
+		granted = domain.RoundCoin(in.Amount)
 		return nil
 	})
 	if err != nil {
@@ -207,13 +209,35 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 			TargetID:   in.TargetID,
 			EventType:  domain.CoinEventThrow,
 			DedupKey:   domain.CoinDedupThrow(throw.ThrowID, seq),
-			Amount:     -in.Coins,
+			Amount:     -float64(in.Coins),
 		})).Error; err != nil {
 			if isDuplicateKeyErr(err) {
 				// 同一序号已经记过：说明这笔已经投过了，不再重复扣币。
 				return domain.ErrCoinLimit
 			}
 			return err
+		}
+
+		// 帖子作者分成：每收到 1 币 +0.1 币（小说不走这条）。
+		// 与投币流水用同一事务，作者余额与分成流水要么都成功、要么都不落库。
+		if in.TargetType == domain.CoinTargetPost && in.AuthorID > 0 && in.AuthorID != in.UserID {
+			tip := domain.RoundCoin(float64(in.Coins) * domain.CoinAuthorTipPerCoin)
+			if tip > 0 {
+				if err := tx.Model(&model.User{}).Where("userID = ?", in.AuthorID).
+					UpdateColumn("coins", gorm.Expr("coins + ?", tip)).Error; err != nil {
+					return err
+				}
+				if err := tx.Create(coinLedgerRow(domain.CoinGrantInput{
+					UserID:     in.AuthorID,
+					TargetType: in.TargetType,
+					TargetID:   in.TargetID,
+					EventType:  domain.CoinEventPostTipIncome,
+					DedupKey:   domain.CoinDedupPostTip(throw.ThrowID, seq),
+					Amount:     tip,
+				})).Error; err != nil {
+					return err
+				}
+			}
 		}
 
 		if err := tx.Model(&model.CoinThrow{}).Where("throw_id = ?", throw.ThrowID).
@@ -240,7 +264,7 @@ func (r *coinRepository) Throw(ctx context.Context, in domain.CoinThrowInput) (*
 		// 与 ThrownByMe（列表/详情里的 myCoins）保持一致。
 		result.Total = held + legacyVotes[in.TargetID]
 		result.Exp = in.Coins * domain.CoinExpPerCoin
-		result.CoinsLeft = user.Coins - in.Coins
+		result.CoinsLeft = domain.RoundCoin(user.Coins - float64(in.Coins))
 		return nil
 	})
 	if err != nil {
@@ -327,7 +351,7 @@ func (r *coinRepository) Cancel(ctx context.Context, userID int, targetType stri
 			TargetID:   targetID,
 			EventType:  domain.CoinEventRefund,
 			DedupKey:   domain.CoinDedupRefund(throw.ThrowID, throw.ThrownTotal),
-			Amount:     amount,
+			Amount:     float64(amount),
 		})).Error; err != nil {
 			if isDuplicateKeyErr(err) {
 				// 同一序号已退过：说明这笔取消已经生效过，不再重复退款。
@@ -354,7 +378,7 @@ func (r *coinRepository) Cancel(ctx context.Context, userID int, targetType stri
 		result.Coins = amount
 		result.Total = legacy[targetID]
 		result.Exp = -amount * domain.CoinExpPerCoin
-		result.CoinsLeft = user.Coins + amount
+		result.CoinsLeft = domain.RoundCoin(user.Coins + float64(amount))
 		return nil
 	})
 	if err != nil {
@@ -378,7 +402,7 @@ func adjustTargetCoins(tx *gorm.DB, targetType string, targetID, delta int) erro
 }
 
 // Balance 当前币余额。
-func (r *coinRepository) Balance(ctx context.Context, userID int) (int, error) {
+func (r *coinRepository) Balance(ctx context.Context, userID int) (float64, error) {
 	var u model.User
 	if err := r.session(ctx).Select("coins").Where("userID = ?", userID).First(&u).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -417,11 +441,11 @@ func (r *coinRepository) AccumulatedByDedup(ctx context.Context, dedupKey string
 }
 
 // SumSigned 指定事件的收支合计（带符号）。
-func (r *coinRepository) SumSigned(ctx context.Context, userID int, eventTypes ...string) (int, error) {
+func (r *coinRepository) SumSigned(ctx context.Context, userID int, eventTypes ...string) (float64, error) {
 	if userID <= 0 || len(eventTypes) == 0 {
 		return 0, nil
 	}
-	var total *int
+	var total *float64
 	if err := r.session(ctx).Model(&model.CoinLedger{}).
 		Where("user_id = ? AND event_type IN ?", userID, eventTypes).
 		Select("COALESCE(SUM(amount), 0)").Scan(&total).Error; err != nil {

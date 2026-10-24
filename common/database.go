@@ -61,6 +61,10 @@ func InitDB() *gorm.DB {
 	// 全站皮肤：活动时间窗（一行一期活动，由管理员直接 INSERT）+ 用户外观设置。
 	autoMigrate(db, &model.ThemeEvent{})
 	autoMigrate(db, &model.UserThemeSetting{})
+	// 勋章系统：勋章目录（管理员 INSERT 图床地址）+ 发放记录 + 用户展示偏好。
+	autoMigrate(db, &model.Badge{})
+	autoMigrate(db, &model.UserBadge{})
+	autoMigrate(db, &model.UserBadgePref{})
 	ensureUserEmailUniqueIndex(db)
 	autoMigrate(db, &model.UsedEmail{})
 	autoMigrate(db, &model.Post{})
@@ -261,6 +265,7 @@ func GetDB() *gorm.DB {
 //  2. 按 staff-<aliasID>@staff.internal 找职位小号（users 行），没有就建：
 //     满级（score=5000，前端 Lv8 阈值）+ 称号=职称 + 随机不可登录口令 + 屏蔽邮件通知；
 //  3. 管理员改了 alias/title 后重启即同步到小号昵称/称号，并回写 alias_user_id。
+//
 // 全程幂等；运行期新增的行由 service.ensureShells 兜底（无需重启）。
 func SyncStaffAliases(db *gorm.DB) {
 	var rows []model.StaffAlias
