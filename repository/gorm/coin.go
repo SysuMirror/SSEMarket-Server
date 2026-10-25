@@ -492,7 +492,10 @@ func (r *coinRepository) ThrownByMe(ctx context.Context, userID int, targetType 
 // 投币流水（负数）+ 退款流水（正数）取反。流水是唯一不会说谎的地方——
 // coin_num 可能被旧数据污染，退款金额必须按流水算，否则取消投币会凭空造币。
 func realCoinsFromLedger(tx *gorm.DB, userID int, targetType string, targetID int) (int, error) {
-	var net *int
+	// amount 列已改为 DECIMAL(12,2)，SUM 返回的是 decimal 文本（如 "-2.00"）；
+	// 这里必须先用 float64 接住再转 int，否则 MySQL 驱动会报
+	// "converting driver.Value type []uint8 to a int: invalid syntax"。
+	var net *float64
 	if err := tx.Model(&model.CoinLedger{}).
 		Where("user_id = ? AND target_type = ? AND target_id = ? AND event_type IN ?",
 			userID, targetType, targetID, []string{domain.CoinEventThrow, domain.CoinEventRefund}).
@@ -502,7 +505,7 @@ func realCoinsFromLedger(tx *gorm.DB, userID int, targetType string, targetID in
 	if net == nil {
 		return 0, nil
 	}
-	return -*net, nil
+	return int(domain.RoundCoin(-*net)), nil
 }
 
 // legacyVoteCoins 历史投票折算：投票功能已下线，pvotes 表只读不再写入，
