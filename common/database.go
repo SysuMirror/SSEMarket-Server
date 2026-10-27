@@ -96,6 +96,7 @@ func InitDB() *gorm.DB {
 	autoMigrate(db, &model.OAuth2Token{})
 	autoMigrate(db, &model.OAuth2AuthRecord{})
 	autoMigrate(db, &model.UserAPIToken{})
+	autoMigrate(db, &model.ForumAgentAction{}, &model.ForumAgentMedia{})
 	autoMigrate(db, &model.Pvote{})
 	autoMigrate(db, &model.PostWatch{})
 	autoMigrate(db, &model.LotteryPost{})

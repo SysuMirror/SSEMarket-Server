@@ -21,6 +21,11 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	r.POST("/internal/featured", controller.InternalFeatured)
 
 	r.Use(middleware.CORSMiddleware())
+	// Native forum MCP: PAT only, isolated from JWT login routes and the
+	// legacy Python /api/v1/agent/ upstream. Rate limit is per account.
+	forumMCP := r.Group("/api/auth")
+	forumMCP.Use(middleware.ForumPATAuth(), middleware.UserRateLimit("forum-mcp", 30, time.Minute))
+	forumMCP.Any("/mcp", controller.NewForumMCPHandler())
 	// 这里把路由分成了三组，其中auth是需要token验证的，也就是需要用户登录
 	// noauth是不需要token的，也就是不需要用户登录
 	// oauth是OAuth带限制权限认证的，需要用户先授权

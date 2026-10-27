@@ -415,6 +415,24 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		return nil, err
 	}
 
+	// Resolve the entire target chain before inserting. A forged parent or
+	// reply ID must not create an orphan/cross-post reply before validation.
+	pc, err := s.comments.FindPcommentByID(ctx, in.PcommentID)
+	if err != nil {
+		return nil, err
+	}
+	if pc.PostID != in.PostID {
+		return nil, domain.ErrBadRequest
+	}
+	if in.ReplyCcommentID > 0 {
+		reply, err := s.comments.FindCcommentByID(ctx, in.ReplyCcommentID)
+		if err != nil {
+			return nil, err
+		}
+		if reply.PcommentID != in.PcommentID {
+			return nil, domain.ErrBadRequest
+		}
+	}
 	cc := &domain.Ccomment{
 		UserID:         authorID,
 		PcommentID:     in.PcommentID,
@@ -423,11 +441,6 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		UserTargetName: in.UserTargetName,
 	}
 	if err := s.comments.CreateCcomment(ctx, cc); err != nil {
-		return nil, err
-	}
-
-	pc, err := s.comments.FindPcommentByID(ctx, in.PcommentID)
-	if err != nil {
 		return nil, err
 	}
 
@@ -444,7 +457,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 	if post.UserID != 0 {
 		skipNotify[post.UserID] = struct{}{}
 	}
-	if in.UserTargetName != "" && in.ReplyCcommentID > 0 {
+	if in.ReplyCcommentID > 0 {
 		replyCC, err := s.comments.FindCcommentByID(ctx, in.ReplyCcommentID)
 		if err != nil {
 			return nil, err
@@ -479,6 +492,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
 	return &domain.CcommentCreateResult{
+		Ccomment:                cc,
 		Notifies:                notifies,
 		PostWatchEmailReceivers: postWatchReceivers,
 	}, nil
