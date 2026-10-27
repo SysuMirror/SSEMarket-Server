@@ -381,7 +381,7 @@ func PostCcomment(c *gin.Context) {
 	for _, u := range result.PostWatchEmailReceivers {
 		emailNotifyIfEnabled(u, 1, content)
 	}
-	response.Response(c, http.StatusOK, 200, nil, "评论成功！")
+	response.Response(c, http.StatusOK, 200, gin.H{"ccommentID": result.Ccomment.ID}, "评论成功！")
 }
 
 type PcMsg struct {

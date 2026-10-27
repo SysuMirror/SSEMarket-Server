@@ -86,6 +86,7 @@ type CcommentNotifyInfo struct {
 
 // CcommentCreateResult 发表二级评论结果。
 type CcommentCreateResult struct {
+	Ccomment                *Ccomment
 	Notifies                []*CcommentNotifyInfo
 	PostWatchEmailReceivers []*User
 }
