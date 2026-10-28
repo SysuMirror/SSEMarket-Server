@@ -81,10 +81,36 @@ func forumPublish(ctx context.Context, in forumPublishInput) (map[string]any, er
 				}
 				// Never accept target identity from model-supplied author fields.
 				body["ccommentID"] = cc.ID
+				name, err := forumReplyTargetName(ctx, in.PostID, in.ParentCommentID, cc.ID, p.User.ID)
+				if err != nil {
+					return nil, err
+				}
+				body["userTargetName"] = name
 			}
 		}
 		return forumInvokeWrite(ctx, p.User, handler, body, in)
 	})
+}
+
+// Use the same public identity as the comment reader; raw user IDs can reveal
+// the author of an anonymous post. The reply ID still drives notifications.
+func forumReplyTargetName(ctx context.Context, postID, parentID, replyID, viewerID int) (string, error) {
+	tree, err := service.Comments.ListForPost(ctx, postID, "post", viewerID)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range tree {
+		if item == nil || item.Pcomment == nil || item.Pcomment.ID != parentID {
+			continue
+		}
+		for _, sub := range item.Subcomments {
+			if sub == nil || sub.Ccomment == nil || sub.Ccomment.ID != replyID {
+				continue
+			}
+			return publicForumAuthor(sub.Author, sub.Author == nil || sub.Author.ID <= 0, false).Author, nil
+		}
+	}
+	return "", domain.ErrBadRequest
 }
 
 func validateForumPublication(in forumPublishInput) error {
