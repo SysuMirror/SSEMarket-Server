@@ -15,6 +15,9 @@ import (
 	"github.com/gin-gonic/gin/binding"
 )
 
+// defaultProductCoverURL 商品未上传图片时的兜底封面
+const defaultProductCoverURL = "https://image.ssemarket.cn/i/images/2026/10/28/f1aa38aa-05b1-460d-89eb-0b17298f0c15.jpg"
+
 type ProductMsg struct {
 	UserID       int      `json:"UserID"`
 	Price        int      `json:"Price"`
@@ -250,7 +253,7 @@ func GetCarouselImg(c *gin.Context) {
 
 func splitProductPhotos(raw string) []string {
 	if raw == "" {
-		return []string{}
+		return []string{defaultProductCoverURL}
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
@@ -260,6 +263,9 @@ func splitProductPhotos(raw string) []string {
 			continue
 		}
 		out = append(out, replaceResizedWithURL(p))
+	}
+	if len(out) == 0 {
+		return []string{defaultProductCoverURL}
 	}
 	return out
 }
