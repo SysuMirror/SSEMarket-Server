@@ -156,7 +156,9 @@ func forumGetPost(ctx context.Context, in forumPostInput) (map[string]any, error
 			return nil, err
 		}
 	}
-	return map[string]any{"post": publicForumPost(post, author, p.User.ID, true)}, nil
+	music, musicStatus := forumPostMusic(ctx, post.Content)
+	return map[string]any{"post": publicForumPost(post, author, p.User.ID, true),
+		"music": music, "music_metadata_status": musicStatus}, nil
 }
 
 func forumComments(ctx context.Context, in forumCommentsInput) (map[string]any, error) {
