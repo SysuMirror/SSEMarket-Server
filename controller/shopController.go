@@ -16,7 +16,7 @@ import (
 )
 
 // defaultProductCoverURL 商品未上传图片时的兜底封面
-const defaultProductCoverURL = "https://image.ssemarket.cn/i/images/2026/10/28/f1aa38aa-05b1-460d-89eb-0b17298f0c15.jpg"
+const defaultProductCoverURL = "https://ssemarket.cn/new/shop-default-cover.webp"
 
 type ProductMsg struct {
 	UserID       int      `json:"UserID"`
