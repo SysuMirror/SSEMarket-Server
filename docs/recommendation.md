@@ -15,11 +15,14 @@
 
 老帖不再单纯靠时间衰减硬挤，而是按年龄分三桶后固定配额交错，保证每页都有历史帖：
 
-| 桶 | 年龄 | 有画像用户每 15 条 | 冷启动用户每 15 条 |
+| 桶 | 年龄 | 有画像用户每 15 条（开探索） | 冷启动用户每 15 条 |
 |---|---|---|---|
-| 新帖 | ≤90 天 | 7 | 3 |
+| 新帖 | ≤90 天 | 6 | 3 |
 | 中帖 | 90~365 天 | 4 | 3 |
-| 老帖 | >365 天 | 4 | 9 |
+| 老帖 | >365 天 | 3 | 9 |
+| 探索 | 任意年龄，明显不像用户兴趣 | 2 | 0 |
+
+不开探索位时，有画像用户仍为 7 新 / 4 中 / 4 老。探索位只给已有画像的用户：冷启动本来就在推历史优质老帖，不再硬塞圈外内容。
 
 桶内分数：
 
@@ -40,6 +43,8 @@ quality = clamp01(log1p(2*赞 + 3*评论 + 2*币) / 6)
 **冷启动规则**：账号注册不足 3 天，或强兴趣信号不足 3 个（点赞/评论/收藏/投币 + ≥15 秒阅读）时，按冷启动配额优先推历史优质老帖；满 3 天且信号达标后自动切到个人画像排序。阈值可用 `RECOMMEND_COLD_START_DAYS` / `RECOMMEND_COLD_START_SIGNALS` 调整。
 
 **刷新会换内容**：推荐流每下发一页 15 条就记一次曝光（Redis `rec:imp:v2:{uid}` / `rec:impc:v2:{uid}`，保留 7 天）。用户只是刷到、没点进详情，也会在下次刷新时被轻微降权，所以刷新一次就能看到后面的帖子，不用反复刷；多次曝光会继续往后排。曝光和已读分开：点进详情仍走 `post_read_events` 的 -0.25，更重。后台新帖轮询（limit=20）、置顶探测（limit=1）不记曝光，避免程序请求污染信号。
+
+**探索位（打破信息茧房）**：有画像用户每 15 条固定留 2 条探索位，放在第 5、第 12 条，前 3 条不放出圈内容。候选规则：未读、最近 7 天没刷到过、自己发的除外、文本/图片有可比向量；相似度取该用户候选分布的后 20%，质量取前 40%（只用赞/评论/币，不含浏览量）。候选按质量加权随机，两个探索位尽量不同标签/分区。探索位同样记曝光，刷到不点会冷却 7 天；点进详情/停留 ≥15 秒会立刻清画像，下次刷新就能把这次兴趣写进模型。配置 `RECOMMEND_EXPLORE_PER_PAGE=0` 可整体关闭，冷启动用户不启用。
 
 画像会尽量用上所有能拿到兴趣的地方，统一带 45 天半衰期：
 - 帖子互动：浏览 0.2（弱信号）、点赞 3、评论 4、收藏 4.5、投币 5；
@@ -69,6 +74,10 @@ quality = clamp01(log1p(2*赞 + 3*评论 + 2*币) / 6)
 | `RECOMMEND_INDEX_REFRESH` | 2m | 内存索引刷新间隔 |
 | `RECOMMEND_COLD_START_DAYS` | 3 | 新账号冷启动天数 |
 | `RECOMMEND_COLD_START_SIGNALS` | 3 | 切画像所需强兴趣信号数 |
+| `RECOMMEND_EXPLORE_PER_PAGE` | 2 | 每 15 条探索位数量；0 关闭，最大 3 |
+| `RECOMMEND_EXPLORE_SIM_PERCENTILE` | 0.20 | 探索候选的相似度分位（后 20%） |
+| `RECOMMEND_EXPLORE_QUALITY_PERCENTILE` | 0.60 | 探索候选的质量分位（前 40%） |
+| `RECOMMEND_EXPLORE_COOLDOWN` | 168h | 刷到不点后的探索冷却时间 |
 | `RECOMMEND_CHAT_ENABLED` | true | 是否用小秋聊天补画像 |
 | `RECOMMEND_CHAT_BASE` | `http://host.docker.internal:8110` | sse-agent chat 面地址（内网） |
 | `RECOMMEND_CHAT_PROFILE_TTL` | 30m | 聊天画像缓存时间 |
@@ -113,8 +122,9 @@ POST   /api/auth/admin/recommendation/rebuild
 ## 回滚
 
 ```bash
-# 后端：回到旧镜像（旧容器保留为 server-old-rec-20261103）
-# 当前线上镜像以实际 docker ps 为准；env 备份：
+# 后端：回到上一版（rec-20261103k，容器保留为 server-old-rec-20261104）
+# 当前线上 rec-20261104b；再上一版 rec-20261104a（容器 server-rec-20261104a）
+# env 备份：
 #   /root/SSE_Market/go_server.env.bak-20261103-spark（切 Spark 前）
 #   /root/SSE_Market/go_server.env.bak-20261103（上推荐前）
 docker stop server && docker rm server
@@ -126,7 +136,7 @@ docker run -d --name server --restart unless-stopped --network sse_market_server
   -v /root/SSE_Market/log/server:/app/log \
   -v /root/SSE_Market/database:/app/database \
   -v /root/SSE_Market/hexo_blog:/app/hexo_blog \
-  sse_market_server:rollback-20261103
+  sse_market_server:rec-20261103k
 
 # 前端：恢复构建产物。dist 是 nginx 的目录 bind mount，
 # 必须原地清空再拷回（不要 rm -rf dist 后重建，否则容器仍指向旧 inode）。

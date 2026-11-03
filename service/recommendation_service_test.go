@@ -366,6 +366,135 @@ func TestImpressionPenaltyDecays(t *testing.T) {
 	}
 }
 
+func TestExplorationSlotsPickOffInterestHighQuality(t *testing.T) {
+	s := newTestRecService(&fakeRecRepo{mode: domain.RecModeOn})
+	s.cfg.explorePerPage = 2
+	s.cfg.exploreSimPercentile = 0.20
+	s.cfg.exploreQualityPercentile = 0.60
+	s.cfg.exploreCooldown = 7 * 24 * time.Hour
+
+	now := time.Now()
+	for i := 1; i <= 70; i++ {
+		s.idx.posts[i] = domain.RecPostMeta{ID: i, PostTime: now, Partition: "技术", Tag: "Go"}
+		s.idx.text[i] = []float32{1, 0}
+	}
+	offInterest := make(map[int]struct{})
+	for i := 101; i <= 120; i++ {
+		s.idx.posts[i] = domain.RecPostMeta{
+			ID: i, PostTime: now, Partition: "摄影", Tag: "摄影",
+			LikeNum: 50, CommentNum: 20,
+		}
+		s.idx.text[i] = []float32{0, 1}
+		offInterest[i] = struct{}{}
+	}
+	registered := now.Add(-30 * 24 * time.Hour)
+	s.profiles[7] = &tasteProfile{
+		text: []float32{1, 0}, browsed: map[int]struct{}{},
+		partitions: map[string]float64{"技术": 1}, tags: map[string]float64{"Go": 1},
+		strongSignals: 10, registeredAt: &registered, builtAt: now,
+	}
+
+	ctx := context.Background()
+	first, total, err := s.RankPostIDs(ctx, 7, nil, recFeedPageSize, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 90 || len(first) != recFeedPageSize {
+		t.Fatalf("unexpected first page total=%d len=%d", total, len(first))
+	}
+	// 默认探索位落在第 5、第 12 条（0-based 4、11）。
+	for _, pos := range []int{4, 11} {
+		if _, ok := offInterest[first[pos]]; !ok {
+			t.Fatalf("position %d should be exploration, got post %d: %v", pos+1, first[pos], first)
+		}
+	}
+	offCount := 0
+	for _, id := range first {
+		if _, ok := offInterest[id]; ok {
+			offCount++
+		}
+	}
+	if offCount != 2 {
+		t.Fatalf("first page should have exactly 2 exploration posts, got %d: %v", offCount, first)
+	}
+
+	// 探索位按页重复：第二页同样应有两处，且分页不重不漏。
+	seen := make(map[int]struct{}, total)
+	for _, id := range first {
+		seen[id] = struct{}{}
+	}
+	for offset := recFeedPageSize; offset < total; offset += recFeedPageSize {
+		page, _, err := s.RankPostIDs(ctx, 7, nil, recFeedPageSize, offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, id := range page {
+			if _, dup := seen[id]; dup {
+				t.Fatalf("duplicate post %d across pages", id)
+			}
+			seen[id] = struct{}{}
+			if offset == recFeedPageSize && (i == 4 || i == 11) {
+				if _, ok := offInterest[id]; !ok {
+					t.Fatalf("second page position %d should be exploration, got %d", i+1, id)
+				}
+			}
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("pagination should cover all posts: got %d want %d", len(seen), total)
+	}
+}
+
+func TestExplorationSkipsReadAndRecentlySeen(t *testing.T) {
+	s := newTestRecService(&fakeRecRepo{})
+	s.cfg.explorePerPage = 2
+	s.cfg.exploreSimPercentile = 1
+	s.cfg.exploreQualityPercentile = 0
+	s.cfg.exploreCooldown = 7 * 24 * time.Hour
+
+	now := time.Now()
+	entries := make([]rankEntry, 0, 10)
+	for i := 1; i <= 10; i++ {
+		entries = append(entries, rankEntry{
+			id: i, sim: 0, quality: 0.9, hasVector: true, tag: fmt.Sprintf("t%d", i),
+		})
+	}
+	entries[0].read = true
+	impressions := map[int]recImpression{
+		2: {count: 1, lastAt: now},
+		3: {count: 1, lastAt: now.Add(-8 * 24 * time.Hour)},
+	}
+	selected := s.selectExploration(entries, 8, impressions, now)
+	if len(selected) != 8 {
+		t.Fatalf("expected 8 exploration posts, got %d", len(selected))
+	}
+	chosen := make(map[int]struct{}, len(selected))
+	for _, e := range selected {
+		if e.id == 1 {
+			t.Fatal("read post must not be used for exploration")
+		}
+		if e.id == 2 {
+			t.Fatal("recently seen post must not be used for exploration")
+		}
+		if _, dup := chosen[e.id]; dup {
+			t.Fatalf("duplicate exploration post %d", e.id)
+		}
+		chosen[e.id] = struct{}{}
+	}
+	if _, ok := chosen[3]; !ok {
+		t.Fatal("impression older than cooldown should be allowed again")
+	}
+}
+
+func TestExplorationDisabled(t *testing.T) {
+	s := newTestRecService(&fakeRecRepo{})
+	s.cfg.explorePerPage = 0
+	entries := []rankEntry{{id: 1, hasVector: true, quality: 1}}
+	if got := s.selectExploration(entries, 2, nil, time.Now()); len(got) != 0 {
+		t.Fatalf("exploration should be disabled, got %+v", got)
+	}
+}
+
 func TestUnitVectorNormalizes(t *testing.T) {
 	v := unitVector([]float64{3, 4})
 	if v == nil || len(v) != 2 {

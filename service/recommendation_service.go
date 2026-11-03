@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -48,10 +49,25 @@ type RecommendationService interface {
 	Rebuild(ctx context.Context) error
 }
 
-// rankEntry 排序中间结构。
+// rankEntry 排序中间结构。sim/quality 同时供探索位筛选使用，
+// 避免为了算分位数再对全量帖子做一遍向量点积。
 type rankEntry struct {
-	id    int
-	score float64
+	id        int
+	score     float64
+	sim       float64
+	quality   float64
+	read      bool
+	own       bool
+	hasVector bool
+	partition string
+	tag       string
+}
+
+func (e rankEntry) topic() string {
+	if e.tag != "" {
+		return e.tag
+	}
+	return e.partition
 }
 
 type recIndex struct {
@@ -971,15 +987,12 @@ func (s *recommendationService) RankPostIDs(ctx context.Context, userID int, exc
 	}
 	now := time.Now()
 	coldStart := s.isColdStart(taste, now)
-	pattern := recPatternPersonalized
-	if coldStart {
-		pattern = recPatternColdStart
-	}
 	impressions := s.impressionsFor(ctx, userID)
 
 	s.idxMu.RLock()
 	idx := s.idx
 	buckets := [3][]rankEntry{}
+	all := make([]rankEntry, 0, len(idx.posts))
 	for id, meta := range idx.posts {
 		if meta.IsPrivate && meta.UserID != userID {
 			continue
@@ -1002,13 +1015,22 @@ func (s *recommendationService) RankPostIDs(ctx context.Context, userID int, exc
 		case bucket == recBucketFresh:
 			mode = recScoreFresh
 		}
-		score := s.scorePost(meta, idx, taste, now, read, userID, mode)
+		score, sim, quality := s.scorePostDetailed(meta, idx, taste, now, read, userID, mode)
 		// 看过但没点开的帖子轻微降权；次数越多扣得越多，48 小时半衰。
 		score -= impressionPenalty(impressions[id], now)
-		buckets[bucket] = append(buckets[bucket], rankEntry{
-			id:    id,
-			score: score,
-		})
+		entry := rankEntry{
+			id:        id,
+			score:     score,
+			sim:       sim,
+			quality:   quality,
+			read:      read,
+			own:       meta.UserID == userID,
+			hasVector: s.hasComparableVector(meta, idx, taste),
+			partition: meta.Partition,
+			tag:       meta.Tag,
+		}
+		all = append(all, entry)
+		buckets[bucket] = append(buckets[bucket], entry)
 	}
 	s.idxMu.RUnlock()
 
@@ -1022,7 +1044,44 @@ func (s *recommendationService) RankPostIDs(ctx context.Context, userID int, exc
 		})
 		buckets[i] = bucket
 	}
-	ids := interleaveRecBuckets(buckets, pattern)
+
+	// 探索位只给已有画像的用户：冷启动本来就在推历史优质帖，不需要再硬塞圈外内容。
+	explorePerPage := s.cfg.explorePerPage
+	if coldStart {
+		explorePerPage = 0
+	}
+	var exploreBucket []rankEntry
+	if explorePerPage > 0 && len(all) > 0 {
+		pages := (len(all) + recFeedPageSize - 1) / recFeedPageSize
+		need := explorePerPage * pages
+		exploreBucket = s.selectExploration(all, need, impressions, now)
+		if len(exploreBucket) > 0 {
+			logRecf("explore filled user=%d slots=%d selected=%d total=%d", userID, explorePerPage, len(exploreBucket), len(all))
+			selected := make(map[int]struct{}, len(exploreBucket))
+			for _, e := range exploreBucket {
+				selected[e.id] = struct{}{}
+			}
+			// 探索帖从年龄桶里摘掉，避免同一帖在正常位和探索位出现两次。
+			for i := range buckets {
+				filtered := buckets[i][:0]
+				for _, e := range buckets[i] {
+					if _, ok := selected[e.id]; !ok {
+						filtered = append(filtered, e)
+					}
+				}
+				buckets[i] = filtered
+			}
+		}
+	}
+
+	pattern := recPatternPersonalized
+	switch {
+	case coldStart:
+		pattern = recPatternColdStart
+	case len(exploreBucket) > 0:
+		pattern = recPatternForExplore(explorePerPage)
+	}
+	ids := interleaveRecBuckets([4][]rankEntry{buckets[0], buckets[1], buckets[2], exploreBucket}, pattern)
 	s.setRankCache(ctx, userID, ids)
 
 	total := len(ids)
@@ -1043,9 +1102,10 @@ func (s *recommendationService) RankPostIDs(ctx context.Context, userID int, exc
 const recFeedPageSize = 15
 
 const (
-	recBucketFresh = iota // ≤90 天
-	recBucketMid          // 90~365 天
-	recBucketOld          // >365 天
+	recBucketFresh   = iota // ≤90 天
+	recBucketMid            // 90~365 天
+	recBucketOld            // >365 天
+	recBucketExplore        // 明显不像用户兴趣的高质量帖
 )
 
 // 有画像用户：每 15 条 7 新 / 4 中 / 4 老。
@@ -1061,6 +1121,37 @@ var recPatternColdStart = []int{
 	recBucketOld, recBucketOld, recBucketOld, recBucketMid, recBucketOld,
 	recBucketOld, recBucketFresh, recBucketOld, recBucketMid, recBucketOld,
 	recBucketOld, recBucketFresh, recBucketMid, recBucketOld, recBucketFresh,
+}
+
+// 探索模式：每 15 条插入 1~3 条圈外帖。默认 2 条放在第 5、第 12 位，
+// 前 3 条不破坏用户对「推荐准」的第一印象。
+var (
+	recPatternExplore1 = []int{
+		recBucketFresh, recBucketFresh, recBucketMid, recBucketFresh, recBucketExplore,
+		recBucketMid, recBucketOld, recBucketFresh, recBucketFresh, recBucketMid,
+		recBucketOld, recBucketFresh, recBucketMid, recBucketOld, recBucketFresh,
+	}
+	recPatternExplore2 = []int{
+		recBucketFresh, recBucketFresh, recBucketMid, recBucketFresh, recBucketExplore,
+		recBucketMid, recBucketOld, recBucketFresh, recBucketMid, recBucketFresh,
+		recBucketOld, recBucketExplore, recBucketFresh, recBucketMid, recBucketOld,
+	}
+	recPatternExplore3 = []int{
+		recBucketFresh, recBucketFresh, recBucketMid, recBucketFresh, recBucketExplore,
+		recBucketMid, recBucketOld, recBucketFresh, recBucketExplore, recBucketMid,
+		recBucketOld, recBucketExplore, recBucketFresh, recBucketOld, recBucketFresh,
+	}
+)
+
+func recPatternForExplore(n int) []int {
+	switch {
+	case n <= 1:
+		return recPatternExplore1
+	case n == 2:
+		return recPatternExplore2
+	default:
+		return recPatternExplore3
+	}
 }
 
 type recScoreMode int
@@ -1102,11 +1193,12 @@ func (s *recommendationService) isColdStart(t *tasteProfile, now time.Time) bool
 	return false
 }
 
-// interleaveRecBuckets 按配额交错三个年龄桶；某个桶耗尽时从其余桶补位，
-// 保证全量帖子只出现一次且分页稳定。
-func interleaveRecBuckets(buckets [3][]rankEntry, pattern []int) []int {
-	pos := [3]int{}
-	total := len(buckets[0]) + len(buckets[1]) + len(buckets[2])
+// interleaveRecBuckets 按配额交错三个年龄桶 + 探索桶。
+// pattern 每 15 条重复一次，保证每一页都有固定老帖配额和探索位；
+// 某个桶耗尽时从其余桶补位，保证全量帖子只出现一次且分页稳定。
+func interleaveRecBuckets(buckets [4][]rankEntry, pattern []int) []int {
+	pos := [4]int{}
+	total := len(buckets[0]) + len(buckets[1]) + len(buckets[2]) + len(buckets[3])
 	out := make([]int, 0, total)
 	take := func(b int) bool {
 		if pos[b] >= len(buckets[b]) {
@@ -1116,22 +1208,22 @@ func interleaveRecBuckets(buckets [3][]rankEntry, pattern []int) []int {
 		pos[b]++
 		return true
 	}
-	for _, want := range pattern {
-		if take(want) {
-			continue
-		}
-		for _, alt := range [3]int{recBucketFresh, recBucketMid, recBucketOld} {
-			if take(alt) {
+	order := [4]int{recBucketFresh, recBucketMid, recBucketOld, recBucketExplore}
+	for len(out) < total {
+		moved := false
+		for _, want := range pattern {
+			if len(out) >= total {
 				break
 			}
-		}
-	}
-	for {
-		moved := false
-		for _, b := range [3]int{recBucketFresh, recBucketMid, recBucketOld} {
-			if take(b) {
+			if take(want) {
 				moved = true
-				break
+				continue
+			}
+			for _, alt := range order {
+				if take(alt) {
+					moved = true
+					break
+				}
 			}
 		}
 		if !moved {
@@ -1142,14 +1234,18 @@ func interleaveRecBuckets(buckets [3][]rankEntry, pattern []int) []int {
 }
 
 func (s *recommendationService) scorePost(p domain.RecPostMeta, idx *recIndex, taste *tasteProfile, now time.Time, read bool, viewerID int, mode recScoreMode) float64 {
+	score, _, _ := s.scorePostDetailed(p, idx, taste, now, read, viewerID, mode)
+	return score
+}
+
+// scorePostDetailed 在算综合分的同时返回相似度和质量分，供探索位筛选使用。
+func (s *recommendationService) scorePostDetailed(p domain.RecPostMeta, idx *recIndex, taste *tasteProfile, now time.Time, read bool, viewerID int, mode recScoreMode) (float64, float64, float64) {
 	ageHours := now.Sub(p.PostTime).Hours()
 	if ageHours < 0 {
 		ageHours = 0
 	}
 	timeScore := math.Exp(-ageHours / s.cfg.halfLifeHours)
-	// 浏览量来自详情页曝光，不能代表「喜欢」；质量只用主动互动。
-	engagement := float64(2*p.LikeNum + 3*p.CommentNum + 2*p.CoinNum)
-	quality := clamp01(math.Log1p(engagement) / 6.0)
+	quality := postQuality(p)
 	readAdj := 0.05
 	if read {
 		readAdj = -0.25
@@ -1181,7 +1277,157 @@ func (s *recommendationService) scorePost(p domain.RecPostMeta, idx *recIndex, t
 	if p.UserID == viewerID {
 		score -= 0.08
 	}
-	return score
+	return score, simScore, quality
+}
+
+// postQuality 只用主动互动；浏览量来自曝光，不代表喜欢，不能进质量分。
+func postQuality(p domain.RecPostMeta) float64 {
+	engagement := float64(2*p.LikeNum + 3*p.CommentNum + 2*p.CoinNum)
+	return clamp01(math.Log1p(engagement) / 6.0)
+}
+
+// hasComparableVector 判断帖子和用户画像是否有同一模态的向量可比。
+// 只有图片向量、但用户画像只有文本时相似度恒为 0，不能当作「圈外」。
+func (s *recommendationService) hasComparableVector(p domain.RecPostMeta, idx *recIndex, taste *tasteProfile) bool {
+	if taste == nil {
+		return false
+	}
+	if len(taste.text) > 0 {
+		if v, ok := idx.text[p.ID]; ok && len(v) > 0 {
+			return true
+		}
+	}
+	if len(taste.image) > 0 {
+		if v, ok := idx.image[p.ID]; ok && len(v) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+type exploreCandidate struct {
+	rankEntry
+	weight float64
+}
+
+// selectExploration 选「低相似 + 高质量 + 未读 + 最近没刷过」的帖子做圈外探索。
+// 相似度和质量都用候选人里的分位数而不是绝对阈值，避免不同模型/不同用户分布下失效。
+func (s *recommendationService) selectExploration(entries []rankEntry, need int, impressions map[int]recImpression, now time.Time) []rankEntry {
+	if need <= 0 || s.cfg.explorePerPage <= 0 {
+		return nil
+	}
+	stats := make([]rankEntry, 0, len(entries))
+	for _, e := range entries {
+		// 没有可比向量就判断不了「像不像」，自己发的和已读帖也不适合当圈外内容。
+		if e.hasVector && !e.own && !e.read {
+			stats = append(stats, e)
+		}
+	}
+	if len(stats) == 0 {
+		return nil
+	}
+
+	lowSim := bottomFractionSet(stats, s.cfg.exploreSimPercentile)
+	highQuality := topFractionSet(stats, 1-s.cfg.exploreQualityPercentile)
+	pool := make([]exploreCandidate, 0, minInt(len(stats), need))
+	for _, e := range stats {
+		if e.read {
+			continue
+		}
+		if _, ok := lowSim[e.id]; !ok {
+			continue
+		}
+		if _, ok := highQuality[e.id]; !ok {
+			continue
+		}
+		if imp, ok := impressions[e.id]; ok && imp.count > 0 && now.Sub(imp.lastAt) < s.cfg.exploreCooldown {
+			continue
+		}
+		// 质量高的优先，但保留随机性，避免所有用户长期看到同一批「圈外」帖。
+		pool = append(pool, exploreCandidate{
+			rankEntry: e,
+			weight:    e.quality * (0.5 + rand.Float64()),
+		})
+	}
+	if len(pool) == 0 {
+		return nil
+	}
+	sort.Slice(pool, func(i, j int) bool {
+		if pool[i].weight == pool[j].weight {
+			return pool[i].id < pool[j].id
+		}
+		return pool[i].weight > pool[j].weight
+	})
+
+	selected := make([]rankEntry, 0, minInt(need, len(pool)))
+	deferred := make([]exploreCandidate, 0)
+	lastTopic := ""
+	for _, c := range pool {
+		if len(selected) >= need {
+			break
+		}
+		topic := c.topic()
+		// 一页里的两个探索位尽量不同标签/分区，避免「换口味」还是同一个味。
+		if topic != "" && topic == lastTopic {
+			deferred = append(deferred, c)
+			continue
+		}
+		selected = append(selected, c.rankEntry)
+		lastTopic = topic
+	}
+	for _, c := range deferred {
+		if len(selected) >= need {
+			break
+		}
+		selected = append(selected, c.rankEntry)
+	}
+	return selected
+}
+
+// bottomFractionSet 返回相似度最低的 fraction 比例帖子 ID。
+func bottomFractionSet(entries []rankEntry, fraction float64) map[int]struct{} {
+	set := make(map[int]struct{})
+	if fraction <= 0 || len(entries) == 0 {
+		return set
+	}
+	k := int(math.Ceil(fraction * float64(len(entries))))
+	if k > len(entries) {
+		k = len(entries)
+	}
+	sorted := append([]rankEntry(nil), entries...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].sim == sorted[j].sim {
+			return sorted[i].id < sorted[j].id
+		}
+		return sorted[i].sim < sorted[j].sim
+	})
+	for i := 0; i < k; i++ {
+		set[sorted[i].id] = struct{}{}
+	}
+	return set
+}
+
+// topFractionSet 返回质量最高的 fraction 比例帖子 ID。
+func topFractionSet(entries []rankEntry, fraction float64) map[int]struct{} {
+	set := make(map[int]struct{})
+	if fraction <= 0 || len(entries) == 0 {
+		return set
+	}
+	k := int(math.Ceil(fraction * float64(len(entries))))
+	if k > len(entries) {
+		k = len(entries)
+	}
+	sorted := append([]rankEntry(nil), entries...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].quality == sorted[j].quality {
+			return sorted[i].id < sorted[j].id
+		}
+		return sorted[i].quality > sorted[j].quality
+	})
+	for i := 0; i < k; i++ {
+		set[sorted[i].id] = struct{}{}
+	}
+	return set
 }
 
 func (s *recommendationService) similarityScore(p domain.RecPostMeta, idx *recIndex, taste *tasteProfile) float64 {

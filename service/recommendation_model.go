@@ -37,10 +37,15 @@ type recConfig struct {
 	indexRefresh     time.Duration
 	coldStartDays    int
 	coldStartSignals int
-	chatBotUID       int
-	chatEnabled      bool
-	chatBase         string
-	chatProfileTTL   time.Duration
+	// 探索位：每页固定留几条「明显不像用户兴趣」的高质量帖，避免越推越窄。
+	explorePerPage           int
+	exploreSimPercentile     float64
+	exploreQualityPercentile float64
+	exploreCooldown          time.Duration
+	chatBotUID               int
+	chatEnabled              bool
+	chatBase                 string
+	chatProfileTTL           time.Duration
 }
 
 func envInt(key string, def int) int {
@@ -67,6 +72,35 @@ func envDuration(key string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// envIntAllowZero 与 envInt 的区别：允许显式配置 0，用来关闭某个功能。
+func envIntAllowZero(key string, def int) int {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func envFloat(key string, def float64) float64 {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func loadRecConfig() recConfig {
@@ -122,10 +156,15 @@ func loadRecConfig() recConfig {
 		indexRefresh:     envDuration("RECOMMEND_INDEX_REFRESH", 2*time.Minute),
 		coldStartDays:    envInt("RECOMMEND_COLD_START_DAYS", 3),
 		coldStartSignals: envInt("RECOMMEND_COLD_START_SIGNALS", 3),
-		chatBotUID:       envInt("XQ_BOT_UID", 95317),
-		chatEnabled:      envBool("RECOMMEND_CHAT_ENABLED", true),
-		chatBase:         chatBase,
-		chatProfileTTL:   envDuration("RECOMMEND_CHAT_PROFILE_TTL", 30*time.Minute),
+		// 默认每 15 条留 2 条探索位；0 关闭。超过 3 条会明显伤害相关性，直接封顶。
+		explorePerPage:           minInt(envIntAllowZero("RECOMMEND_EXPLORE_PER_PAGE", 2), 3),
+		exploreSimPercentile:     clampFloat(envFloat("RECOMMEND_EXPLORE_SIM_PERCENTILE", 0.20), 0, 1),
+		exploreQualityPercentile: clampFloat(envFloat("RECOMMEND_EXPLORE_QUALITY_PERCENTILE", 0.60), 0, 1),
+		exploreCooldown:          envDuration("RECOMMEND_EXPLORE_COOLDOWN", 7*24*time.Hour),
+		chatBotUID:               envInt("XQ_BOT_UID", 95317),
+		chatEnabled:              envBool("RECOMMEND_CHAT_ENABLED", true),
+		chatBase:                 chatBase,
+		chatProfileTTL:           envDuration("RECOMMEND_CHAT_PROFILE_TTL", 30*time.Minute),
 	}
 	if v := strings.TrimSpace(os.Getenv("RECOMMEND_TIME_HALF_LIFE")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
