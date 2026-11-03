@@ -122,8 +122,9 @@ POST   /api/auth/admin/recommendation/rebuild
 ## 回滚
 
 ```bash
-# 后端：回到上一版（rec-20261103k，容器保留为 server-old-rec-20261104）
-# 当前线上 rec-20261104b；再上一版 rec-20261104a（容器 server-rec-20261104a）
+# 后端：回到上一版（rec-20261104b，容器保留为 server-rec-20261104b）
+# 当前线上 final-20261104（2026-11-04 部署：探索位+商城封面）
+# 2026-11-04 已清理 rec-20261104a 及更早镜像
 # env 备份：
 #   /root/SSE_Market/go_server.env.bak-20261103-spark（切 Spark 前）
 #   /root/SSE_Market/go_server.env.bak-20261103（上推荐前）
@@ -136,13 +137,13 @@ docker run -d --name server --restart unless-stopped --network sse_market_server
   -v /root/SSE_Market/log/server:/app/log \
   -v /root/SSE_Market/database:/app/database \
   -v /root/SSE_Market/hexo_blog:/app/hexo_blog \
-  sse_market_server:rec-20261103k
+  sse_market_server:rec-20261104b
 
 # 前端：恢复构建产物。dist 是 nginx 的目录 bind mount，
 # 必须原地清空再拷回（不要 rm -rf dist 后重建，否则容器仍指向旧 inode）。
 cd /root/SSE_Market/sse_market_new_client/newSSE
 find dist -mindepth 1 -delete
-cp -a dist.bak-20261103/. dist/
+cp -a dist.bak-20261104/. dist/
 ```
 
 新增表与旧代码不冲突，回滚后端无需删表；需要彻底清理时再删 `post_embeddings`、`post_read_events`、`user_recommendation_settings`、`recommendation_gray_rules`。
