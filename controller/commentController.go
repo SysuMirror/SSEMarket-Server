@@ -259,6 +259,9 @@ func PostPcomment(c *gin.Context) {
 		return
 	}
 
+	// @小秋：一级评论提及（内部异步，失败静默走兜底回帖；bot 自己的不触发）
+	TryHandleAtMention("pcomment", result.Pcomment.ID, msg.PostID, result.Pcomment.ID, user.ID, user.Name, msg.Content)
+
 	if result.NotifyReceiver != nil && result.NotifyReceiver.ID != 0 && !result.NotifyReceiver.ISEmailNotificationBlocked {
 		EmailAlerter(result.NotifyReceiver.Email, 1, msg.Content)
 	}
@@ -373,6 +376,10 @@ func PostCcomment(c *gin.Context) {
 		}
 		return
 	}
+
+	// @小秋：楼中楼提及（挂在触发评论的楼下，服务层 ReplyCcommentID 分支负责通知到人）
+	TryHandleAtMention("ccomment", result.Ccomment.ID, msg.PostID, msg.PcommentID, user.ID, user.Name, content)
+
 	for _, n := range result.Notifies {
 		if n.Receiver != nil && n.Receiver.ID != 0 && !n.Receiver.ISEmailNotificationBlocked {
 			EmailAlerter(n.Receiver.Email, 3, content)

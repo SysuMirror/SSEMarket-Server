@@ -201,6 +201,31 @@ func (r *postRepository) ListBrowse(ctx context.Context, filter domain.BrowseFil
 	return modelsToDomain(posts), nil
 }
 
+// ListByIDs 按给定 ID 顺序批量取帖子。推荐流先算出排序 ID 再回表，
+// 这里必须保留入参顺序；查不到或不可见的帖子直接跳过。
+func (r *postRepository) ListByIDs(ctx context.Context, ids []int, viewerUserID int) ([]*domain.Post, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []model.Post
+	q := browseListSelect(r.session(ctx).Model(&model.Post{}))
+	q = applyVisibility(q, viewerUserID)
+	if err := q.Where("postID IN (?)", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int]model.Post, len(rows))
+	for i := range rows {
+		byID[rows[i].PostID] = rows[i]
+	}
+	out := make([]*domain.Post, 0, len(ids))
+	for _, id := range ids {
+		if p, ok := byID[id]; ok {
+			out = append(out, postToDomain(&p))
+		}
+	}
+	return out, nil
+}
+
 // ListPinned 查询主页置顶队列(最多 MaxPinnedQueueSize 条)。
 //
 // 队列规则:
@@ -266,9 +291,9 @@ func (r *postRepository) UnpinPost(ctx context.Context, postID, userID int) erro
 	result := r.session(ctx).Model(&model.Post{}).
 		Where("postID = ? AND userID = ?", postID, userID).
 		Updates(map[string]any{
-			"is_pinned":          0,
-			"pinned_at":          nil,
-			"pinned_expires_at":  nil,
+			"is_pinned":         0,
+			"pinned_at":         nil,
+			"pinned_expires_at": nil,
 		})
 	if result.Error != nil {
 		return result.Error

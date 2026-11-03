@@ -13,6 +13,8 @@ type PostRepository interface {
 	FindByID(ctx context.Context, id int) (*domain.Post, error)
 	List(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, int64, error)
 	ListBrowse(ctx context.Context, filter domain.BrowseFilter) ([]*domain.Post, error)
+	// ListByIDs 按给定 ID 顺序批量取帖子（推荐流用），已按 viewer 可见性过滤。
+	ListByIDs(ctx context.Context, ids []int, viewerUserID int) ([]*domain.Post, error)
 	ListPinned(ctx context.Context, viewerUserID int) ([]*domain.Post, error)
 	CountPinnedByUser(ctx context.Context, userID int) (int64, error)
 	// CountActivePinned 当前全站未过期置顶帖数量(置顶队列长度)。

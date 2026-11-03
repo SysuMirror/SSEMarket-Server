@@ -569,6 +569,18 @@ func UploadAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
+	// 动图（GIF/动图WebP/APNG）解码只剩首帧，跳过常规缩图管线：
+	// GIF 用 ffmpeg 保帧压缩（400 封顶），WebP/APNG 原文件直通图床
+	animatedURL, err := processAnimatedImage(filepath, 400)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "动图上传失败" + err.Error()})
+		return
+	}
+	if animatedURL != "" {
+		response.Success(c, gin.H{"avatar_url": animatedURL}, "上传成功")
+		return
+	}
+
 	// 压缩头像
 	// 打开上传的文件
 	src, err := file.Open()
@@ -642,37 +654,46 @@ func UpdateAvatar(c *gin.Context) {
 		response.Response(c, http.StatusInternalServerError, 500, nil, "文件保存失败")
 		return
 	}
-	// 压缩头像
-	// 打开上传的文件
-	src, err := file.Open()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
-		return
-	}
-	defer src.Close()
-	// 读取上传文件的内容，并解码为 image.Image 对象
-	img, _, err := image.Decode(src)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败"})
-		return
-	}
-
-	// 对图像进行压缩处理
-	resizedImage := imaging.Thumbnail(img, 400, 400, imaging.Lanczos)
-	// 这里似乎只支持绝对路径，这里要根据服务器修改
-	resizedPath := "public/resized/" + filename
-	// 服务器本地备份
-	err = imaging.Save(resizedImage, resizedPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
-		return
-	}
-
+	// 动图（GIF/动图WebP/APNG）解码只剩首帧，跳过常规缩图管线：
+	// GIF 用 ffmpeg 保帧压缩（400 封顶），WebP/APNG 原文件直通图床
 	fileURL := ""
-	fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+	if animatedURL, aerr := processAnimatedImage(filepath, 400); aerr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "动图上传失败" + aerr.Error()})
 		return
+	} else if animatedURL != "" {
+		fileURL = animatedURL
+	} else {
+		// 压缩头像
+		// 打开上传的文件
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
+			return
+		}
+		defer src.Close()
+		// 读取上传文件的内容，并解码为 image.Image 对象
+		img, _, err := image.Decode(src)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败"})
+			return
+		}
+
+		// 对图像进行压缩处理
+		resizedImage := imaging.Thumbnail(img, 400, 400, imaging.Lanczos)
+		// 这里似乎只支持绝对路径，这里要根据服务器修改
+		resizedPath := "public/resized/" + filename
+		// 服务器本地备份
+		err = imaging.Save(resizedImage, resizedPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+			return
+		}
+
+		fileURL, err = api.UploadImage("/src/images/resized/"+filename, resizedPath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "缩略图生成保存失败" + err.Error()})
+			return
+		}
 	}
 
 	user, err := service.Users.UpdateAvatarByPhone(c.Request.Context(), phone, fileURL)

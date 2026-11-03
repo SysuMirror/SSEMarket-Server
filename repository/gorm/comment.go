@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"loginTest/domain"
 	"loginTest/model"
@@ -379,6 +380,11 @@ func (r *commentRepository) AdjustPostHeat(ctx context.Context, postID int, delt
 }
 
 func (r *commentRepository) CreateNotice(ctx context.Context, receiver, sender int, noticeType, text string, target int) error {
+	// ntext 列 varchar(1000)：@小秋 长回帖会把原文塞爆（MySQL 严格模式下静默插失败=通知丢失）。
+	// 一律 900 rune 截断加省略号——顺带修历史隐患（超长评论通知此前也会丢）。
+	if utf8.RuneCountInString(text) > 900 {
+		text = string([]rune(text)[:900]) + "…"
+	}
 	notice := model.Notice{
 		Receiver: receiver,
 		Sender:   sender,

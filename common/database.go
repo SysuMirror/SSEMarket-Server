@@ -119,6 +119,11 @@ func InitDB() *gorm.DB {
 	// 站内币体系：流水 + 投币记录（与小说的经验/积分互不相通）。
 	autoMigrate(db, &model.CoinLedger{})
 	autoMigrate(db, &model.CoinThrow{})
+	// 推荐流：用户开关、UID 灰度规则、帖子向量、阅读时长事件。
+	autoMigrate(db, &model.UserRecommendationSetting{})
+	autoMigrate(db, &model.RecommendationGrayRule{})
+	autoMigrate(db, &model.PostEmbedding{})
+	autoMigrate(db, &model.PostReadEvent{})
 	// 职位账号（开发人员匿名 @）：管理员手工 INSERT 的映射表 + 启动同步派生小号
 	autoMigrate(db, &model.StaffAlias{})
 	SyncStaffAliases(db)

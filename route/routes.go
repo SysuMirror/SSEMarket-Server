@@ -87,6 +87,10 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	auth.POST("/api/auth/apiTest", api.ApiTest)
 	auth.POST("/api/auth/post", controller.Post)
 	auth.POST("/api/auth/browse", controller.Browse)
+	// 推荐流：用户开关与阅读时长上报。
+	auth.GET("/api/auth/recommendation/settings", controller.RecommendationSettings)
+	auth.POST("/api/auth/recommendation/settings", controller.UpdateRecommendationSettings)
+	auth.POST("/api/auth/recommendation/read", controller.RecordRecommendationRead)
 	auth.POST("/api/auth/pinPost", controller.PinPost)
 	auth.POST("/api/auth/unpinPost", controller.UnpinPost)
 	auth.POST("/api/auth/userProfilePosts", controller.UserProfilePosts)
@@ -294,6 +298,12 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	adminAuth.POST("/api/auth/getfeedback", controller.AdminListFeedback)
 	adminAuth.GET("/api/auth/admin/feedback", controller.AdminListFeedback)
 	adminAuth.POST("/api/auth/admin/feedback/:id", controller.AdminMarkFeedback)
+	// 推荐流灰度与运行状态。
+	adminAuth.GET("/api/auth/admin/recommendation/stats", controller.AdminRecommendationStats)
+	adminAuth.GET("/api/auth/admin/recommendation/gray", controller.AdminListRecommendationGrayRules)
+	adminAuth.POST("/api/auth/admin/recommendation/gray", controller.AdminUpsertRecommendationGrayRule)
+	adminAuth.DELETE("/api/auth/admin/recommendation/gray/:id", controller.AdminDeleteRecommendationGrayRule)
+	adminAuth.POST("/api/auth/admin/recommendation/rebuild", controller.AdminRebuildRecommendation)
 
 	adminAuth.GET("/api/auth/admin/oauth/apps", controller.AdminListOAuthApps)
 	adminAuth.POST("/api/auth/admin/oauth/apps", controller.AdminCreateOAuthApp)

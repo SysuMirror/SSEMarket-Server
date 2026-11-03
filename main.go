@@ -229,6 +229,8 @@ func main() {
 	go heat.StartHeat()
 	go lottery.StartAutoDraw()
 	go pin.StartClearExpired()
+	// 推荐流：加载向量索引 + 后台增量构建帖子嵌入（未配置 key 时自动只做时间流）。
+	service.Recs.Start(context.Background())
 
 	port := viper.GetString("server.port")
 	if port == "" {

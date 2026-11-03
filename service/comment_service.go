@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,6 +19,16 @@ import (
 )
 
 const commentWeight = float64(6)
+
+// commentContentLimit 正文字符上限：普通用户 1000；小秋 bot 放宽到 2800——
+// @小秋 回帖是排好版的 markdown（可能带生图链接），1000 装不下；DB 列 varchar(3000)
+// 是硬顶，2800 给通知截断等下游留余量。XQ_BOT_UID 未配置时没有 bot，恒 1000。
+func commentContentLimit(authorUID int) int {
+	if botUID, err := strconv.Atoi(strings.TrimSpace(os.Getenv("XQ_BOT_UID"))); err == nil && botUID > 0 && authorUID == botUID {
+		return 2800
+	}
+	return 1000
+}
 
 type commentService struct {
 	comments repository.CommentRepository
@@ -185,6 +198,53 @@ func (s *commentService) buildSubcommentsFromCache(ccomments []*domain.Ccomment,
 	return out, nil
 }
 
+// XqAtThreadDigest 为 @小秋 场景拼"所在楼"的楼中楼上下文摘要：该一级评论下
+// 最近 maxFloors 条二级评论按时间升序，每条「[月-日 时:分] 作者昵称: 正文截断」。
+// markCcommentID>0 时在该条尾部加触发标记（让小秋知道自己是在哪一层被喊的）。
+// repo 的 List 无 ORDER BY，这里显式按 ID（自增=时间序）排，摘要才稳定。
+func (s *commentService) XqAtThreadDigest(ctx context.Context, pcommentID, markCcommentID, maxFloors, perFloorRunes int) (string, error) {
+	ccs, err := s.comments.ListCcommentsByPcommentID(ctx, pcommentID)
+	if err != nil || len(ccs) == 0 {
+		return "", err
+	}
+	sort.SliceStable(ccs, func(i, j int) bool { return ccs[i].ID < ccs[j].ID })
+	if maxFloors > 0 && len(ccs) > maxFloors {
+		ccs = ccs[len(ccs)-maxFloors:]
+	}
+	ids := make([]int, 0, len(ccs))
+	seen := map[int]bool{}
+	for _, cc := range ccs {
+		if cc.UserID != 0 && !seen[cc.UserID] {
+			seen[cc.UserID] = true
+			ids = append(ids, cc.UserID)
+		}
+	}
+	users, uerr := s.comments.UsersByIDs(ctx, ids)
+	if uerr != nil {
+		users = map[int]*domain.User{}
+	}
+	var b strings.Builder
+	for _, cc := range ccs {
+		name := "匿名用户"
+		if u, ok := users[cc.UserID]; ok && u != nil && u.Name != "" {
+			name = u.Name
+		}
+		text := cc.Content
+		if perFloorRunes > 0 {
+			r := []rune(text)
+			if len(r) > perFloorRunes {
+				text = string(r[:perFloorRunes]) + "…"
+			}
+		}
+		mark := ""
+		if cc.ID == markCcommentID {
+			mark = "　←【刚喊@小秋的就是这条】"
+		}
+		fmt.Fprintf(&b, "[%s] %s：%s%s\n", cc.CreatedAt.Format("01-02 15:04"), name, text, mark)
+	}
+	return b.String(), nil
+}
+
 func (s *commentService) buildSubcomments(ctx context.Context, pcommentID, viewerUserID int, userMap map[int]*domain.User) ([]*domain.CcommentWithMeta, error) {
 	ccomments, err := s.comments.ListCcommentsByPcommentID(ctx, pcommentID)
 	if err != nil {
@@ -294,7 +354,7 @@ func (s *commentService) DeleteCcomment(ctx context.Context, ccommentID int) err
 
 func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentCreateInput) (*domain.PcommentCreateResult, error) {
 	content := strings.TrimSpace(in.Content)
-	if content == "" || utf8.RuneCountInString(content) > 1000 {
+	if content == "" || utf8.RuneCountInString(content) > commentContentLimit(in.UserID) {
 		return nil, domain.ErrBadRequest
 	}
 	if in.UserID == 0 || in.PostID == 0 {
@@ -388,7 +448,7 @@ func (s *commentService) resolveEffectiveAuthor(ctx context.Context, userID, pos
 
 func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentCreateInput) (*domain.CcommentCreateResult, error) {
 	content := strings.TrimSpace(in.Content)
-	if content == "" || utf8.RuneCountInString(content) > 1000 {
+	if content == "" || utf8.RuneCountInString(content) > commentContentLimit(in.UserID) {
 		return nil, domain.ErrBadRequest
 	}
 	if in.UserID == 0 || in.PostID == 0 || in.PcommentID == 0 {

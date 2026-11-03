@@ -16,20 +16,20 @@ type Post struct {
 	LikeNum    int
 	// CoinNum 被投币总数（只展示，不参与任何结算）：
 	// 真实投币数 + 历史投票数（投票功能已下线，旧票按 1 票 = 1 币折算，见 PostCoinNum）。
-	CoinNum   int
-	BrowseNum int
-	PostTime   time.Time
-	Heat       float64
-	Photos     string
-	Tag        string
-	PostKind   string
-	QuotePrice *float64
-	QuestStatus string
-	IsPrivate   bool
-	IsAnonymous bool
-	IsPinned         bool
-	PinnedAt         *time.Time
-	PinnedExpiresAt  *time.Time
+	CoinNum         int
+	BrowseNum       int
+	PostTime        time.Time
+	Heat            float64
+	Photos          string
+	Tag             string
+	PostKind        string
+	QuotePrice      *float64
+	QuestStatus     string
+	IsPrivate       bool
+	IsAnonymous     bool
+	IsPinned        bool
+	PinnedAt        *time.Time
+	PinnedExpiresAt *time.Time
 }
 
 // EffectiveIsPinned 是否「当前仍有效」的置顶。
@@ -62,18 +62,20 @@ type BrowseResult struct {
 	Pinned []BrowseItem // 置顶队列:未过期置顶帖(最多 MaxPinnedQueueSize,按 PinnedAt 先进先出)
 	Posts  []BrowseItem // 正常帖(已排除 Pinned 中的 PostID)
 	Total  int64        // 正常帖总数(不含 Pinned)
+	// FeedMode 本次返回实际使用的推流模式：time（按时间）/ recommend（按画像推荐）。
+	FeedMode string
 }
 
 // BrowseItem 浏览列表单项（含作者与互动状态）。
 type BrowseItem struct {
-	Post             *Post
-	Author           *User
-	IsSaved          bool
-	IsLiked          bool
+	Post    *Post
+	Author  *User
+	IsSaved bool
+	IsLiked bool
 	// MyCoins 我在这帖上累计投了几个币（0 = 没投过；上限 2，见 CoinMaxPerTarget）。
 	MyCoins          int
 	HotComment       *Pcomment // 该帖点赞最多的一条一级评论(并列按字数倒序),可能为 nil
-	HotCommentAuthor *User    // HotComment.UserID 对应的用户,可能为 nil
+	HotCommentAuthor *User     // HotComment.UserID 对应的用户,可能为 nil
 }
 
 // PostDetail 帖子详情（含作者、互动状态、实时浏览数）。

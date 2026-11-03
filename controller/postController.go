@@ -114,6 +114,7 @@ func Post(c *gin.Context) {
 	})
 	if err == nil && createdPost != nil {
 		RagNotify("upsert", "post", createdPost.ID)
+		TryHandleAtMention("post", createdPost.ID, createdPost.ID, 0, user.ID, user.Name, content)
 	}
 	if err != nil {
 		var pinAfter *domain.PinAfterCreateError
@@ -124,6 +125,7 @@ func Post(c *gin.Context) {
 			// 暂时停止向 iwiki 提取服务 Redis 队列塞入数据，以节省服务器成本。恢复时取消下方注释即可。
 			if createdPost != nil && createdPost.ID != 0 {
 				RagNotify("upsert", "post", createdPost.ID)
+				TryHandleAtMention("post", createdPost.ID, createdPost.ID, 0, user.ID, user.Name, content)
 				// if err := mq.EnqueuePost(c.Request.Context(), createdPost.ID, createdPost.Title); err != nil {
 				// 	log.Printf("[archive-mq] EnqueuePost 失败 postID=%d: %v", createdPost.ID, err)
 				// }
@@ -259,7 +261,11 @@ func Browse(c *gin.Context) {
 		Limit:        requestBrowseMeg.Limit,
 		Offset:       requestBrowseMeg.Offset,
 	}
-	items, err := service.Posts.Browse(c.Request.Context(), filter)
+	browseCtx := c.Request.Context()
+	if auth := c.GetHeader("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		browseCtx = service.WithChatToken(browseCtx, strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")))
+	}
+	items, err := service.Posts.Browse(browseCtx, filter)
 	if err != nil {
 		apperr.WriteMsg(c, err, "查询失败")
 		return
@@ -273,9 +279,10 @@ func Browse(c *gin.Context) {
 		postResponses = append(postResponses, browseItemToResponse(item, viewer.ID))
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"pinned": pinnedResponses,
-		"posts":  postResponses,
-		"total":  items.Total,
+		"pinned":   pinnedResponses,
+		"posts":    postResponses,
+		"total":    items.Total,
+		"feedMode": items.FeedMode,
 	})
 }
 
@@ -975,6 +982,19 @@ func UploadPhotos(c *gin.Context) {
 	if err != nil {
 		log.Printf("[UploadPhotos] SaveUploadedFile failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败"})
+		return
+	}
+
+	// 动图（GIF/动图WebP/APNG）解码只剩首帧，跳过常规缩图管线：
+	// GIF 用 ffmpeg 保帧压缩（1920 封顶），WebP/APNG 原文件直通图床
+	animatedURL, err := processAnimatedImage(filepath, 1920)
+	if err != nil {
+		log.Printf("[UploadPhotos] animated passthrough failed: path=%s err=%v", filepath, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "动图上传失败" + err.Error()})
+		return
+	}
+	if animatedURL != "" {
+		c.JSON(http.StatusOK, gin.H{"fileURL": animatedURL, "message": "上传成功"})
 		return
 	}
 

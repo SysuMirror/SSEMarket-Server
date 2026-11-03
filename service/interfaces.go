@@ -134,6 +134,8 @@ type CommentService interface {
 	FindUserByPhone(ctx context.Context, phone string) (*domain.User, error)
 	FindPcomment(ctx context.Context, pcommentID int) (*domain.Pcomment, error)
 	FindCcomment(ctx context.Context, ccommentID int) (*domain.Ccomment, error)
+	// XqAtThreadDigest @小秋楼中楼上下文摘要（见 commentService 实现）
+	XqAtThreadDigest(ctx context.Context, pcommentID, markCcommentID, maxFloors, perFloorRunes int) (string, error)
 	ValidatePcommentAccess(ctx context.Context, pcommentID, viewerUserID int) error
 	ValidateCcommentAccess(ctx context.Context, ccommentID, viewerUserID int) error
 	ResolveMentionUsers(ctx context.Context, names []string) ([]*domain.User, error)

@@ -60,7 +60,7 @@ func (s *postService) CountBrowse(ctx context.Context, filter domain.BrowseFilte
 // 其他场景(searchsort != "home")不走置顶逻辑,Pinned 字段为空,
 // 所有帖都在 Posts 中(与旧行为兼容)。
 func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) (domain.BrowseResult, error) {
-	result := domain.BrowseResult{}
+	result := domain.BrowseResult{FeedMode: domain.RecEffectiveTime}
 
 	// 仅主页列表展示置顶帖。其他场景(收藏/历史/分区/搜索)无置顶逻辑。
 	if filter.Searchsort == "home" || filter.Searchsort == "" {
@@ -84,6 +84,48 @@ func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) (d
 		}
 	}
 
+	// 默认主页（无搜索/标签/时间筛选、未改排序）在用户开启或命中灰度时走推荐流。
+	// 推荐排序失败或索引尚未就绪时静默退回时间流，绝不影响首页可用性。
+	if recEligible(filter) && Recs != nil {
+		if mode, _, _ := Recs.EffectiveMode(ctx, filter.ViewerUserID); mode == domain.RecEffectiveRecommend {
+			limit, offset := filter.Limit, filter.Offset
+			if limit <= 0 {
+				limit = 15
+			}
+			exclude := make(map[int]struct{}, len(filter.ExcludePostIDs))
+			for _, id := range filter.ExcludePostIDs {
+				exclude[id] = struct{}{}
+			}
+			ids, total, err := Recs.RankPostIDs(ctx, filter.ViewerUserID, exclude, limit, offset)
+			if err == nil {
+				var recPosts []*domain.Post
+				if len(ids) > 0 {
+					recPosts, err = s.posts.ListByIDs(ctx, ids, filter.ViewerUserID)
+				}
+				if err == nil {
+					items, attachErr := s.attachPersonalBrowseState(ctx, filter, recPosts)
+					if attachErr == nil {
+						result.Posts = items
+						result.Total = int64(total)
+						result.FeedMode = domain.RecEffectiveRecommend
+						// 记录本页曝光，供下次刷新降权轮换。只认真实 feed 页大小，
+						// 后台新帖轮询（limit=20）和置顶探测（limit=1）不算用户看过。
+						if limit == recFeedPageSize && len(items) > 0 {
+							seen := make([]int, 0, len(items))
+							for _, item := range items {
+								if item.Post != nil && item.Post.ID > 0 {
+									seen = append(seen, item.Post.ID)
+								}
+							}
+							Recs.RecordFeedImpressions(ctx, filter.ViewerUserID, seen)
+						}
+						return result, nil
+					}
+				}
+			}
+		}
+	}
+
 	posts, err := s.fetchPublicFeed(ctx, filter)
 	if err != nil {
 		return result, err
@@ -94,6 +136,24 @@ func (s *postService) Browse(ctx context.Context, filter domain.BrowseFilter) (d
 	}
 	result.Posts = items
 	return result, nil
+}
+
+// recEligible 判断当前列表请求是否可以走推荐流：
+// 只有「主页默认信息流」可以；搜索、标签、时间筛选、分区、显式改排序都保持原行为。
+func recEligible(filter domain.BrowseFilter) bool {
+	if filter.ViewerUserID <= 0 {
+		return false
+	}
+	if filter.Searchsort != "" && filter.Searchsort != "home" {
+		return false
+	}
+	if filter.Partition != "" && filter.Partition != "主页" {
+		return false
+	}
+	if filter.Searchinfo != "" || filter.Tag != "" || filter.TimeFrom != "" || filter.TimeTo != "" {
+		return false
+	}
+	return filter.OrderBy == "" || filter.OrderBy == "time_desc"
 }
 
 func (s *postService) GetDetail(ctx context.Context, postID, viewerUserID int) (*domain.PostDetail, error) {
@@ -178,17 +238,17 @@ func (s *postService) Create(ctx context.Context, in domain.PostCreateInput) (*d
 	}
 	tagString := strings.Join(in.Tags, ",")
 	post := &domain.Post{
-		UserID:     in.UserID,
-		Partition:  in.Partition,
-		Title:      in.Title,
-		Content:    in.Content,
-		LikeNum:    0,
-		CommentNum: 0,
-		BrowseNum:  0,
-		Heat:       0,
-		PostTime:   time.Now(),
-		Photos:     in.Photos,
-		Tag:        tagString,
+		UserID:      in.UserID,
+		Partition:   in.Partition,
+		Title:       in.Title,
+		Content:     in.Content,
+		LikeNum:     0,
+		CommentNum:  0,
+		BrowseNum:   0,
+		Heat:        0,
+		PostTime:    time.Now(),
+		Photos:      in.Photos,
+		Tag:         tagString,
 		IsPrivate:   in.IsPrivate,
 		IsAnonymous: in.IsAnonymous,
 	}
@@ -627,11 +687,11 @@ func (s *postService) buildBrowseItems(ctx context.Context, viewerID int, posts 
 			saved = true
 		}
 		items = append(items, domain.BrowseItem{
-			Post:     p,
-			Author:   author,
-			IsSaved:  saved,
-			IsLiked:  liked,
-			MyCoins:  thrownSet[p.ID],
+			Post:    p,
+			Author:  author,
+			IsSaved: saved,
+			IsLiked: liked,
+			MyCoins: thrownSet[p.ID],
 		})
 	}
 	return items, nil
