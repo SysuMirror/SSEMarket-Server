@@ -46,6 +46,13 @@ func InitConfig() {
 	_ = viper.BindEnv("sso.authorize_url", "SSO_AUTHORIZE_URL")
 	_ = viper.BindEnv("sso.token_url", "SSO_TOKEN_URL")
 	_ = viper.BindEnv("sso.userinfo_url", "SSO_USERINFO_URL")
+	_ = viper.BindEnv("sso.password_verify_url", "SSO_PASSWORD_VERIFY_URL")
+	_ = viper.BindEnv("sso.session_verify_url", "SSO_SESSION_VERIFY_URL")
+	_ = viper.BindEnv("sso.session_revoke_url", "SSO_SESSION_REVOKE_URL")
+	_ = viper.BindEnv("sso.cookie_name", "SSO_COOKIE_NAME")
+	_ = viper.BindEnv("sso.cookie_domain", "SSO_COOKIE_DOMAIN")
+	_ = viper.BindEnv("sso.cookie_max_age", "SSO_COOKIE_MAX_AGE")
+	_ = viper.BindEnv("sso.discovery_url", "SSO_DISCOVERY_URL")
 	_ = viper.BindEnv("sso.redirect_uri", "SSO_REDIRECT_URI")
 	_ = viper.BindEnv("platform.sm2_public_key", "PLATFORM_SM2_PUBLIC_KEY")
 

@@ -211,7 +211,7 @@ func newSsoServer(t *testing.T, expectedVerifierRef *string, sub string) *httpte
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"sub":"` + sub + `","preferred_username":"alice","email":"a@x.cn"}`))
+		_, _ = w.Write([]byte(`{"sub":"` + sub + `","preferred_username":"alice","email":"a@x.cn","internal":true}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -229,7 +229,7 @@ func newFailingTokenServer(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"sub":"s1","preferred_username":"a","email":"a@x.cn"}`))
+		_, _ = w.Write([]byte(`{"sub":"s1","preferred_username":"a","email":"a@x.cn","internal":true}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

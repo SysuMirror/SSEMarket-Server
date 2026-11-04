@@ -31,7 +31,8 @@ type UserRepository interface {
 	ListAllUsers(ctx context.Context) ([]*domain.User, error)
 	SaveRefreshToken(ctx context.Context, userID int, token string, expiresAt int64) error
 	FindValidRefreshToken(ctx context.Context, token string, userID int) (*domain.RefreshTokenRecord, error)
-	MarkRefreshTokenUsed(ctx context.Context, id int) error
+	FindUsedRefreshToken(ctx context.Context, token string, userID int) (*domain.RefreshTokenRecord, error)
+	MarkRefreshTokenUsed(ctx context.Context, id int, successorToken string) error
 	UseCDKey(ctx context.Context, content string) error
 
 	FindActiveOAuth2App(ctx context.Context, appID string) (*domain.OAuth2App, error)

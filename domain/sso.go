@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // SsoBinding UniSSO 身份与集市账号的绑定关系。
 type SsoBinding struct {
@@ -27,11 +30,44 @@ type SsoTicketPayload struct {
 	SsoEmail    string `json:"sso_email,omitempty"`
 }
 
+// SsoBool 兼容 true/"true"/1 三种序列化；缺失或无法识别一律 false。
+type SsoBool bool
+
+func (b *SsoBool) UnmarshalJSON(data []byte) error {
+	switch strings.Trim(strings.TrimSpace(string(data)), `"`) {
+	case "true", "True", "TRUE", "1":
+		*b = true
+	default:
+		*b = false
+	}
+	return nil
+}
+
 // SsoUserinfo UniSSO userinfo 端点返回（仅取需要的字段）。
 type SsoUserinfo struct {
-	Sub               string `json:"sub"`
-	PreferredUsername string `json:"preferred_username"`
-	Email             string `json:"email"`
+	Sub               string  `json:"sub"`
+	PreferredUsername string  `json:"preferred_username"`
+	Email             string  `json:"email"`
+	Internal          SsoBool `json:"internal"`
+}
+
+// SsoSession unisso password/verify、session/verify 返回的共享 SSO 会话元数据。
+// Cookie 值不可自证，平台只把它当会话指针，必须服务端回 unisso 校验。
+type SsoSession struct {
+	ID           string `json:"sso_session"`
+	CookieName   string `json:"sso_cookie_name"`
+	CookieDomain string `json:"sso_cookie_domain"`
+	MaxAge       int    `json:"sso_max_age"`
+}
+
+// SsoPasswordVerifyUser POST /api/oauth/password/verify 的 user 节点。
+type SsoPasswordVerifyUser struct {
+	Sub               string  `json:"sub"`
+	SseSub            string  `json:"sse_sub"`
+	Internal          SsoBool `json:"internal"`
+	Name              string  `json:"name"`
+	Email             string  `json:"email"`
+	PreferredUsername string  `json:"preferred_username"`
 }
 
 // SsoExchangeResult POST /api/sso/exchange 的响应体。

@@ -180,6 +180,8 @@ func main() {
 	core.InitLocalCache()
 	cache.InitManager()
 	service.InitHotDataService(gormrepo.NewHotDataRepository(db))
+	// UniSSO 健康探测：主模式/兜底模式切换，前端登录入口依赖此状态。
+	service.StartSsoHealthMonitor()
 
 	collectorCtx, collectorCancel := context.WithCancel(context.Background())
 	observability.StartCollectors(collectorCtx, rds)

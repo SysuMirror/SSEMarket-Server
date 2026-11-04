@@ -69,3 +69,45 @@ func UserRateLimit(scope string, limit int, window time.Duration) gin.HandlerFun
 		c.Abort()
 	}
 }
+
+// IPRateLimit 通用「按客户端 IP」固定窗口限流中间件，用于无登录态端点（如静默 SSO）。
+//
+//   - 计数放 Redis，key = ratelimit:ip:<scope>:<ip>:<窗口序号>，随窗口自动过期；
+//   - Redis 不可用或报错时放行（fail-open），身份兑换失败本就静默回落登录表单，
+//     不能因为限流器自身故障把用户挡在门外；
+//   - 超限返回 429 + Retry-After。
+func IPRateLimit(scope string, limit int, window time.Duration) gin.HandlerFunc {
+	if scope == "" || limit <= 0 || window <= 0 {
+		panic("IPRateLimit: scope/limit/window 必须为正")
+	}
+	windowMs := window.Milliseconds()
+	return func(c *gin.Context) {
+		if core.MyRedis == nil {
+			c.Next()
+			return
+		}
+		ip := clientIPFromProxy(c)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
+		defer cancel()
+		bucket := time.Now().UnixMilli() / windowMs
+		key := fmt.Sprintf("ratelimit:ip:%s:%s:%d", scope, ip, bucket)
+
+		pipe := core.MyRedis.TxPipeline()
+		countCmd := pipe.Incr(ctx, key)
+		pipe.Expire(ctx, key, window+time.Second)
+		if _, err := pipe.Exec(ctx); err != nil {
+			c.Next()
+			return
+		}
+		if countCmd.Val() <= int64(limit) {
+			c.Next()
+			return
+		}
+
+		c.Header("Retry-After", strconv.Itoa(int(window.Seconds())))
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"code": http.StatusTooManyRequests,
+			"msg":  "sso_unavailable",
+		})
+	}
+}

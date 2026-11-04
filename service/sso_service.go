@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,11 +35,22 @@ const (
 	ssoTicketBound      = "bound"
 )
 
-// 回调阶段错误（controller 映射为 302 ?error=state|exchange|conflict）。
+// 回调阶段错误（controller 映射为 302 ?error=state|exchange|conflict|internal）。
 var (
 	ErrSsoStateInvalid = errors.New("sso state invalid or replayed")
 	ErrSsoExchange     = errors.New("sso token exchange failed")
 	ErrSsoConflict     = errors.New("sso binding conflict")
+	ErrSsoForbidden    = errors.New("sso user is not internal")
+)
+
+// M2M 密码校验（/api/auth/login 主路径）错误，controller 映射为明确提示。
+var (
+	ErrSsoBadCredentials  = errors.New("sso invalid email or password")
+	ErrSsoUnavailable     = errors.New("sso service unavailable")
+	ErrSsoNoLocalAccount  = errors.New("sso identity has no local market account")
+	ErrSsoVerifyForbidden = errors.New("sso password verify forbidden")
+	ErrSsoTooManyAttempts = errors.New("sso password verify too many attempts")
+	ErrSsoInvalidSession  = errors.New("sso session invalid or expired")
 )
 
 // ssoKV state/ticket 的一次性 KV；生产为 Redis，单测注入内存实现。
@@ -115,7 +127,7 @@ func SsoPKCEChallenge(verifier string) string {
 }
 
 func ssoStateKey(state string) string { return "sso:state:" + state }
-func ssoTicketKey(t string) string   { return "sso:ticket:" + t }
+func ssoTicketKey(t string) string    { return "sso:ticket:" + t }
 
 func (s *ssoService) BuildAuthorizeURL(ctx context.Context, bindUID int) (string, error) {
 	if !config.SsoEnabled() {
@@ -217,6 +229,11 @@ func (s *ssoService) ConsumeCallback(ctx context.Context, code, state string) (s
 	if err != nil {
 		return "", ErrSsoExchange
 	}
+	// 准入红线：只有 unisso 判定为院内（internal=true）的账号才允许进入集市，
+	// 登录与绑定两条路径共用此校验。
+	if !bool(info.Internal) {
+		return "", ErrSsoForbidden
+	}
 
 	// 分派：sub 已绑定 → 直接登录（或绑定场景下的幂等/冲突判定）
 	binding, err := s.bindings.FindBySub(ctx, info.Sub)
@@ -254,6 +271,207 @@ func (s *ssoService) ConsumeCallback(ctx context.Context, code, state string) (s
 		SsoUsername: info.PreferredUsername,
 		SsoEmail:    info.Email,
 	})
+}
+
+// verifyPassword 调 unisso M2M POST /api/oauth/password/verify 校验邮箱密码（登录主路径，无跳转）。
+// 同时返回 unisso 签发的共享 SSO 会话元数据，供登录响应种父域 Cookie。
+func (s *ssoService) verifyPassword(ctx context.Context, email, password string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error) {
+	form := url.Values{}
+	form.Set("client_id", config.SsoClientID())
+	form.Set("client_secret", config.SsoClientSecret())
+	form.Set("email", email)
+	form.Set("password", password)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.SsoPasswordVerifyURL(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, nil, ErrSsoUnavailable
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return nil, nil, ErrSsoUnavailable
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		bodyStr := string(body)
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized && strings.Contains(bodyStr, "invalid_credentials"):
+			return nil, nil, ErrSsoBadCredentials
+		case resp.StatusCode == http.StatusForbidden && strings.Contains(bodyStr, "password_verify_forbidden"):
+			return nil, nil, ErrSsoVerifyForbidden
+		case resp.StatusCode == http.StatusTooManyRequests:
+			// unisso 按 IP+email 锁 15 分钟，契约要求平台侧不得自动重试
+			return nil, nil, ErrSsoTooManyAttempts
+		default:
+			// 400 invalid_request / 401 invalid_client / 5xx：客户端或服务端故障
+			return nil, nil, ErrSsoUnavailable
+		}
+	}
+	var out struct {
+		OK   bool                          `json:"ok"`
+		User *domain.SsoPasswordVerifyUser `json:"user"`
+		domain.SsoSession
+	}
+	if err := json.Unmarshal(body, &out); err != nil || !out.OK || out.User == nil || out.User.Sub == "" {
+		return nil, nil, ErrSsoUnavailable
+	}
+	return out.User, &out.SsoSession, nil
+}
+
+// ObtainPasswordSession 注册成功后补取 unisso 共享会话：unisso 尚无该账号时返回错误，
+// 调用方必须忽略，不得影响注册结果。
+func (s *ssoService) ObtainPasswordSession(ctx context.Context, email, password string) (*domain.SsoSession, error) {
+	if config.SsoPasswordVerifyURL() == "" {
+		return nil, ErrSsoUnavailable
+	}
+	_, sess, err := s.verifyPassword(ctx, strings.TrimSpace(strings.ToLower(email)), password)
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+// VerifySession 调 unisso M2M POST /api/oauth/session/verify 校验共享 Cookie 里的会话指针。
+// 成功会滑动续期；401 会话失效、其余状态一律按不可用处理，前端静默回落登录表单。
+func (s *ssoService) VerifySession(ctx context.Context, session string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error) {
+	if session == "" || config.SsoSessionVerifyURL() == "" {
+		return nil, nil, ErrSsoInvalidSession
+	}
+	form := url.Values{}
+	form.Set("client_id", config.SsoClientID())
+	form.Set("client_secret", config.SsoClientSecret())
+	form.Set("session", session)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, config.SsoSessionVerifyURL(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, nil, ErrSsoUnavailable
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return nil, nil, ErrSsoUnavailable
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, nil, ErrSsoInvalidSession
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, ErrSsoUnavailable
+	}
+	var out struct {
+		OK   bool                          `json:"ok"`
+		User *domain.SsoPasswordVerifyUser `json:"user"`
+		domain.SsoSession
+	}
+	if err := json.Unmarshal(body, &out); err != nil || !out.OK || out.User == nil || out.User.Sub == "" {
+		return nil, nil, ErrSsoUnavailable
+	}
+	return out.User, &out.SsoSession, nil
+}
+
+// RevokeSession 调 unisso 吊销共享会话（best-effort：平台登出无论如何都要清本地会话与 Cookie）。
+func (s *ssoService) RevokeSession(ctx context.Context, session string) {
+	if session == "" || config.SsoSessionRevokeURL() == "" {
+		return
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	form := url.Values{}
+	form.Set("client_id", config.SsoClientID())
+	form.Set("client_secret", config.SsoClientSecret())
+	form.Set("session", session)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, config.SsoSessionRevokeURL(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	_ = resp.Body.Close()
+}
+
+// LoginViaSession 静默 SSO：共享 Cookie → unisso session/verify → 本地账号定位 → 本地 JWT。
+func (s *ssoService) LoginViaSession(ctx context.Context, session string) (*domain.AuthTokens, error) {
+	u, _, err := s.VerifySession(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return s.loginUnissoUser(ctx, u, u.Email)
+}
+
+// LoginViaUnisso 主模式登录：unisso 密码校验 → internal 准入 → 定位集市账号（sse_sub 优先，
+// 缺失按邮箱匹配）→ 幂等补绑定 → 签发本地 JWT。身份来源是 unisso，本地密码不参与。
+// 同时返回 SSO 会话元数据，由登录响应种父域 Cookie。
+func (s *ssoService) LoginViaUnisso(ctx context.Context, email, password string) (*domain.AuthTokens, *domain.SsoSession, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || len(password) < 6 {
+		return nil, nil, domain.ErrBadRequest
+	}
+	if config.SsoPasswordVerifyURL() == "" {
+		return nil, nil, ErrSsoUnavailable
+	}
+	u, sess, err := s.verifyPassword(ctx, email, password)
+	if err != nil {
+		return nil, nil, err
+	}
+	tokens, err := s.loginUnissoUser(ctx, u, email)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tokens, sess, nil
+}
+
+// loginUnissoUser 已通过 unisso 校验的身份 → 本地账号。密码登录与静默 SSO 共用同一套
+// 准入、定位与绑定逻辑，保证两条路径行为一致。
+func (s *ssoService) loginUnissoUser(ctx context.Context, u *domain.SsoPasswordVerifyUser, fallbackEmail string) (*domain.AuthTokens, error) {
+	if !bool(u.Internal) {
+		return nil, ErrSsoForbidden
+	}
+
+	uid := 0
+	if u.SseSub != "" {
+		if v, convErr := strconv.Atoi(u.SseSub); convErr == nil {
+			uid = v
+		}
+	}
+	if uid <= 0 { // 无 sse 身份（unisso 新注册号）：按邮箱匹配集市账号
+		lu, _, err := s.users.FindAuthByEmail(ctx, strings.TrimSpace(strings.ToLower(fallbackEmail)))
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return nil, ErrSsoNoLocalAccount
+			}
+			return nil, err
+		}
+		uid = lu.ID
+	}
+	if _, err := s.users.FindByID(ctx, uid); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, ErrSsoNoLocalAccount
+		}
+		return nil, err
+	}
+
+	// 绑定一致性：sub 已绑他人 → 冲突；未绑 → 幂等补绑定（保证 sso_bindings 与登录路径一致）
+	if b, err := s.bindings.FindBySub(ctx, u.Sub); err == nil {
+		if b.LocalUserID != uid {
+			return nil, ErrSsoConflict
+		}
+	} else if errors.Is(err, domain.ErrNotFound) {
+		if err := s.bindings.Create(ctx, &domain.SsoBinding{
+			LocalUserID: uid,
+			SsoSub:      u.Sub,
+			SsoUsername: u.PreferredUsername,
+			CreatedAt:   time.Now(),
+		}); err != nil && !errors.Is(err, domain.ErrConflict) {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	return s.tokens.IssueTokensForUser(ctx, uid)
 }
 
 func (s *ssoService) saveTicket(ctx context.Context, p *domain.SsoTicketPayload) (string, error) {

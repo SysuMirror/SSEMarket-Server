@@ -312,6 +312,23 @@ func (r *userRepository) ListAllUsers(ctx context.Context) ([]*domain.User, erro
 	return out, nil
 }
 
+func refreshRecordToDomain(rec model.RefreshToken) *domain.RefreshTokenRecord {
+	out := &domain.RefreshTokenRecord{
+		ID:        rec.ID,
+		UserID:    rec.UserID,
+		Token:     rec.Token,
+		ExpiresAt: rec.ExpiresAt,
+		IsUsed:    rec.IsUsed,
+	}
+	if rec.SuccessorToken != nil {
+		out.SuccessorToken = *rec.SuccessorToken
+	}
+	if rec.UsedAt != nil {
+		out.UsedAt = *rec.UsedAt
+	}
+	return out
+}
+
 func (r *userRepository) FindValidRefreshToken(ctx context.Context, token string, userID int) (*domain.RefreshTokenRecord, error) {
 	var rec model.RefreshToken
 	err := r.session(ctx).Where("token = ? AND user_id = ? AND is_used = ?", token, userID, false).First(&rec).Error
@@ -324,17 +341,30 @@ func (r *userRepository) FindValidRefreshToken(ctx context.Context, token string
 	if rec.ID == 0 {
 		return nil, domain.ErrNotFound
 	}
-	return &domain.RefreshTokenRecord{
-		ID:        rec.ID,
-		UserID:    rec.UserID,
-		Token:     rec.Token,
-		ExpiresAt: rec.ExpiresAt,
-		IsUsed:    rec.IsUsed,
-	}, nil
+	return refreshRecordToDomain(rec), nil
 }
 
-func (r *userRepository) MarkRefreshTokenUsed(ctx context.Context, id int) error {
-	return r.session(ctx).Model(&model.RefreshToken{}).Where("id = ?", id).Update("is_used", true).Error
+func (r *userRepository) FindUsedRefreshToken(ctx context.Context, token string, userID int) (*domain.RefreshTokenRecord, error) {
+	var rec model.RefreshToken
+	err := r.session(ctx).Where("token = ? AND user_id = ? AND is_used = ?", token, userID, true).First(&rec).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	if rec.ID == 0 {
+		return nil, domain.ErrNotFound
+	}
+	return refreshRecordToDomain(rec), nil
+}
+
+func (r *userRepository) MarkRefreshTokenUsed(ctx context.Context, id int, successorToken string) error {
+	return r.session(ctx).Model(&model.RefreshToken{}).Where("id = ?", id).Updates(map[string]any{
+		"is_used":         true,
+		"successor_token": successorToken,
+		"used_at":         time.Now(),
+	}).Error
 }
 
 func oauth2AppToDomain(app model.OAuth2App) *domain.OAuth2App {

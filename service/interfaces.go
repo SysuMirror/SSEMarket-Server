@@ -85,6 +85,17 @@ type SsoService interface {
 	// BuildAuthorizeURL 生成 state+PKCE 存 Redis，返回 UniSSO authorize 地址。
 	// bindUID>0 表示已登录用户主动绑定；SSO 未启用返回 ErrBadRequest。
 	BuildAuthorizeURL(ctx context.Context, bindUID int) (string, error)
+	// LoginViaUnisso 主模式登录：M2M 密码校验 + internal 准入 + 幂等补绑定 + 本地 JWT。
+	// 同时返回 unisso 共享 SSO 会话元数据，由登录响应种父域 Cookie。
+	// 错误：ErrSsoBadCredentials/ErrSsoForbidden/ErrSsoConflict/ErrSsoNoLocalAccount/ErrSsoUnavailable。
+	LoginViaUnisso(ctx context.Context, email, password string) (*domain.AuthTokens, *domain.SsoSession, error)
+	// ObtainPasswordSession 注册成功后补取共享 SSO 会话（best-effort，失败不影响注册）。
+	ObtainPasswordSession(ctx context.Context, email, password string) (*domain.SsoSession, error)
+	// LoginViaSession 静默 SSO：共享 Cookie 会话 → unisso 校验 → 本地 JWT。
+	// 错误：ErrSsoInvalidSession（401）/ErrSsoForbidden/ErrSsoNoLocalAccount/ErrSsoConflict/ErrSsoUnavailable（503）。
+	LoginViaSession(ctx context.Context, session string) (*domain.AuthTokens, error)
+	// RevokeSession 调 unisso 吊销共享会话（best-effort，无返回错误）。
+	RevokeSession(ctx context.Context, session string)
 	// ConsumeCallback 消费回调：校验 state（GETDEL 一次性）→ 换 token → 取 userinfo
 	// → 按绑定关系分派一次性 ticket。错误用 ErrSsoStateInvalid/ErrSsoExchange/ErrSsoConflict 区分。
 	ConsumeCallback(ctx context.Context, code, state string) (string, error)

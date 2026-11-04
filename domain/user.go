@@ -201,11 +201,13 @@ type UserAPITokenVerify struct {
 
 // RefreshTokenRecord 刷新令牌记录。
 type RefreshTokenRecord struct {
-	ID        int
-	UserID    int
-	Token     string
-	ExpiresAt time.Time
-	IsUsed    bool
+	ID             int
+	UserID         int
+	Token          string
+	ExpiresAt      time.Time
+	IsUsed         bool
+	SuccessorToken string
+	UsedAt         time.Time
 }
 
 // PostSummary 用户帖子统计摘要。

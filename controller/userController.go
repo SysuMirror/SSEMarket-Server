@@ -8,6 +8,7 @@ import (
 	"loginTest/api"
 	"loginTest/apperr"
 	"loginTest/common"
+	"loginTest/config"
 	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/response"
@@ -140,6 +141,13 @@ func Register(c *gin.Context) {
 		}
 		return
 	}
+	// 注册本地成功后再向 unisso 补取共享会话：unisso 尚无该账号时忽略失败，
+	// 注册结果与本地登录态不受影响。
+	if service.CurrentSsoMode() == service.SsoModeSso {
+		if sess, sessErr := service.Sso.ObtainPasswordSession(c.Request.Context(), requestUser.Email, password1); sessErr == nil {
+			setSsoCookie(c, sess)
+		}
+	}
 	response.Success(c, gin.H{
 		"token":         tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,
@@ -178,11 +186,54 @@ func Login(c *gin.Context) {
 	email := requestUser.Email
 	password := util.Decrypt(requestUser.Password)
 
+	// 主模式：邮箱密码交给 unisso M2M 校验（用户无感，不跳转），通过后签发本地 JWT；
+	// 兜底/禁用模式：本地 bcrypt。探测判定 UniSSO 故障时自动切换。
+	mode := service.CurrentSsoMode()
+	if mode == service.SsoModeSso {
+		tokens, ssoSess, err := service.Sso.LoginViaUnisso(c.Request.Context(), email, password)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrSsoBadCredentials):
+				service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "bad_credentials")
+				response.Response(c, http.StatusUnauthorized, 401, nil, "邮箱或密码错误")
+			case errors.Is(err, service.ErrSsoForbidden):
+				service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "not_internal")
+				response.Response(c, http.StatusForbidden, 403, nil, "该账号没有软件工程学院内部权限，无法登录集市")
+			case errors.Is(err, service.ErrSsoConflict):
+				response.Response(c, http.StatusConflict, 409, nil, "该统一身份已绑定其他集市账号")
+			case errors.Is(err, service.ErrSsoNoLocalAccount):
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "该邮箱没有对应的集市账号，请先注册")
+			case errors.Is(err, service.ErrSsoVerifyForbidden):
+				response.Response(c, http.StatusForbidden, 403, nil, "该账号不允许通过密码校验登录，请联系管理员")
+			case errors.Is(err, service.ErrSsoTooManyAttempts):
+				response.Response(c, http.StatusTooManyRequests, 429, nil, "失败次数过多，已被临时锁定，请15分钟后再试")
+			case errors.Is(err, service.ErrSsoUnavailable):
+				response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
+			case errors.Is(err, domain.ErrBadRequest):
+				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
+			default:
+				apperr.WriteMsg(c, err, "登录失败")
+			}
+			return
+		}
+		service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "success")
+		setSsoCookie(c, ssoSess)
+		response.Success(c, gin.H{
+			"token":         tokens.AccessToken,
+			"refresh_token": tokens.RefreshToken,
+		}, "登录成功")
+		return
+	}
+	fallback := mode == service.SsoModeFallback
+
 	tokens, err := service.Users.Login(c.Request.Context(), domain.LoginInput{
 		Email:    email,
 		Password: password,
 	})
 	if err != nil {
+		if fallback {
+			service.SsoAudit("local_login", "mode", mode, "email", email, "result", "failed")
+		}
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
@@ -199,10 +250,105 @@ func Login(c *gin.Context) {
 		}
 		return
 	}
+	if fallback {
+		service.SsoAudit("local_login", "mode", mode, "email", email, "result", "success")
+	}
 	response.Success(c, gin.H{
 		"token":         tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,
 	}, "登录成功")
+}
+
+// setSsoCookie 把 unisso 签发的共享父域 Cookie 种给浏览器。
+// 值/名称/域/有效期全部来自 unisso 响应，不从本仓库常量推导。
+func setSsoCookie(c *gin.Context, sess *domain.SsoSession) {
+	if sess == nil || sess.ID == "" || sess.CookieName == "" || sess.CookieDomain == "" {
+		return
+	}
+	maxAge := sess.MaxAge
+	if maxAge <= 0 {
+		maxAge = config.SsoCookieMaxAge()
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     sess.CookieName,
+		Value:    sess.ID,
+		Domain:   sess.CookieDomain,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// clearSsoCookie 清父域 Cookie：名称/域优先用 unisso 响应值，缺失时退到配置默认值，
+// 保证 unisso 不可达也能把浏览器里的会话指针删掉。
+func clearSsoCookie(c *gin.Context, sess *domain.SsoSession) {
+	name, cookieDomain := config.SsoCookieName(), config.SsoCookieDomain()
+	if sess != nil {
+		if sess.CookieName != "" {
+			name = sess.CookieName
+		}
+		if sess.CookieDomain != "" {
+			cookieDomain = sess.CookieDomain
+		}
+	}
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Domain:   cookieDomain,
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// SsoTry 静默 SSO：共享 sse_sso Cookie → unisso 校验 → 本地 JWT。
+// 无 Cookie/会话失效/非院内 → 401，unisso 不可达 → 503；前端两种情况都静默回落登录表单。
+func SsoTry(c *gin.Context) {
+	sid, err := c.Cookie(config.SsoCookieName())
+	if err != nil || sid == "" {
+		// 非主模式（兜底/禁用）下没有共享 Cookie 是正常状态（本地登录不经 unisso），
+		// 不能据此判定登出；返回 503，前端保留本地会话。
+		if service.CurrentSsoMode() != service.SsoModeSso {
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "sso_unavailable")
+			return
+		}
+		response.Response(c, http.StatusUnauthorized, 401, nil, "no_sso")
+		return
+	}
+	tokens, err := service.Sso.LoginViaSession(c.Request.Context(), sid)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrSsoUnavailable):
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "sso_unavailable")
+		case errors.Is(err, service.ErrSsoInvalidSession),
+			errors.Is(err, service.ErrSsoForbidden),
+			errors.Is(err, service.ErrSsoNoLocalAccount),
+			errors.Is(err, service.ErrSsoConflict):
+			response.Response(c, http.StatusUnauthorized, 401, nil, "invalid_sso")
+		default:
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "sso_unavailable")
+		}
+		return
+	}
+	service.SsoAudit("sso_silent", "result", "success")
+	response.Success(c, gin.H{
+		"token":         tokens.AccessToken,
+		"refresh_token": tokens.RefreshToken,
+	}, "登录成功")
+}
+
+// SsoLogout 单点登出：先吊销 unisso 会话，再清父域 Cookie，最后返回 200 让前端清本地会话。
+// unisso 不可达时仍然清 Cookie 并返回 200。
+func SsoLogout(c *gin.Context) {
+	sid, _ := c.Cookie(config.SsoCookieName())
+	service.Sso.RevokeSession(c.Request.Context(), sid)
+	clearSsoCookie(c, nil)
+	service.SsoAudit("sso_logout", "result", "done")
+	response.Success(c, nil, "已退出登录")
 }
 
 // 通过 refresh token 刷新 access token

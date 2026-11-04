@@ -85,6 +85,20 @@ func SsoLogin(c *gin.Context) {
 	c.Redirect(http.StatusFound, authorizeURL)
 }
 
+// SsoMode GET /api/sso/mode —— 登录模式快照，前端据此决定是否展示本地密码兜底入口。
+func SsoMode(c *gin.Context) {
+	service.EnsureSsoModeFresh()
+	info := service.CurrentSsoModeInfo()
+	response.Success(c, gin.H{
+		"mode":                 info.Mode,
+		"password_login":       info.PasswordLogin,
+		"unisso_healthy":       info.UnissoHealthy,
+		"consecutive_failures": info.ConsecutiveFailures,
+		"checked_at":           info.CheckedAt,
+		"last_error":           info.LastError,
+	}, "成功")
+}
+
 // SsoBindStart POST /api/sso/bind/start —— 已登录用户发起绑定，前端拿 authorize_url 跳转。
 func SsoBindStart(c *gin.Context) {
 	user := ssoAuthUser(c)
@@ -116,6 +130,8 @@ func SsoCallback(c *gin.Context) {
 			errCode = "state"
 		case errors.Is(err, service.ErrSsoConflict):
 			errCode = "conflict"
+		case errors.Is(err, service.ErrSsoForbidden):
+			errCode = "internal"
 		}
 		c.Redirect(http.StatusFound, "/new/auth/sso/result?error="+errCode)
 		return

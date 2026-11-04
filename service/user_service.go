@@ -346,6 +346,11 @@ func (s *userService) IdentityValidate(ctx context.Context, email, valiCode stri
 	return nil
 }
 
+// refreshGrantWindow 轮换宽限窗口：refresh token 并发刷新时，后到者可凭
+// 60 秒内刚轮换的记录直接换发同一对 successor，而不是 401（企微多开 WebView
+// 等场景常见）。窗口取值沿用 IETF OAuth BCP 对 rotation 的建议。
+const refreshGrantWindow = 60 * time.Second
+
 func (s *userService) RefreshToken(ctx context.Context, refreshToken string) (*domain.AuthTokens, error) {
 	if refreshToken == "" {
 		return nil, domain.ErrBadRequest
@@ -366,20 +371,50 @@ func (s *userService) RefreshToken(ctx context.Context, refreshToken string) (*d
 		return nil, err
 	}
 	rec, err := s.users.FindValidRefreshToken(ctx, refreshToken, userID)
+	if err == nil {
+		if time.Now().After(rec.ExpiresAt) {
+			_ = s.users.MarkRefreshTokenUsed(ctx, rec.ID, "")
+			return nil, domain.ErrTokenExpired
+		}
+		// 先签发新对再标记旧 token，并记录 successor：并发刷新的后到者
+		// 在宽限窗口内仍能换发同一对 successor。
+		tokens, err := s.issueTokens(ctx, u)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.users.MarkRefreshTokenUsed(ctx, rec.ID, tokens.RefreshToken); err != nil {
+			return nil, err
+		}
+		return tokens, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return nil, err
+	}
+	// 旧 token 已被并发刷新用掉：宽限窗口内且 successor 仍未被使用时，
+	// 按用户签发 access 并返回同一对 successor，不再 401。
+	grace, err := s.users.FindUsedRefreshToken(ctx, refreshToken, userID)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, domain.ErrUnauthorized
 		}
 		return nil, err
 	}
-	if time.Now().After(rec.ExpiresAt) {
-		_ = s.users.MarkRefreshTokenUsed(ctx, rec.ID)
-		return nil, domain.ErrTokenExpired
+	if grace.SuccessorToken == "" || time.Since(grace.UsedAt) > refreshGrantWindow {
+		return nil, domain.ErrUnauthorized
 	}
-	if err := s.users.MarkRefreshTokenUsed(ctx, rec.ID); err != nil {
-		return nil, err
+	if _, err := s.users.FindValidRefreshToken(ctx, grace.SuccessorToken, userID); err != nil {
+		return nil, domain.ErrUnauthorized
 	}
-	return s.issueTokens(ctx, u)
+	access, err := common.ReleaseToken(*u)
+	if err != nil {
+		return nil, domain.ErrInternal
+	}
+	CacheUserAfterAuth(ctx, u)
+	return &domain.AuthTokens{
+		AccessToken:  access,
+		RefreshToken: grace.SuccessorToken,
+		User:         u,
+	}, nil
 }
 
 func (s *userService) ModifyPassword(ctx context.Context, in domain.ModifyPasswordInput) (*domain.User, error) {
