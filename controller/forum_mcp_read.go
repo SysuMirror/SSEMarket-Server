@@ -62,6 +62,7 @@ type forumComment struct {
 	CommentID       int       `json:"comment_id"`
 	PostID          int       `json:"post_id"`
 	ParentCommentID int       `json:"parent_comment_id,omitempty"`
+	ReplyToAuthor   string    `json:"reply_to_author,omitempty"`
 	Content         string    `json:"content"`
 	Time            time.Time `json:"time"`
 	ContentComplete bool      `json:"content_complete"`
@@ -207,7 +208,8 @@ func forumReplies(ctx context.Context, in forumRepliesInput) (map[string]any, er
 			anon := sub.Author == nil || sub.Author.ID <= 0
 			items = append(items, forumComment{forumAuthor: publicForumAuthor(sub.Author, anon, cc.UserID == p.User.ID),
 				CommentID: cc.ID, PostID: in.PostID, ParentCommentID: in.ParentCommentID,
-				Content: cc.Content, Time: cc.CreatedAt, ContentComplete: true})
+				ReplyToAuthor: cc.UserTargetName,
+				Content:       cc.Content, Time: cc.CreatedAt, ContentComplete: true})
 		}
 		return forumCommentPage(items, limit, in.AfterID, "replies"), nil
 	}
