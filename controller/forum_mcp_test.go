@@ -194,7 +194,7 @@ func TestForumMCPCommentCursorAndAnonReplies(t *testing.T) {
 	long := strings.Repeat("评论", 150)
 	service.Comments = mcpComments{tree: []*domain.PcommentWithMeta{
 		{Pcomment: &domain.Pcomment{ID: 30, UserID: 99, Content: long}, Author: &domain.User{Name: "匿名用户"}, Subcomments: []*domain.CcommentWithMeta{
-			{Ccomment: &domain.Ccomment{ID: 40, UserID: 99, Content: long}, Author: &domain.User{Name: "匿名用户"}},
+			{Ccomment: &domain.Ccomment{ID: 40, UserID: 99, Content: long, UserTargetName: "提问的人"}, Author: &domain.User{Name: "匿名用户"}},
 			{Ccomment: &domain.Ccomment{ID: 41, UserID: 8, Content: "second"}, Author: &domain.User{ID: 8, Name: "public"}},
 		}},
 		{Pcomment: &domain.Pcomment{ID: 10, UserID: 8, Content: "first"}, Author: &domain.User{ID: 8, Name: "public"}},
@@ -206,6 +206,9 @@ func TestForumMCPCommentCursorAndAnonReplies(t *testing.T) {
 	}
 	out = forumTestCall(t, r, "forum_replies_v2", map[string]any{"post_id": 22, "parent_comment_id": 30, "after_id": 0, "limit": 1})["structuredContent"].(map[string]any)
 	item := out["replies"].([]any)[0].(map[string]any)
+	if item["reply_to_author"] != "提问的人" {
+		t.Fatal("reply recipient missing from readback", item)
+	}
 	if item["author_id"] != nil || item["content"] != long || out["next_after_id"] != float64(40) || out["has_more"] != true {
 		t.Fatal(out)
 	}
