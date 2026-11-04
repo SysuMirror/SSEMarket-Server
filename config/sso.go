@@ -26,8 +26,13 @@ func SsoCookieName() string {
 	if v := viper.GetString("sso.cookie_name"); v != "" {
 		return v
 	}
-	return "sse_sso"
+	return "unisso_sid"
 }
+
+// SsoCookieNameLegacy 旧共享 Cookie 名。共享 Cookie 改名 sse_sso -> unisso_sid 后，
+// 浏览器里两个名字都可能存在（unisso 切默认名前签发的一律是旧名），
+// 读取与清除都要兼顾两个名字；存量旧 Cookie 全部过期后可移除。
+func SsoCookieNameLegacy() string { return "sse_sso" }
 
 func SsoCookieDomain() string {
 	if v := viper.GetString("sso.cookie_domain"); v != "" {

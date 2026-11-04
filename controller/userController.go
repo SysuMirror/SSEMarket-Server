@@ -281,34 +281,41 @@ func setSsoCookie(c *gin.Context, sess *domain.SsoSession) {
 	})
 }
 
-// clearSsoCookie 清父域 Cookie：名称/域优先用 unisso 响应值，缺失时退到配置默认值，
-// 保证 unisso 不可达也能把浏览器里的会话指针删掉。
+// clearSsoCookie 清父域 Cookie：新名/旧名（及 unisso 响应指名的 Cookie）一律清除，
+// 域优先用 unisso 响应值，缺失时退到配置默认值，保证 unisso 不可达也能把浏览器里的会话指针删掉。
 func clearSsoCookie(c *gin.Context, sess *domain.SsoSession) {
-	name, cookieDomain := config.SsoCookieName(), config.SsoCookieDomain()
+	cookieDomain := config.SsoCookieDomain()
+	names := []string{config.SsoCookieName(), config.SsoCookieNameLegacy()}
 	if sess != nil {
-		if sess.CookieName != "" {
-			name = sess.CookieName
-		}
 		if sess.CookieDomain != "" {
 			cookieDomain = sess.CookieDomain
 		}
+		if sess.CookieName != "" && sess.CookieName != names[0] && sess.CookieName != names[1] {
+			names = append(names, sess.CookieName)
+		}
 	}
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     name,
-		Value:    "",
-		Domain:   cookieDomain,
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	for _, name := range names {
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Domain:   cookieDomain,
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+	}
 }
 
-// SsoTry 静默 SSO：共享 sse_sso Cookie → unisso 校验 → 本地 JWT。
+// SsoTry 静默 SSO：共享 Cookie（unisso_sid，兼容旧 sse_sso）→ unisso 校验 → 本地 JWT。
 // 无 Cookie/会话失效/非院内 → 401，unisso 不可达 → 503；前端两种情况都静默回落登录表单。
 func SsoTry(c *gin.Context) {
 	sid, err := c.Cookie(config.SsoCookieName())
+	if err != nil || sid == "" {
+		// 旧名 Cookie 兜底：unisso 切换默认名前签发的会话指针仍是 sse_sso。
+		sid, err = c.Cookie(config.SsoCookieNameLegacy())
+	}
 	if err != nil || sid == "" {
 		// 非主模式（兜底/禁用）下没有共享 Cookie 是正常状态（本地登录不经 unisso），
 		// 不能据此判定登出；返回 503，前端保留本地会话。
@@ -345,6 +352,10 @@ func SsoTry(c *gin.Context) {
 // unisso 不可达时仍然清 Cookie 并返回 200。
 func SsoLogout(c *gin.Context) {
 	sid, _ := c.Cookie(config.SsoCookieName())
+	if sid == "" {
+		// 旧名 Cookie 兜底：否则仅持旧名 Cookie 的用户登出时吊销不到 unisso 会话。
+		sid, _ = c.Cookie(config.SsoCookieNameLegacy())
+	}
 	service.Sso.RevokeSession(c.Request.Context(), sid)
 	clearSsoCookie(c, nil)
 	service.SsoAudit("sso_logout", "result", "done")
