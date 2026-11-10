@@ -20,8 +20,6 @@ import (
 	"loginTest/domain"
 	"loginTest/repository"
 	"loginTest/util"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -560,15 +558,15 @@ func (s *ssoService) BindWithCredentials(ctx context.Context, ticket, email, pas
 		return nil, domain.ErrUnauthorized
 	}
 
-	u, hash, err := s.users.FindAuthByEmail(ctx, email)
+	u, _, err := s.users.FindAuthByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, domain.ErrNotFound // 422：账号不存在
 		}
 		return nil, err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		return nil, domain.ErrUnauthorized // 401：密码错误
+	if err := s.verifyAccountPassword(ctx, email, password, p.Sub, u.ID); err != nil {
+		return nil, err
 	}
 	if _, err := s.bindings.FindByUserID(ctx, u.ID); err == nil {
 		return nil, domain.ErrConflict // 该集市账号已绑定其他 SSO
@@ -595,20 +593,40 @@ func (s *ssoService) GetStatus(ctx context.Context, userID int) (*domain.SsoStat
 	return &domain.SsoStatus{Bound: true, SsoUsername: b.SsoUsername, BoundAt: b.CreatedAt}, nil
 }
 
-func (s *ssoService) Unbind(ctx context.Context, userID int, password string) error {
+func (s *ssoService) Unbind(ctx context.Context, userID int, email, password string) error {
 	if userID <= 0 || len(password) < 6 {
 		return domain.ErrBadRequest
 	}
-	u, err := s.users.FindByID(ctx, userID)
+	if strings.TrimSpace(email) == "" {
+		u, err := s.users.FindByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+		email = u.Email
+	}
+	b, err := s.bindings.FindByUserID(ctx, userID)
 	if err != nil {
 		return err
 	}
-	_, hash, err := s.users.FindAuthByEmail(ctx, u.Email)
-	if err != nil {
+	if err := s.verifyAccountPassword(ctx, email, password, b.SsoSub, userID); err != nil {
 		return err
-	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
-		return domain.ErrUnauthorized
 	}
 	return s.bindings.DeleteByUserID(ctx, userID)
+}
+
+func (s *ssoService) verifyAccountPassword(ctx context.Context, email, password, expectedSub string, userID int) error {
+	if !config.SsoEnabled() || config.SsoPasswordVerifyURL() == "" {
+		return ErrSsoUnavailable
+	}
+	u, _, err := s.verifyPassword(ctx, strings.ToLower(strings.TrimSpace(email)), password)
+	if errors.Is(err, ErrSsoBadCredentials) || errors.Is(err, ErrSsoVerifyForbidden) {
+		return domain.ErrUnauthorized
+	}
+	if err != nil {
+		return err
+	}
+	if !bool(u.Internal) || u.Sub != expectedSub || (u.SseSub != "" && u.SseSub != strconv.Itoa(userID)) {
+		return domain.ErrUnauthorized
+	}
+	return nil
 }

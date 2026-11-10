@@ -85,7 +85,7 @@ func SsoLogin(c *gin.Context) {
 	c.Redirect(http.StatusFound, authorizeURL)
 }
 
-// SsoMode GET /api/sso/mode —— 登录模式快照，前端据此决定是否展示本地密码兜底入口。
+// SsoMode GET /api/sso/mode —— 统一身份服务状态快照。
 func SsoMode(c *gin.Context) {
 	service.EnsureSsoModeFresh()
 	info := service.CurrentSsoModeInfo()
@@ -178,6 +178,10 @@ func SsoBind(c *gin.Context) {
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
 			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "该邮箱未注册集市账号，请先注册")
+		case errors.Is(err, service.ErrSsoUnavailable):
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
+		case errors.Is(err, service.ErrSsoTooManyAttempts):
+			response.Response(c, http.StatusTooManyRequests, 429, nil, "失败次数过多，请稍后再试")
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusUnauthorized, 401, nil, "邮箱或密码错误")
 		case errors.Is(err, domain.ErrConflict):
@@ -222,14 +226,19 @@ func SsoUnbind(c *gin.Context) {
 		return
 	}
 	var req struct {
+		Email    string `json:"email"`
 		Password string `json:"password"` // AES 加密传输
 	}
 	if err := c.Bind(&req); err != nil {
 		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
 		return
 	}
-	if err := service.Sso.Unbind(c.Request.Context(), user.ID, util.Decrypt(req.Password)); err != nil {
+	if err := service.Sso.Unbind(c.Request.Context(), user.ID, req.Email, util.Decrypt(req.Password)); err != nil {
 		switch {
+		case errors.Is(err, service.ErrSsoUnavailable):
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
+		case errors.Is(err, service.ErrSsoTooManyAttempts):
+			response.Response(c, http.StatusTooManyRequests, 429, nil, "失败次数过多，请稍后再试")
 		case errors.Is(err, domain.ErrUnauthorized):
 			response.Response(c, http.StatusUnauthorized, 401, nil, "密码错误")
 		case errors.Is(err, domain.ErrNotFound):

@@ -609,12 +609,13 @@ func TestSsoExchangeTicket_LoginOneTime(t *testing.T) {
 func TestSsoBindWithCredentials_HappyPath(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	ssoSetup(t)
+	passwordAuthority(t, "sub-7", "u5@x.cn")
 	var vref string
 	newSsoServer(t, &vref, "sub-7")
 
 	bindings := newFakeBindings()
 	users := newFakeUsers()
-	users.seed(&domain.User{ID: 5, Email: "U5@x.cn"}, "secret123")
+	users.seed(&domain.User{ID: 5, Email: "U5@x.cn"}, "old-local-secret")
 	tokens := fakeTokens{users: map[int]struct{}{5: {}}}
 	kv := newMemKV()
 	svc := service.NewSsoServiceForTest(bindings, users, tokens, kv, &http.Client{})
@@ -654,12 +655,13 @@ func TestSsoBindWithCredentials_HappyPath(t *testing.T) {
 func TestSsoBindWithCredentials_WrongPassword(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	ssoSetup(t)
+	passwordAuthority(t, "sub-7", "u5@x.cn")
 	var vref string
 	newSsoServer(t, &vref, "sub-7")
 
 	bindings := newFakeBindings()
 	users := newFakeUsers()
-	users.seed(&domain.User{ID: 5, Email: "u5@x.cn"}, "secret123")
+	users.seed(&domain.User{ID: 5, Email: "u5@x.cn"}, "old-local-secret")
 	tokens := fakeTokens{users: map[int]struct{}{5: {}}}
 	kv := newMemKV()
 	svc := service.NewSsoServiceForTest(bindings, users, tokens, kv, &http.Client{})
@@ -677,7 +679,7 @@ func TestSsoBindWithCredentials_WrongPassword(t *testing.T) {
 		t.Fatalf("ConsumeCallback: %v", err)
 	}
 
-	_, err = svc.BindWithCredentials(context.Background(), ticket, "u5@x.cn", "wrong-pwd")
+	_, err = svc.BindWithCredentials(context.Background(), ticket, "u5@x.cn", "old-local-secret")
 	if !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
@@ -725,6 +727,7 @@ func TestSsoBindWithCredentials_UnknownEmail(t *testing.T) {
 func TestSsoBindWithCredentials_UserAlreadyBound(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	ssoSetup(t)
+	passwordAuthority(t, "sub-7", "u5@x.cn")
 	var vref string
 	newSsoServer(t, &vref, "sub-7")
 
@@ -759,16 +762,17 @@ func TestSsoBindWithCredentials_UserAlreadyBound(t *testing.T) {
 func TestSsoUnbind_PasswordOK(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	ssoSetup(t)
+	passwordAuthority(t, "sub-1", "unisso@x.cn")
 
 	bindings := newFakeBindings()
 	bindings.bySub["sub-1"] = &domain.SsoBinding{ID: 1, LocalUserID: 7, SsoSub: "sub-1"}
 	bindings.byUser[7] = bindings.bySub["sub-1"]
 	users := newFakeUsers()
-	users.seed(&domain.User{ID: 7, Email: "u7@x.cn"}, "secret123")
+	users.seed(&domain.User{ID: 7, Email: "u7@x.cn"}, "old-local-secret")
 	tokens := fakeTokens{}
 	svc := service.NewSsoServiceForTest(bindings, users, tokens, newMemKV(), &http.Client{})
 
-	err := svc.Unbind(context.Background(), 7, "secret123")
+	err := svc.Unbind(context.Background(), 7, "unisso@x.cn", "secret123")
 	if err != nil {
 		t.Fatalf("Unbind: %v", err)
 	}
@@ -780,15 +784,16 @@ func TestSsoUnbind_PasswordOK(t *testing.T) {
 func TestSsoUnbind_PasswordWrong(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	ssoSetup(t)
+	passwordAuthority(t, "sub-1", "u7@x.cn")
 
 	bindings := newFakeBindings()
 	bindings.bySub["sub-1"] = &domain.SsoBinding{ID: 1, LocalUserID: 7, SsoSub: "sub-1"}
 	bindings.byUser[7] = bindings.bySub["sub-1"]
 	users := newFakeUsers()
-	users.seed(&domain.User{ID: 7, Email: "u7@x.cn"}, "secret123")
+	users.seed(&domain.User{ID: 7, Email: "u7@x.cn"}, "old-local-secret")
 	svc := service.NewSsoServiceForTest(bindings, users, fakeTokens{}, newMemKV(), &http.Client{})
 
-	err := svc.Unbind(context.Background(), 7, "wrong-pwd")
+	err := svc.Unbind(context.Background(), 7, "", "old-local-secret")
 	if !errors.Is(err, domain.ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
 	}
@@ -830,3 +835,16 @@ func TestSsoGetStatus(t *testing.T) {
 
 // 防 unused 警告（io 在测试中未直接使用，保留以备扩展）。
 var _ = io.Discard
+
+func passwordAuthority(t *testing.T, sub, email string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.FormValue("password") != "secret123" || r.FormValue("email") != email {
+			http.Error(w, `{"error":"invalid_credentials"}`, http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"user":{"sub":"` + sub + `","internal":true}}`))
+	}))
+	t.Cleanup(srv.Close)
+	viper.Set("sso.password_verify_url", srv.URL)
+}

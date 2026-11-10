@@ -97,6 +97,17 @@ func DeleteMe(c *gin.Context) {
 }
 
 func Register(c *gin.Context) {
+	// 统一身份模式（含故障兜底）下，注册的唯一入口是 sso.ssemarket.cn/register：
+	// UniSSO 注册页校验验证码/CDKey 后会服务端调用本接口建集市账号，再把两边
+	// 绑定起来。浏览器直接调本接口只会建出「UniSSO 里没有」的孤儿账号，之后
+	// 永远登不上（2026-11-05/06 实际发生 2 例）。服务端调用不带 Origin/Referer，
+	// 因此只拦浏览器请求，不破坏 UniSSO 的正常注册链路。
+	if browserAuthRequest(c) {
+		response.Response(c, http.StatusForbidden, 403, nil,
+			"注册请前往统一身份认证：https://sso.ssemarket.cn/register")
+		return
+	}
+
 	var requestUser = registerUser{}
 	c.Bind(&requestUser)
 	password1 := util.Decrypt(requestUser.Password)
@@ -180,83 +191,63 @@ type loginuser struct {
 	Password string `json:"password"`
 }
 
+// browserAuthRequest 判断请求是否由浏览器页面发起（同源 POST 也带 Origin，
+// 链接跳转/XHR 通常还带 Referer，现代浏览器另带 Sec-Fetch-*）。
+// UniSSO 后端服务端调用 /auth/register 建号时不带这些头，据此把「统一身份
+// 注册」与「用户直接打开集市注册页」区分开。
+func browserAuthRequest(c *gin.Context) bool {
+	return c.GetHeader("Origin") != "" ||
+		c.GetHeader("Referer") != "" ||
+		c.GetHeader("Sec-Fetch-Site") != ""
+}
+
 func Login(c *gin.Context) {
-	var requestUser = loginuser{}
-	c.Bind(&requestUser)
+	mode := service.CurrentSsoMode()
+	if mode == service.SsoModeDisabled {
+		response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
+		return
+	}
+	var requestUser loginuser
+	if err := c.ShouldBind(&requestUser); err != nil {
+		response.Response(c, http.StatusBadRequest, 400, nil, "请求参数错误")
+		return
+	}
 	email := requestUser.Email
 	password := util.Decrypt(requestUser.Password)
-
-	// 主模式：邮箱密码交给 unisso M2M 校验（用户无感，不跳转），通过后签发本地 JWT；
-	// 兜底/禁用模式：本地 bcrypt。探测判定 UniSSO 故障时自动切换。
-	mode := service.CurrentSsoMode()
-	if mode == service.SsoModeSso {
-		tokens, ssoSess, err := service.Sso.LoginViaUnisso(c.Request.Context(), email, password)
-		if err != nil {
-			switch {
-			case errors.Is(err, service.ErrSsoBadCredentials):
-				service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "bad_credentials")
-				response.Response(c, http.StatusUnauthorized, 401, nil, "邮箱或密码错误")
-			case errors.Is(err, service.ErrSsoForbidden):
-				service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "not_internal")
-				response.Response(c, http.StatusForbidden, 403, nil, "该账号没有软件工程学院内部权限，无法登录集市")
-			case errors.Is(err, service.ErrSsoConflict):
-				response.Response(c, http.StatusConflict, 409, nil, "该统一身份已绑定其他集市账号")
-			case errors.Is(err, service.ErrSsoNoLocalAccount):
-				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "该邮箱没有对应的集市账号，请先注册")
-			case errors.Is(err, service.ErrSsoVerifyForbidden):
-				response.Response(c, http.StatusForbidden, 403, nil, "该账号不允许通过密码校验登录，请联系管理员")
-			case errors.Is(err, service.ErrSsoTooManyAttempts):
-				response.Response(c, http.StatusTooManyRequests, 429, nil, "失败次数过多，已被临时锁定，请15分钟后再试")
-			case errors.Is(err, service.ErrSsoUnavailable):
-				response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
-			case errors.Is(err, domain.ErrBadRequest):
-				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
-			default:
-				apperr.WriteMsg(c, err, "登录失败")
-			}
-			return
-		}
-		service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "success")
-		setSsoCookie(c, ssoSess)
-		response.Success(c, gin.H{
-			"token":         tokens.AccessToken,
-			"refresh_token": tokens.RefreshToken,
-		}, "登录成功")
-		return
-	}
-	fallback := mode == service.SsoModeFallback
-
-	tokens, err := service.Users.Login(c.Request.Context(), domain.LoginInput{
-		Email:    email,
-		Password: password,
-	})
+	// 健康探测只提供状态提示；密码始终由 UniSSO 校验。
+	tokens, ssoSess, err := service.Sso.LoginViaUnisso(c.Request.Context(), email, password)
 	if err != nil {
-		if fallback {
-			service.SsoAudit("local_login", "mode", mode, "email", email, "result", "failed")
-		}
 		switch {
-		case errors.Is(err, domain.ErrNotFound):
-			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "用户不存在")
-		case errors.Is(err, domain.ErrUnauthorized):
-			response.Response(c, http.StatusBadRequest, 400, nil, "密码错误")
+		case errors.Is(err, service.ErrSsoBadCredentials):
+			service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "bad_credentials")
+			response.Response(c, http.StatusUnauthorized, 401, nil, "邮箱或密码错误")
+		case errors.Is(err, service.ErrSsoForbidden):
+			service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "not_internal")
+			response.Response(c, http.StatusForbidden, 403, nil, "该账号没有软件工程学院内部权限，无法登录集市")
+		case errors.Is(err, service.ErrSsoConflict):
+			response.Response(c, http.StatusConflict, 409, nil, "该统一身份已绑定其他集市账号")
+		case errors.Is(err, service.ErrSsoNoLocalAccount):
+			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "该邮箱没有对应的集市账号，请先注册")
+		case errors.Is(err, service.ErrSsoVerifyForbidden):
+			response.Response(c, http.StatusForbidden, 403, nil, "该账号不允许通过密码校验登录，请联系管理员")
+		case errors.Is(err, service.ErrSsoTooManyAttempts):
+			response.Response(c, http.StatusTooManyRequests, 429, nil, "失败次数过多，已被临时锁定，请15分钟后再试")
+		case errors.Is(err, service.ErrSsoUnavailable):
+			response.Response(c, http.StatusServiceUnavailable, 503, nil, "统一身份服务暂时不可用，请稍后再试")
 		case errors.Is(err, domain.ErrBadRequest):
-			if email == "" {
-				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "邮箱号为空！"+email)
-			} else {
-				response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
-			}
+			response.Response(c, http.StatusUnprocessableEntity, 422, nil, "密码不能少于6位")
 		default:
-			apperr.WriteMsg(c, err, "系统异常")
+			apperr.WriteMsg(c, err, "登录失败")
 		}
 		return
 	}
-	if fallback {
-		service.SsoAudit("local_login", "mode", mode, "email", email, "result", "success")
-	}
+	service.SsoAudit("unisso_login", "mode", mode, "email", email, "result", "success")
+	setSsoCookie(c, ssoSess)
 	response.Success(c, gin.H{
 		"token":         tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,
 	}, "登录成功")
+	return
 }
 
 // setSsoCookie 把 unisso 签发的共享父域 Cookie 种给浏览器。
@@ -317,7 +308,7 @@ func SsoTry(c *gin.Context) {
 		sid, err = c.Cookie(config.SsoCookieNameLegacy())
 	}
 	if err != nil || sid == "" {
-		// 非主模式（兜底/禁用）下没有共享 Cookie 是正常状态（本地登录不经 unisso），
+		// 探测失败或未配置时，不能仅凭缺少 Cookie 判定用户已登出，
 		// 不能据此判定登出；返回 503，前端保留本地会话。
 		if service.CurrentSsoMode() != service.SsoModeSso {
 			response.Response(c, http.StatusServiceUnavailable, 503, nil, "sso_unavailable")
@@ -393,33 +384,8 @@ func RefreshToken(c *gin.Context) {
 }
 
 func ModifyPassword(c *gin.Context) {
-	var inputUser ModifyUser
-	c.Bind(&inputUser)
-	password := util.Decrypt(inputUser.Password)
-	password2 := util.Decrypt(inputUser.Password2)
-	if password != password2 {
-		response.Response(c, http.StatusUnprocessableEntity, 400, nil, "密码输入不一致")
-		return
-	}
-	u, err := service.Users.ModifyPassword(c.Request.Context(), domain.ModifyPasswordInput{
-		Email:    inputUser.Email,
-		Password: password,
-		ValiCode: inputUser.ValiCode,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, domain.ErrNotFound):
-			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "未找到邮箱")
-		case errors.Is(err, domain.ErrUnauthorized):
-			response.Response(c, http.StatusBadRequest, 400, nil, "验证码错误")
-		case errors.Is(err, domain.ErrBadRequest):
-			response.Response(c, http.StatusUnprocessableEntity, 400, nil, "邮箱不符合要求")
-		default:
-			apperr.WriteMsg(c, err, "修改密码失败")
-		}
-		return
-	}
-	response.Success(c, gin.H{"data": u}, "修改密码成功")
+	response.Response(c, http.StatusForbidden, 403, nil,
+		"请使用集市登录页的忘记密码入口，或前往 https://sso.ssemarket.cn/reset-password")
 }
 
 func ModifyEmail(c *gin.Context) {

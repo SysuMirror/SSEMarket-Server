@@ -31,7 +31,7 @@ func discoveryHandler(healthy *atomic.Bool) http.Handler {
 	return mux
 }
 
-func TestSsoProbe_FallbackAfterThreeFailuresThenRecover(t *testing.T) {
+func TestSsoProbe_UnavailableAfterThreeFailuresThenRecover(t *testing.T) {
 	var healthy atomic.Bool
 	healthy.Store(false)
 	srv := httptest.NewServer(discoveryHandler(&healthy))
@@ -48,8 +48,8 @@ func TestSsoProbe_FallbackAfterThreeFailuresThenRecover(t *testing.T) {
 		t.Fatalf("failures = %d, want 2", h.failures)
 	}
 	h.probe()
-	if h.mode != SsoModeFallback {
-		t.Fatalf("mode = %s after 3 failures, want fallback", h.mode)
+	if h.mode != SsoModeUnavailable {
+		t.Fatalf("mode = %s after 3 failures, want unavailable", h.mode)
 	}
 	healthy.Store(true)
 	h.probe()
@@ -76,7 +76,7 @@ func TestCurrentSsoMode_Disabled(t *testing.T) {
 	if CurrentSsoMode() != SsoModeDisabled {
 		t.Fatalf("mode = %s, want disabled", CurrentSsoMode())
 	}
-	if !LocalPasswordLoginAllowed() {
-		t.Fatal("local password login must be allowed when sso disabled")
+	if CurrentSsoModeInfo().PasswordLogin {
+		t.Fatal("local password login must never be allowed")
 	}
 }

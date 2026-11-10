@@ -106,7 +106,7 @@ type SsoService interface {
 	// GetStatus 查询用户绑定状态（未绑定返回 Bound=false，不报错）。
 	GetStatus(ctx context.Context, userID int) (*domain.SsoStatus, error)
 	// Unbind 验证密码后删除绑定。
-	Unbind(ctx context.Context, userID int, password string) error
+	Unbind(ctx context.Context, userID int, email, password string) error
 }
 
 // StaffService 职位账号（开发人员匿名 @）领域服务。

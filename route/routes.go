@@ -71,6 +71,8 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 
 	noauth.POST("/api/auth/register", controller.Register)
 	noauth.POST("/api/auth/login", middleware.LoginRateLimit(), controller.Login)
+	noauth.POST("/api/auth/password-reset/start", middleware.IPRateLimit("password-reset-start", 8, time.Minute), controller.StartUnissoPasswordReset)
+	noauth.POST("/api/auth/password-reset/confirm", middleware.IPRateLimit("password-reset-confirm", 12, time.Minute), controller.ConfirmUnissoPasswordReset)
 	noauth.POST("/api/auth/logout", controller.SsoLogout)
 	// 静默 SSO：共享 sse_sso Cookie 兑换本地会话（限流 10 次/分钟/IP）
 	noauth.POST("/api/auth/sso/try", middleware.IPRateLimit("sso-try", 10, time.Minute), controller.SsoTry)

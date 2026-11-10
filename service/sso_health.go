@@ -17,14 +17,11 @@ import (
 	"loginTest/config"
 )
 
-// UniSSO 可用性探测与兜底模式。
-// 主模式（sso）：只允许 UniSSO 登录，本地 /api/auth/login 返回 403。
-// 兜底模式（fallback）：discovery 连续失败 3 次后自动放开本地密码登录。
-// 恢复：下一次探测成功即自动回到主模式。
+// UniSSO 可用性探测只反映服务状态，不改变密码校验来源。
 const (
-	SsoModeSso      = "sso"
-	SsoModeFallback = "fallback"
-	SsoModeDisabled = "disabled"
+	SsoModeSso         = "sso"
+	SsoModeUnavailable = "unavailable"
+	SsoModeDisabled    = "disabled"
 
 	ssoProbeTimeout  = 2 * time.Second
 	ssoProbeInterval = 30 * time.Second
@@ -54,7 +51,7 @@ type ssoHealth struct {
 
 var ssoHealthState = &ssoHealth{mode: SsoModeSso}
 
-// CurrentSsoMode 返回当前登录模式（sso / fallback / disabled）。
+// CurrentSsoMode 返回当前登录模式（sso / unavailable / disabled）。
 func CurrentSsoMode() string {
 	if !config.SsoEnabled() {
 		return SsoModeDisabled
@@ -64,14 +61,9 @@ func CurrentSsoMode() string {
 	return ssoHealthState.mode
 }
 
-// LocalPasswordLoginAllowed 主模式下禁止本地密码登录，其余模式放行。
-func LocalPasswordLoginAllowed() bool {
-	return CurrentSsoMode() != SsoModeSso
-}
-
 // CurrentSsoModeInfo 返回状态快照；status 接口与登录门禁共用。
 func CurrentSsoModeInfo() SsoModeInfo {
-	info := SsoModeInfo{Mode: SsoModeDisabled, PasswordLogin: true}
+	info := SsoModeInfo{Mode: SsoModeDisabled}
 	if !config.SsoEnabled() {
 		info.CheckedAt = time.Now()
 		return info
@@ -82,7 +74,6 @@ func CurrentSsoModeInfo() SsoModeInfo {
 	info.CheckedAt = ssoHealthState.lastProbe
 	info.LastError = ssoHealthState.lastErr
 	ssoHealthState.mu.RUnlock()
-	info.PasswordLogin = info.Mode != SsoModeSso
 	info.UnissoHealthy = info.Mode == SsoModeSso
 	return info
 }
@@ -109,11 +100,11 @@ func StartSsoHealthMonitor() {
 		}
 		if config.SsoClientID() == "" || config.SsoClientSecret() == "" || config.SsoDiscoveryURL() == "" {
 			ssoHealthState.mu.Lock()
-			ssoHealthState.mode = SsoModeFallback
+			ssoHealthState.mode = SsoModeUnavailable
 			ssoHealthState.lastErr = "sso client/discovery not configured"
 			ssoHealthState.lastProbe = time.Now()
 			ssoHealthState.mu.Unlock()
-			SsoAudit("mode_change", "from", SsoModeSso, "to", SsoModeFallback, "reason", "client_not_configured")
+			SsoAudit("mode_change", "from", SsoModeSso, "to", SsoModeUnavailable, "reason", "client_not_configured")
 			return
 		}
 		go func() {
@@ -145,9 +136,9 @@ func (h *ssoHealth) probe() {
 	if err != nil {
 		h.failures++
 		h.lastErr = err.Error()
-		if h.failures >= ssoFailThreshold && h.mode != SsoModeFallback {
-			h.mode = SsoModeFallback
-			transition = SsoModeFallback
+		if h.failures >= ssoFailThreshold && h.mode != SsoModeUnavailable {
+			h.mode = SsoModeUnavailable
+			transition = SsoModeUnavailable
 		}
 	} else {
 		h.failures = 0
