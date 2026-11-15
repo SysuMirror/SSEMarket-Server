@@ -1006,19 +1006,37 @@ func UploadPhotos(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件打开失败"})
 		return
 	}
-	defer src.Close()
 	// 读取上传文件的内容，并解码为 image.Image 对象
-	img, _, err := image.Decode(src)
-	if err != nil {
-		log.Printf("[UploadPhotos] image.Decode failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件解码失败" + err.Error()})
+	img, _, decodeErr := image.Decode(src)
+	src.Close()
+
+	// 手机相册常见的 HEIC/HEIF/AVIF 标准库解不了：用容器内 ffmpeg 转 JPEG 再走同一套缩图管线。
+	convertedPath := ""
+	if decodeErr != nil {
+		if jpgPath, convErr := convertImageToJPEG(filepath); convErr == nil {
+			convertedPath = jpgPath
+			defer os.Remove(jpgPath)
+			if f, openErr := os.Open(jpgPath); openErr == nil {
+				img, _, decodeErr = image.Decode(f)
+				f.Close()
+			}
+		} else {
+			log.Printf("[UploadPhotos] convert fallback failed: path=%s err=%v", filepath, convErr)
+		}
+	}
+	if decodeErr != nil {
+		log.Printf("[UploadPhotos] image.Decode failed: path=%s err=%v", filepath, decodeErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "图片格式不支持或文件已损坏"})
 		return
 	}
 
 	// imaging 不支持编码 WebP：先解码（blank import 注册 webp codec），
 	// 落盘时统一转成 PNG，避免用户上传 WebP 时失败。
 	saveFilename := filename
-	if strings.EqualFold(pathpkg.Ext(filename), ".webp") {
+	if convertedPath != "" {
+		// 原文件可能是“HEIC 内容 + .png 后缀”，按转码后的真实格式存成 .jpg。
+		saveFilename = strings.TrimSuffix(filename, pathpkg.Ext(filename)) + ".jpg"
+	} else if strings.EqualFold(pathpkg.Ext(filename), ".webp") {
 		saveFilename = strings.TrimSuffix(filename, pathpkg.Ext(filename)) + ".png"
 	}
 	// 对图像进行缩略图处理
