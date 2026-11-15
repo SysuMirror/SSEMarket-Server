@@ -156,6 +156,11 @@ func registerPprofRoutes(r *gin.Engine) {
 
 func main() {
 	config.InitConfig()
+	// SSO 配置自检：启用统一身份但缺 client/secret 时，所有登录都会 503。
+	// 启动即失败，避免「容器起来了但没人能登录」；secret 只放在 go_server.env，不写进镜像。
+	if config.SsoEnabled() && (config.SsoClientID() == "" || config.SsoClientSecret() == "" || config.SsoDiscoveryURL() == "") {
+		log.Fatalf("[config] SSO enabled but SSO_CLIENT_ID / SSO_CLIENT_SECRET / SSO_DISCOVERY_URL is empty; refusing to start (check /root/SSE_Market/go_server.env)")
+	}
 	config.InitEmailConfig()
 	config.InitPprof()
 
