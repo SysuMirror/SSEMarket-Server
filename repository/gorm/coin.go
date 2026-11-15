@@ -33,6 +33,7 @@ var coinDisplayEvents = []string{
 	domain.CoinEventWriteDaily,
 	domain.CoinEventRated,
 	domain.CoinEventProgrammersDay2026,
+	domain.CoinEventS16Champions2026,
 	domain.CoinEventPostTipIncome,
 	domain.CoinEventThrow,
 	domain.CoinEventRefund,

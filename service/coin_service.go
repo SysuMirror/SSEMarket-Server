@@ -28,6 +28,7 @@ var coinEarnEvents = []string{
 	domain.CoinEventWriteDaily,
 	domain.CoinEventRated,
 	domain.CoinEventProgrammersDay2026,
+	domain.CoinEventS16Champions2026,
 	domain.CoinEventPostTipIncome,
 }
 
