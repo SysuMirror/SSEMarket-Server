@@ -34,6 +34,7 @@ var coinDisplayEvents = []string{
 	domain.CoinEventRated,
 	domain.CoinEventProgrammersDay2026,
 	domain.CoinEventS16Champions2026,
+	domain.CoinEventManualGrant,
 	domain.CoinEventPostTipIncome,
 	domain.CoinEventThrow,
 	domain.CoinEventRefund,

@@ -29,6 +29,8 @@ const (
 	CoinEventProgrammersDay2026 = "programmers_day_2026"
 	// CoinEventS16Champions2026 S16 全球总决赛 BLG 夺冠全站福利（每人 +16 币）。
 	CoinEventS16Champions2026 = "s16_champions_2026"
+	// CoinEventManualGrant 运营/管理员人工发放（一次性调整；具体原因写进 dedup_key）。
+	CoinEventManualGrant = "manual_grant"
 	// CoinEventPostTipIncome 帖子作者收到的投币分成（每 1 币给作者 +0.1）。
 	CoinEventPostTipIncome = "post_tip_income"
 	CoinEventThrow         = "coin_throw"  // 投币支出（负数）
@@ -182,6 +184,8 @@ func CoinEventLabel(eventType string) string {
 		return "程序员节发放"
 	case CoinEventS16Champions2026:
 		return "S16 全球总决赛 BLG 3:1 GEN 夺冠"
+	case CoinEventManualGrant:
+		return "人工发放"
 	case CoinEventPostTipIncome:
 		return "帖子获投币分成"
 	default:
