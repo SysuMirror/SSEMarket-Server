@@ -1,10 +1,17 @@
 package domain
 
-// Admin 管理员实体。
+import "time"
+
+// Admin 管理员实体（管理台白名单条目）。
 type Admin struct {
-	ID       int
-	Account  string
-	Password string
+	ID          int
+	Account     string
+	SsoSub      string
+	Email       string
+	Name        string
+	IsActive    bool
+	CreatedAt   time.Time
+	LastLoginAt time.Time
 }
 
 // AdminUserFilter 管理端用户筛选。

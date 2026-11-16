@@ -94,7 +94,7 @@ func AuthMiddleware_admin() gin.HandlerFunc {
 			return
 		}
 		admin, err := service.Admins.GetByID(ctx.Request.Context(), adminId)
-		if err != nil || admin == nil || admin.ID == 0 {
+		if err != nil || admin == nil || admin.ID == 0 || !admin.IsActive {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "权限不足"})
 			ctx.Abort()
 			return

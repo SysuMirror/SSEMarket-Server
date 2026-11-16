@@ -189,11 +189,21 @@ func adminToDomain(a *model.Admin) *domain.Admin {
 	if a == nil {
 		return nil
 	}
-	return &domain.Admin{
+	out := &domain.Admin{
 		ID:       a.AdminID,
 		Account:  a.Account,
-		Password: a.Password,
+		SsoSub:   a.SsoSub,
+		Email:    a.Email,
+		Name:     a.Name,
+		IsActive: a.IsActive,
 	}
+	if a.CreatedAt != nil {
+		out.CreatedAt = *a.CreatedAt
+	}
+	if a.LastLoginAt != nil {
+		out.LastLoginAt = *a.LastLoginAt
+	}
+	return out
 }
 
 func tagToDomain(t *model.Tag) *domain.Tag {

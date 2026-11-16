@@ -3,6 +3,7 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"loginTest/domain"
@@ -36,9 +37,12 @@ func (r *adminRepository) FindByID(ctx context.Context, id int) (*domain.Admin, 
 	return adminToDomain(&m), nil
 }
 
-func (r *adminRepository) FindByAccount(ctx context.Context, account string) (*domain.Admin, error) {
+func (r *adminRepository) FindBySsoSub(ctx context.Context, sub string) (*domain.Admin, error) {
+	if strings.TrimSpace(sub) == "" {
+		return nil, domain.ErrNotFound
+	}
 	var m model.Admin
-	err := r.session(ctx).Where("account = ?", account).First(&m).Error
+	err := r.session(ctx).Where("sso_sub = ?", sub).First(&m).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
@@ -48,17 +52,50 @@ func (r *adminRepository) FindByAccount(ctx context.Context, account string) (*d
 	return adminToDomain(&m), nil
 }
 
-func (r *adminRepository) Count(ctx context.Context) (int64, error) {
+func (r *adminRepository) FindByEmail(ctx context.Context, email string) (*domain.Admin, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, domain.ErrNotFound
+	}
+	var m model.Admin
+	err := r.session(ctx).Where("LOWER(email) = ?", email).First(&m).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, err
+	}
+	return adminToDomain(&m), nil
+}
+
+func (r *adminRepository) List(ctx context.Context) ([]domain.Admin, error) {
+	var rows []model.Admin
+	if err := r.session(ctx).Order("adminID ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]domain.Admin, 0, len(rows))
+	for i := range rows {
+		out = append(out, *adminToDomain(&rows[i]))
+	}
+	return out, nil
+}
+
+func (r *adminRepository) CountActive(ctx context.Context) (int64, error) {
 	var n int64
-	err := r.session(ctx).Model(&model.Admin{}).Count(&n).Error
+	err := r.session(ctx).Model(&model.Admin{}).Where("is_active = ?", true).Count(&n).Error
 	return n, err
 }
 
 func (r *adminRepository) Create(ctx context.Context, admin *domain.Admin) error {
 	m := model.Admin{
-		Account:  admin.Account,
-		Password: admin.Password,
-		AdminID:  admin.ID,
+		Account:     admin.Account,
+		AdminID:     admin.ID,
+		SsoSub:      admin.SsoSub,
+		Email:       admin.Email,
+		Name:        admin.Name,
+		IsActive:    admin.IsActive,
+		CreatedAt:   timePtr(admin.CreatedAt),
+		LastLoginAt: timePtr(admin.LastLoginAt),
 	}
 	if err := r.session(ctx).Create(&m).Error; err != nil {
 		return err
@@ -67,17 +104,26 @@ func (r *adminRepository) Create(ctx context.Context, admin *domain.Admin) error
 	return nil
 }
 
-func (r *adminRepository) Save(ctx context.Context, admin *domain.Admin) error {
-	m := model.Admin{
-		AdminID:  admin.ID,
-		Account:  admin.Account,
-		Password: admin.Password,
+func (r *adminRepository) UpdateLogin(ctx context.Context, id int, name, email, ssoSub string, at time.Time) error {
+	updates := map[string]interface{}{
+		"last_login_at": at,
+		"name":          name,
+		"email":         email,
+		"is_active":     true,
 	}
-	return r.session(ctx).Save(&m).Error
+	if strings.TrimSpace(ssoSub) != "" {
+		updates["sso_sub"] = ssoSub
+	}
+	return r.session(ctx).Model(&model.Admin{}).Where("adminID = ?", id).Updates(updates).Error
 }
 
-func (r *adminRepository) DeleteByAccount(ctx context.Context, account string) error {
-	res := r.session(ctx).Where("account = ?", account).Delete(&model.Admin{})
+func (r *adminRepository) SetActive(ctx context.Context, id int, active bool) error {
+	return r.session(ctx).Model(&model.Admin{}).Where("adminID = ?", id).
+		Update("is_active", active).Error
+}
+
+func (r *adminRepository) DeleteByID(ctx context.Context, id int) error {
+	res := r.session(ctx).Where("adminID = ?", id).Delete(&model.Admin{})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -143,4 +189,11 @@ func (r *adminRepository) CreateAdminPost(ctx context.Context, in domain.AdminPo
 		return 0, err
 	}
 	return p.PostID, nil
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }

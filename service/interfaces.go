@@ -107,6 +107,11 @@ type SsoService interface {
 	GetStatus(ctx context.Context, userID int) (*domain.SsoStatus, error)
 	// Unbind 验证密码后删除绑定。
 	Unbind(ctx context.Context, userID int, email, password string) error
+	// VerifyPasswordIdentity 仅校验 unisso 邮箱密码并返回身份与共享会话，不做集市账号准入。
+	// 供管理台等非普通用户入口复用同一套 M2M 凭据。
+	VerifyPasswordIdentity(ctx context.Context, email, password string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error)
+	// VerifySessionIdentity 仅校验共享 Cookie 会话指针并返回身份与续期后的会话元数据。
+	VerifySessionIdentity(ctx context.Context, session string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error)
 }
 
 // StaffService 职位账号（开发人员匿名 @）领域服务。
@@ -317,13 +322,23 @@ type NoticeService interface {
 // AdminService 管理端领域服务。
 type AdminService interface {
 	GetByID(ctx context.Context, id int) (*domain.Admin, error)
-	Login(ctx context.Context, account, encryptedPassword string) (string, error)
-	AddAdmin(ctx context.Context, account, pass1, pass2 string) (*domain.Admin, error)
-	ChangePassword(ctx context.Context, account, pass1, pass2 string) (*domain.Admin, error)
-	DeleteAdmin(ctx context.Context, account string) error
 	FilterUsers(ctx context.Context, filter domain.AdminUserFilter) ([]domain.AdminUserItem, error)
 	DeleteUser(ctx context.Context, name string) error
 	CreatePost(ctx context.Context, in domain.AdminPostInput) error
+
+	// UniSSO 管理台登录：邮箱密码经 unisso 校验后，再按白名单与 internal 准入。
+	// 错误：ErrSsoBadCredentials/ErrSsoTooManyAttempts/ErrSsoUnavailable/ErrAdminNotInternal/ErrAdminNotWhitelisted/ErrAdminInactive。
+	LoginWithSso(ctx context.Context, email, encryptedPassword string) (*domain.Admin, string, *domain.SsoSession, error)
+	// LoginWithSession 静默 SSO：共享 Cookie → unisso 校验 → 白名单准入。
+	LoginWithSession(ctx context.Context, session string) (*domain.Admin, string, error)
+	// ListAdmins 管理台白名单。
+	ListAdmins(ctx context.Context) ([]domain.Admin, error)
+	// AddAdminByEmail 按邮箱加入白名单；sso_sub 在对方首次登录时回填。
+	AddAdminByEmail(ctx context.Context, email, name string) (*domain.Admin, error)
+	// SetAdminActive 启用/停用白名单条目（不允许停用最后一个启用中的管理员）。
+	SetAdminActive(ctx context.Context, id int, active bool) error
+	// DeleteAdminByID 删除白名单条目（不允许删除最后一个启用中的管理员）。
+	DeleteAdminByID(ctx context.Context, id int) error
 }
 
 // SueService 举报领域服务。

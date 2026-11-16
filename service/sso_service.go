@@ -367,6 +367,20 @@ func (s *ssoService) VerifySession(ctx context.Context, session string) (*domain
 	return out.User, &out.SsoSession, nil
 }
 
+// VerifyPasswordIdentity 对外暴露纯 unisso 密码校验（管理台登录复用）。
+func (s *ssoService) VerifyPasswordIdentity(ctx context.Context, email, password string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" || password == "" {
+		return nil, nil, domain.ErrBadRequest
+	}
+	return s.verifyPassword(ctx, email, password)
+}
+
+// VerifySessionIdentity 对外暴露纯共享会话校验（管理台静默登录复用）。
+func (s *ssoService) VerifySessionIdentity(ctx context.Context, session string) (*domain.SsoPasswordVerifyUser, *domain.SsoSession, error) {
+	return s.VerifySession(ctx, session)
+}
+
 // RevokeSession 调 unisso 吊销共享会话（best-effort：平台登出无论如何都要清本地会话与 Cookie）。
 func (s *ssoService) RevokeSession(ctx context.Context, session string) {
 	if session == "" || config.SsoSessionRevokeURL() == "" {
