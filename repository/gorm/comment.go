@@ -123,180 +123,83 @@ func (r *commentRepository) DeleteCcomment(ctx context.Context, id int) error {
 	return r.session(ctx).Where("ccommentID = ?", id).Delete(&model.Ccomment{}).Error
 }
 
-func (r *commentRepository) PcommentLikedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error) {
+func (r *commentRepository) commentReactionSet(
+	ctx context.Context, userID int, targetType, reaction string, targetIDs []int,
+) (map[int]bool, error) {
 	out := make(map[int]bool)
-	if len(pcommentIDs) == 0 {
+	if len(targetIDs) == 0 {
 		return out, nil
 	}
-	var likes []model.Pclike
-	err := r.session(ctx).Where("userID = ? AND pctargetID IN ?", userID, pcommentIDs).Find(&likes).Error
+	var rows []model.CommentReaction
+	err := r.session(ctx).
+		Where("userID = ? AND targetType = ? AND reaction = ? AND targetID IN ?",
+			userID, targetType, reaction, targetIDs).
+		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	for _, like := range likes {
-		out[like.PctargetID] = true
+	for _, row := range rows {
+		out[row.TargetID] = true
 	}
 	return out, nil
+}
+
+func (r *commentRepository) PcommentLikedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error) {
+	return r.commentReactionSet(ctx, userID, model.CommentTargetPcomment, model.ReactionLike, pcommentIDs)
 }
 
 func (r *commentRepository) PcommentDeniedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error) {
-	out := make(map[int]bool)
-	if len(pcommentIDs) == 0 {
-		return out, nil
-	}
-	var denies []model.Pcdeny
-	err := r.session(ctx).Where("userID = ? AND pctargetID IN ?", userID, pcommentIDs).Find(&denies).Error
-	if err != nil {
-		return nil, err
-	}
-	for _, deny := range denies {
-		out[deny.PctargetID] = true
-	}
-	return out, nil
+	return r.commentReactionSet(ctx, userID, model.CommentTargetPcomment, model.ReactionDeny, pcommentIDs)
 }
 
 func (r *commentRepository) CcommentLikedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error) {
-	out := make(map[int]bool)
-	if len(ccommentIDs) == 0 {
-		return out, nil
-	}
-	var likes []model.Cclike
-	err := r.session(ctx).Where("userID = ? AND cctargetID IN ?", userID, ccommentIDs).Find(&likes).Error
-	if err != nil {
-		return nil, err
-	}
-	for _, like := range likes {
-		out[like.CctargetID] = true
-	}
-	return out, nil
+	return r.commentReactionSet(ctx, userID, model.CommentTargetCcomment, model.ReactionLike, ccommentIDs)
 }
 
 func (r *commentRepository) CcommentDeniedSet(ctx context.Context, userID int, ccommentIDs []int) (map[int]bool, error) {
-	out := make(map[int]bool)
-	if len(ccommentIDs) == 0 {
-		return out, nil
-	}
-	var denies []model.Ccdeny
-	err := r.session(ctx).Where("userID = ? AND cctargetID IN ?", userID, ccommentIDs).Find(&denies).Error
-	if err != nil {
-		return nil, err
-	}
-	for _, deny := range denies {
-		out[deny.CctargetID] = true
-	}
-	return out, nil
+	return r.commentReactionSet(ctx, userID, model.CommentTargetCcomment, model.ReactionDeny, ccommentIDs)
 }
 
 func (r *commentRepository) CcommentReaction(ctx context.Context, userID, ccommentID int) (liked, denied bool, err error) {
-	likeMap, err := r.CcommentLikedSet(ctx, userID, []int{ccommentID})
+	var row model.CommentReaction
+	err = r.session(ctx).
+		Where("userID = ? AND targetType = ? AND targetID = ?",
+			userID, model.CommentTargetCcomment, ccommentID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, false, nil
+	}
 	if err != nil {
 		return false, false, err
 	}
-	denyMap, err := r.CcommentDeniedSet(ctx, userID, []int{ccommentID})
-	if err != nil {
-		return false, false, err
-	}
-	return likeMap[ccommentID], denyMap[ccommentID], nil
+	return row.Reaction == model.ReactionLike, row.Reaction == model.ReactionDeny, nil
+}
+
+func (r *commentRepository) hasCommentReaction(
+	ctx context.Context, userID int, targetType string, targetID int, reaction string,
+) (bool, error) {
+	var count int64
+	err := r.session(ctx).Model(&model.CommentReaction{}).
+		Where("userID = ? AND targetType = ? AND targetID = ? AND reaction = ?",
+			userID, targetType, targetID, reaction).
+		Count(&count).Error
+	return count > 0, err
 }
 
 func (r *commentRepository) FindPcommentLike(ctx context.Context, userID, pcommentID int) (bool, error) {
-	var like model.Pclike
-	err := r.session(ctx).Where("userID = ? AND pctargetID = ?", userID, pcommentID).First(&like).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return like.PclikeID != 0, nil
+	return r.hasCommentReaction(ctx, userID, model.CommentTargetPcomment, pcommentID, model.ReactionLike)
 }
 
 func (r *commentRepository) FindPcommentDeny(ctx context.Context, userID, pcommentID int) (bool, error) {
-	var deny model.Pcdeny
-	err := r.session(ctx).Where("userID = ? AND pctargetID = ?", userID, pcommentID).First(&deny).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return deny.PcdenyID != 0, nil
-}
-
-func (r *commentRepository) CreatePcommentLike(ctx context.Context, userID, pcommentID int) error {
-	return r.session(ctx).Create(&model.Pclike{UserID: userID, PctargetID: pcommentID}).Error
-}
-
-func (r *commentRepository) DeletePcommentLike(ctx context.Context, userID, pcommentID int) error {
-	return r.session(ctx).Where("userID = ? AND pctargetID = ?", userID, pcommentID).Delete(&model.Pclike{}).Error
-}
-
-func (r *commentRepository) CreatePcommentDeny(ctx context.Context, userID, pcommentID int) error {
-	return r.session(ctx).Create(&model.Pcdeny{UserID: userID, PctargetID: pcommentID}).Error
-}
-
-func (r *commentRepository) DeletePcommentDeny(ctx context.Context, userID, pcommentID int) error {
-	return r.session(ctx).Where("userID = ? AND pctargetID = ?", userID, pcommentID).Delete(&model.Pcdeny{}).Error
-}
-
-func (r *commentRepository) IncrPcommentLikeNum(ctx context.Context, pcommentID, delta int) error {
-	return r.session(ctx).Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).
-		UpdateColumn("like_num", gorm.Expr("like_num + ?", delta)).Error
-}
-
-func (r *commentRepository) IncrPcommentDenyNum(ctx context.Context, pcommentID, delta int) error {
-	return r.session(ctx).Model(&model.Pcomment{}).Where("pcommentID = ?", pcommentID).
-		UpdateColumn("deny_num", gorm.Expr("deny_num + ?", delta)).Error
+	return r.hasCommentReaction(ctx, userID, model.CommentTargetPcomment, pcommentID, model.ReactionDeny)
 }
 
 func (r *commentRepository) FindCcommentLike(ctx context.Context, userID, ccommentID int) (bool, error) {
-	var like model.Cclike
-	err := r.session(ctx).Where("userID = ? AND cctargetID = ?", userID, ccommentID).First(&like).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return like.CclikeID != 0, nil
+	return r.hasCommentReaction(ctx, userID, model.CommentTargetCcomment, ccommentID, model.ReactionLike)
 }
 
 func (r *commentRepository) FindCcommentDeny(ctx context.Context, userID, ccommentID int) (bool, error) {
-	var deny model.Ccdeny
-	err := r.session(ctx).Where("userID = ? AND cctargetID = ?", userID, ccommentID).First(&deny).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return deny.CcdenyID != 0, nil
-}
-
-func (r *commentRepository) CreateCcommentLike(ctx context.Context, userID, ccommentID int) error {
-	return r.session(ctx).Create(&model.Cclike{UserID: userID, CctargetID: ccommentID}).Error
-}
-
-func (r *commentRepository) DeleteCcommentLike(ctx context.Context, userID, ccommentID int) error {
-	return r.session(ctx).Where("userID = ? AND cctargetID = ?", userID, ccommentID).Delete(&model.Cclike{}).Error
-}
-
-func (r *commentRepository) CreateCcommentDeny(ctx context.Context, userID, ccommentID int) error {
-	return r.session(ctx).Create(&model.Ccdeny{UserID: userID, CctargetID: ccommentID}).Error
-}
-
-func (r *commentRepository) DeleteCcommentDeny(ctx context.Context, userID, ccommentID int) error {
-	return r.session(ctx).Where("userID = ? AND cctargetID = ?", userID, ccommentID).Delete(&model.Ccdeny{}).Error
-}
-
-func (r *commentRepository) IncrCcommentLikeNum(ctx context.Context, ccommentID, delta int) error {
-	return r.session(ctx).Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).
-		UpdateColumn("like_num", gorm.Expr("like_num + ?", delta)).Error
-}
-
-func (r *commentRepository) IncrCcommentDenyNum(ctx context.Context, ccommentID, delta int) error {
-	return r.session(ctx).Model(&model.Ccomment{}).Where("ccommentID = ?", ccommentID).
-		UpdateColumn("deny_num", gorm.Expr("deny_num + ?", delta)).Error
+	return r.hasCommentReaction(ctx, userID, model.CommentTargetCcomment, ccommentID, model.ReactionDeny)
 }
 
 func (r *commentRepository) UsersByIDs(ctx context.Context, ids []int) (map[int]*domain.User, error) {

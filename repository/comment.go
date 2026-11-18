@@ -18,6 +18,14 @@ type CommentRepository interface {
 	FindCcommentByID(ctx context.Context, id int) (*domain.Ccomment, error)
 	CreateCcomment(ctx context.Context, c *domain.Ccomment) error
 	DeleteCcomment(ctx context.Context, id int) error
+	// CreatePcommentAndAdjustPost 在同一事务内创建一级评论并更新帖子评论数/热度。
+	CreatePcommentAndAdjustPost(ctx context.Context, c *domain.Pcomment, commentDelta int, heatDelta float64) error
+	// CreateCcommentAndAdjustPost 在同一事务内创建楼中楼并更新帖子评论数/热度。
+	CreateCcommentAndAdjustPost(ctx context.Context, c *domain.Ccomment, postID, commentDelta int, heatDelta float64) error
+	// DeletePcommentAndAdjustPost 在同一事务内删除一级评论并回退帖子评论数/热度。
+	DeletePcommentAndAdjustPost(ctx context.Context, id, postID, commentDelta int, heatDelta float64) error
+	// DeleteCcommentAndAdjustPost 在同一事务内删除楼中楼并回退帖子评论数/热度。
+	DeleteCcommentAndAdjustPost(ctx context.Context, id, postID, commentDelta int, heatDelta float64) error
 
 	PcommentLikedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error)
 	PcommentDeniedSet(ctx context.Context, userID int, pcommentIDs []int) (map[int]bool, error)
@@ -27,21 +35,17 @@ type CommentRepository interface {
 
 	FindPcommentLike(ctx context.Context, userID, pcommentID int) (bool, error)
 	FindPcommentDeny(ctx context.Context, userID, pcommentID int) (bool, error)
-	CreatePcommentLike(ctx context.Context, userID, pcommentID int) error
-	DeletePcommentLike(ctx context.Context, userID, pcommentID int) error
-	CreatePcommentDeny(ctx context.Context, userID, pcommentID int) error
-	DeletePcommentDeny(ctx context.Context, userID, pcommentID int) error
-	IncrPcommentLikeNum(ctx context.Context, pcommentID, delta int) error
-	IncrPcommentDenyNum(ctx context.Context, pcommentID, delta int) error
 
 	FindCcommentLike(ctx context.Context, userID, ccommentID int) (bool, error)
 	FindCcommentDeny(ctx context.Context, userID, ccommentID int) (bool, error)
-	CreateCcommentLike(ctx context.Context, userID, ccommentID int) error
-	DeleteCcommentLike(ctx context.Context, userID, ccommentID int) error
-	CreateCcommentDeny(ctx context.Context, userID, ccommentID int) error
-	DeleteCcommentDeny(ctx context.Context, userID, ccommentID int) error
-	IncrCcommentLikeNum(ctx context.Context, ccommentID, delta int) error
-	IncrCcommentDenyNum(ctx context.Context, ccommentID, delta int) error
+	// TogglePcommentLikeOnce 在同一事务内切换一级评论点赞：已赞则取消，已踩则改为赞。
+	TogglePcommentLikeOnce(ctx context.Context, userID, pcommentID int) error
+	// TogglePcommentDenyOnce 在同一事务内切换一级评论点踩：已踩则取消，已赞则改为踩。
+	TogglePcommentDenyOnce(ctx context.Context, userID, pcommentID int) error
+	// ToggleCcommentLikeOnce 在同一事务内切换楼中楼点赞：已赞则取消，已踩则改为赞。
+	ToggleCcommentLikeOnce(ctx context.Context, userID, ccommentID int) error
+	// ToggleCcommentDenyOnce 在同一事务内切换楼中楼点踩：已踩则取消，已赞则改为踩。
+	ToggleCcommentDenyOnce(ctx context.Context, userID, ccommentID int) error
 
 	UsersByIDs(ctx context.Context, ids []int) (map[int]*domain.User, error)
 	FindUserByPhone(ctx context.Context, phone string) (*domain.User, error)

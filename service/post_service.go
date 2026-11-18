@@ -483,24 +483,21 @@ func (s *postService) ToggleLike(ctx context.Context, userID, postID int) error 
 		return err
 	}
 	if isLiked {
-		if err := s.posts.UpdateLikeNum(ctx, postID, -1); err != nil {
+		deleted, err := s.posts.DeleteLikeOnce(ctx, userID, postID)
+		if err != nil {
 			return err
 		}
-		if err := s.posts.DeleteLike(ctx, userID, postID); err != nil {
-			return err
+		if deleted {
+			s.ranks.AdjustUserReceivedLike(ctx, post.UserID, -1)
 		}
-		s.ranks.AdjustUserReceivedLike(ctx, post.UserID, -1)
 	} else {
-		if err := s.posts.UpdateLikeNum(ctx, postID, 1); err != nil {
+		inserted, err := s.posts.CreateLikeOnce(ctx, userID, postID, weightLike)
+		if err != nil {
 			return err
 		}
-		if err := s.posts.UpdateHeat(ctx, postID, weightLike); err != nil {
-			return err
+		if inserted {
+			s.ranks.AdjustUserReceivedLike(ctx, post.UserID, 1)
 		}
-		if err := s.posts.CreateLike(ctx, userID, postID); err != nil {
-			return err
-		}
-		s.ranks.AdjustUserReceivedLike(ctx, post.UserID, 1)
 	}
 	InvalidatePostDetail(postID)
 	return nil
@@ -514,17 +511,7 @@ func (s *postService) RecordBrowse(ctx context.Context, userID, postID int) erro
 	if !canViewPost(post, userID) {
 		return nil
 	}
-	browsed, err := s.posts.HasBrowsed(ctx, userID, postID)
-	if err != nil {
-		return err
-	}
-	if browsed {
-		return nil
-	}
-	if err := s.posts.UpdateHeat(ctx, postID, weightBrowse); err != nil {
-		return err
-	}
-	return s.posts.CreateBrowse(ctx, userID, postID)
+	return s.posts.CreateBrowseOnce(ctx, userID, postID, weightBrowse)
 }
 
 func (s *postService) Delete(ctx context.Context, postID, userID int) error {

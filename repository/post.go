@@ -45,10 +45,16 @@ type PostRepository interface {
 	UpdateHeat(ctx context.Context, postID int, delta float64) error
 	HasBrowsed(ctx context.Context, userID, postID int) (bool, error)
 	CreateBrowse(ctx context.Context, userID, postID int) error
+	// CreateBrowseOnce 幂等记录浏览：首次插入成功时，才在同一事务内增加热度。
+	CreateBrowseOnce(ctx context.Context, userID, postID int, heatDelta float64) error
 	DeleteSave(ctx context.Context, userID, postID int) error
 	CreateSave(ctx context.Context, userID, postID int) error
 	DeleteLike(ctx context.Context, userID, postID int) error
 	CreateLike(ctx context.Context, userID, postID int) error
+	// CreateLikeOnce 幂等点赞：明细首次插入成功时，才在同一事务内累加点赞数与热度。
+	CreateLikeOnce(ctx context.Context, userID, postID int, heatDelta float64) (bool, error)
+	// DeleteLikeOnce 幂等取消点赞：明细确实删除成功时，才在同一事务内扣减点赞数。
+	DeleteLikeOnce(ctx context.Context, userID, postID int) (bool, error)
 	ListUserProfile(ctx context.Context, targetUserID, viewerUserID, limit, offset int) ([]*domain.Post, error)
 	CountUserProfile(ctx context.Context, targetUserID, viewerUserID int) (int64, error)
 	FindPublicByID(ctx context.Context, postID int) (*domain.Post, error)

@@ -316,15 +316,12 @@ func (s *commentService) DeletePcomment(ctx context.Context, pcommentID int) err
 		return err
 	}
 	delta := deleteHeatDelta(pc.CreatedAt, count, true)
-	if err := s.comments.IncrPostCommentNum(ctx, post.ID, -int(count+1)); err != nil {
-		return err
-	}
-	if err := s.comments.AdjustPostHeat(ctx, post.ID, -delta); err != nil {
+	if err := s.comments.DeletePcommentAndAdjustPost(ctx, pcommentID, post.ID, -int(count+1), -delta); err != nil {
 		return err
 	}
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
-	return s.comments.DeletePcomment(ctx, pcommentID)
+	return nil
 }
 
 func (s *commentService) DeleteCcomment(ctx context.Context, ccommentID int) error {
@@ -341,15 +338,12 @@ func (s *commentService) DeleteCcomment(ctx context.Context, ccommentID int) err
 		return err
 	}
 	delta := deleteHeatDelta(cc.CreatedAt, 0, false)
-	if err := s.comments.IncrPostCommentNum(ctx, post.ID, -1); err != nil {
-		return err
-	}
-	if err := s.comments.AdjustPostHeat(ctx, post.ID, -delta); err != nil {
+	if err := s.comments.DeleteCcommentAndAdjustPost(ctx, ccommentID, post.ID, -1, -delta); err != nil {
 		return err
 	}
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
-	return s.comments.DeleteCcomment(ctx, ccommentID)
+	return nil
 }
 
 func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentCreateInput) (*domain.PcommentCreateResult, error) {
@@ -387,7 +381,7 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 		Content:   content,
 		CreatedAt: time.Now(),
 	}
-	if err := s.comments.CreatePcomment(ctx, pc); err != nil {
+	if err := s.comments.CreatePcommentAndAdjustPost(ctx, pc, 1, commentWeight); err != nil {
 		return nil, err
 	}
 
@@ -404,12 +398,6 @@ func (s *commentService) CreatePcomment(ctx context.Context, in domain.PcommentC
 	s.notifyMentions(ctx, authorID, content, "pcomment", pc.ID, skipNotify, "", 0)
 	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
-	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
-		return nil, err
-	}
-	if err := s.comments.AdjustPostHeat(ctx, post.ID, commentWeight); err != nil {
-		return nil, err
-	}
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
 
@@ -500,7 +488,7 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 		CreatedAt:      time.Now(),
 		UserTargetName: in.UserTargetName,
 	}
-	if err := s.comments.CreateCcomment(ctx, cc); err != nil {
+	if err := s.comments.CreateCcommentAndAdjustPost(ctx, cc, post.ID, 1, commentWeight); err != nil {
 		return nil, err
 	}
 
@@ -543,12 +531,6 @@ func (s *commentService) CreateCcomment(ctx context.Context, in domain.CcommentC
 	s.notifyMentions(ctx, authorID, content, "ccomment", cc.ID, skipNotify, preciseName, preciseUserID)
 	postWatchReceivers := s.notifyPostWatchers(ctx, post.ID, authorID, content, skipNotify)
 
-	if err := s.comments.IncrPostCommentNum(ctx, post.ID, 1); err != nil {
-		return nil, err
-	}
-	if err := s.comments.AdjustPostHeat(ctx, post.ID, commentWeight); err != nil {
-		return nil, err
-	}
 	InvalidatePostDetail(post.ID)
 	InvalidateCommentList(post.ID, "post")
 	return &domain.CcommentCreateResult{
@@ -578,42 +560,13 @@ func (s *commentService) TogglePcommentLike(ctx context.Context, userID, pcommen
 	if err := s.validatePcommentAccess(ctx, pcommentID, userID); err != nil {
 		return err
 	}
-	isLiked, err := s.comments.FindPcommentLike(ctx, userID, pcommentID)
-	if err != nil {
-		return err
-	}
-	isDenied, err := s.comments.FindPcommentDeny(ctx, userID, pcommentID)
-	if err != nil {
-		return err
-	}
-	if isLiked {
-		if err := s.comments.IncrPcommentLikeNum(ctx, pcommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeletePcommentLike(ctx, userID, pcommentID); err != nil {
-			return err
-		}
-		s.invalidateCommentListByPcommentID(ctx, pcommentID)
+	if userID == 0 || pcommentID == 0 {
 		return nil
 	}
-	if isDenied {
-		if err := s.comments.IncrPcommentDenyNum(ctx, pcommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeletePcommentDeny(ctx, userID, pcommentID); err != nil {
-			return err
-		}
+	if err := s.comments.TogglePcommentLikeOnce(ctx, userID, pcommentID); err != nil {
+		return err
 	}
-	if userID != 0 && pcommentID != 0 {
-		if err := s.comments.IncrPcommentLikeNum(ctx, pcommentID, 1); err != nil {
-			return err
-		}
-		if err := s.comments.CreatePcommentLike(ctx, userID, pcommentID); err != nil {
-			return err
-		}
-		s.invalidateCommentListByPcommentID(ctx, pcommentID)
-		return nil
-	}
+	s.invalidateCommentListByPcommentID(ctx, pcommentID)
 	return nil
 }
 
@@ -621,34 +574,13 @@ func (s *commentService) TogglePcommentDeny(ctx context.Context, userID, pcommen
 	if err := s.validatePcommentAccess(ctx, pcommentID, userID); err != nil {
 		return err
 	}
-	isLiked, err := s.comments.FindPcommentLike(ctx, userID, pcommentID)
-	if err != nil {
+	if userID == 0 || pcommentID == 0 {
+		return nil
+	}
+	if err := s.comments.TogglePcommentDenyOnce(ctx, userID, pcommentID); err != nil {
 		return err
 	}
-	isDenied, err := s.comments.FindPcommentDeny(ctx, userID, pcommentID)
-	if err != nil {
-		return err
-	}
-	if isDenied {
-		if err := s.comments.IncrPcommentDenyNum(ctx, pcommentID, -1); err != nil {
-			return err
-		}
-		return s.comments.DeletePcommentDeny(ctx, userID, pcommentID)
-	}
-	if isLiked {
-		if err := s.comments.IncrPcommentLikeNum(ctx, pcommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeletePcommentLike(ctx, userID, pcommentID); err != nil {
-			return err
-		}
-	}
-	if userID != 0 && pcommentID != 0 {
-		if err := s.comments.IncrPcommentDenyNum(ctx, pcommentID, 1); err != nil {
-			return err
-		}
-		return s.comments.CreatePcommentDeny(ctx, userID, pcommentID)
-	}
+	s.invalidateCommentListByPcommentID(ctx, pcommentID)
 	return nil
 }
 
@@ -656,42 +588,13 @@ func (s *commentService) ToggleCcommentLike(ctx context.Context, userID, ccommen
 	if err := s.validateCcommentAccess(ctx, ccommentID, userID); err != nil {
 		return err
 	}
-	isLiked, err := s.comments.FindCcommentLike(ctx, userID, ccommentID)
-	if err != nil {
-		return err
-	}
-	isDenied, err := s.comments.FindCcommentDeny(ctx, userID, ccommentID)
-	if err != nil {
-		return err
-	}
-	if isLiked {
-		if err := s.comments.IncrCcommentLikeNum(ctx, ccommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeleteCcommentLike(ctx, userID, ccommentID); err != nil {
-			return err
-		}
-		s.invalidateCommentListByCcommentID(ctx, ccommentID)
+	if userID == 0 || ccommentID == 0 {
 		return nil
 	}
-	if isDenied {
-		if err := s.comments.IncrCcommentDenyNum(ctx, ccommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeleteCcommentDeny(ctx, userID, ccommentID); err != nil {
-			return err
-		}
+	if err := s.comments.ToggleCcommentLikeOnce(ctx, userID, ccommentID); err != nil {
+		return err
 	}
-	if userID != 0 && ccommentID != 0 {
-		if err := s.comments.IncrCcommentLikeNum(ctx, ccommentID, 1); err != nil {
-			return err
-		}
-		if err := s.comments.CreateCcommentLike(ctx, userID, ccommentID); err != nil {
-			return err
-		}
-		s.invalidateCommentListByCcommentID(ctx, ccommentID)
-		return nil
-	}
+	s.invalidateCommentListByCcommentID(ctx, ccommentID)
 	return nil
 }
 
@@ -699,34 +602,13 @@ func (s *commentService) ToggleCcommentDeny(ctx context.Context, userID, ccommen
 	if err := s.validateCcommentAccess(ctx, ccommentID, userID); err != nil {
 		return err
 	}
-	isLiked, err := s.comments.FindCcommentLike(ctx, userID, ccommentID)
-	if err != nil {
+	if userID == 0 || ccommentID == 0 {
+		return nil
+	}
+	if err := s.comments.ToggleCcommentDenyOnce(ctx, userID, ccommentID); err != nil {
 		return err
 	}
-	isDenied, err := s.comments.FindCcommentDeny(ctx, userID, ccommentID)
-	if err != nil {
-		return err
-	}
-	if isDenied {
-		if err := s.comments.IncrCcommentDenyNum(ctx, ccommentID, -1); err != nil {
-			return err
-		}
-		return s.comments.DeleteCcommentDeny(ctx, userID, ccommentID)
-	}
-	if isLiked {
-		if err := s.comments.IncrCcommentLikeNum(ctx, ccommentID, -1); err != nil {
-			return err
-		}
-		if err := s.comments.DeleteCcommentLike(ctx, userID, ccommentID); err != nil {
-			return err
-		}
-	}
-	if userID != 0 && ccommentID != 0 {
-		if err := s.comments.IncrCcommentDenyNum(ctx, ccommentID, 1); err != nil {
-			return err
-		}
-		return s.comments.CreateCcommentDeny(ctx, userID, ccommentID)
-	}
+	s.invalidateCommentListByCcommentID(ctx, ccommentID)
 	return nil
 }
 
