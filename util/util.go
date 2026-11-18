@@ -22,17 +22,6 @@ func TruncateRunes(s string, maxRunes int) string {
 	return string(runes[:maxRunes])
 }
 
-// 工具函数，若注册时没有传名字，生成随机字符串
-func RandomString(n int) string {
-	var letters = []byte("fajvhfaufvafbiauAABIFWFIIudfuwfuwdagcqiuetoeh")
-	result := make([]byte, n)
-	mathRand.Seed(time.Now().Unix())
-	for i := range result {
-		result[i] = letters[mathRand.Intn(len(letters))]
-	}
-	return string(result)
-}
-
 // 生成随机数字
 func GenerateRandomDigits(length int) string {
 	digits := "0123456789"

@@ -89,4 +89,4 @@ SDK 的 `structuredContent` 返回 JSON，`content` 同时附等价 JSON 文本�
 
 本地验证：`go test ./controller ./service ./middleware ./route`，并覆盖了工具权限/输入伪造、每请求身份、匿名与私密内容、长正文、分页、并发防重、确认失败不重试、图片格式/哈希/URL，以及回复链先校验后写入。未调用生产发帖、上传或图片生成。
 
-实际主程序 `go build .` 编译通过。全仓 `go test ./...` / `go build ./...` 仍受基线已有问题影响：`SSE_market_server_test` 备份目录混用 package 且引用缺失类型，`api/cosBucket.go` 的旧 `log.Printf` 动态格式串触发 vet；这些问题在 `online` 的 `f20fa8b` 中已存在，本次未修改这些文件。
+实际主程序 `go build .` 编译通过。当时全仓 `go test ./...` / `go build ./...` 受两处基线问题影响：`SSE_market_server_test` 备份目录混用 package，以及 `api/cosBucket.go` 的动态格式串触发 vet。两处均已于 2026-11-18 清理，现全仓 `go build ./...`、`go vet ./...`、`go test ./...` 全部通过。

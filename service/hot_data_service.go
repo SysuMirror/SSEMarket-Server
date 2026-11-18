@@ -98,23 +98,6 @@ func (s *HotDataService) IncrBrowseCount(postID int) int64 {
 	return n
 }
 
-// SyncBrowseRedisFloor 在仅更新 MySQL 后把 Redis 计数至少抬到 minVal，避免与 ShowDetails 分叉。
-func (s *HotDataService) SyncBrowseRedisFloor(postID int, minVal int64) {
-	if minVal <= 0 || !s.redisHealthy {
-		return
-	}
-	key := util.GetPostBrowseCountKey(postID)
-	cur, err := core.MyRedis.Get(ctx, key).Int64()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return
-	}
-	if errors.Is(err, redis.Nil) || minVal > cur {
-		if err := core.MyRedis.Set(ctx, key, minVal, 0).Err(); err == nil {
-			s.browseDirty.Store(postID, time.Now())
-		}
-	}
-}
-
 // Redis健康检查
 func (s *HotDataService) startHealthCheck() {
 	ticker := time.NewTicker(5 * time.Second)

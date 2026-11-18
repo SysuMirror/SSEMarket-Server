@@ -6,7 +6,6 @@ import (
 	"log"
 
 	"loginTest/core"
-	"loginTest/domain"
 	"loginTest/repository"
 	"loginTest/util"
 
@@ -17,11 +16,11 @@ const hotPostsZSetKey = "hot_posts_zset"
 
 // WarmupDeps 预热任务依赖。
 type WarmupDeps struct {
-	Posts        repository.PostRepository
-	Users        repository.UserRepository
-	HotData      repository.HotDataRepository
-	LoadBloom    func(ctx context.Context) error
-	LoadHotZSet  func(ctx context.Context) error
+	Posts       repository.PostRepository
+	Users       repository.UserRepository
+	HotData     repository.HotDataRepository
+	LoadBloom   func(ctx context.Context) error
+	LoadHotZSet func(ctx context.Context) error
 }
 
 // BuildWarmupTasks 构建默认预热任务列表（P0 优先）。
@@ -66,42 +65,6 @@ func taskHotPostsTop100Cache(ctx context.Context) error {
 		out = append(out, info)
 	}
 	return Set(ctx, util.GetHotPostKey(), out, ProfileHotPostList)
-}
-
-func taskPublicFeedPages(posts repository.PostRepository) func(ctx context.Context) error {
-	return func(ctx context.Context) error {
-		gen := PublicFeedGeneration(ctx)
-		limit := 15
-		// 预热首页前 3 页（offset 0/15/30），与压测/客户端默认分页对齐
-		for page := 0; page < 3; page++ {
-			filter := domain.BrowseFilter{
-				Searchsort: "home",
-				Limit:      limit,
-				Offset:     page * limit,
-			}
-			pubFilter := filter
-			pubFilter.ViewerUserID = 0
-			list, err := posts.ListBrowse(ctx, pubFilter)
-			if err != nil {
-				return err
-			}
-			if len(list) == 0 {
-				log.Printf("[cache] warmup public_feed skip empty page offset=%d", filter.Offset)
-				continue
-			}
-			key := util.GetPublicFeedCacheKey(util.BrowseFeedKeyInput{
-				Searchsort: filter.Searchsort,
-				Partition:  filter.Partition,
-				OrderBy:    filter.OrderBy,
-				Offset:     filter.Offset,
-				Limit:      limit,
-			}, gen)
-			if err := Set(ctx, key, list, ProfilePublicFeed); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 }
 
 func taskBrowseCountBatch(hotData repository.HotDataRepository) func(ctx context.Context) error {

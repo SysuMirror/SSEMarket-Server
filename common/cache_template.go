@@ -4,25 +4,9 @@ import (
 	"context"
 	"loginTest/cache"
 	"loginTest/util"
-	"time"
 )
 
 var ctx = context.Background()
-
-// MultiLevelGet 多级缓存统一读取（委托 CacheManager）。
-func MultiLevelGet[T any](key string, dbFunc func() (T, error), expire time.Duration) (T, error) {
-	profile := cache.Profile{
-		Name:  "legacy",
-		L1TTL: 5 * time.Minute,
-		L2TTL: expire,
-	}
-	return cache.GetAside(ctx, key, dbFunc, profile)
-}
-
-// DelMultiLevelCache 删除两级缓存（写接口调用）。
-func DelMultiLevelCache(keys ...string) {
-	cache.Invalidate(keys...)
-}
 
 // InvalidatePostDetailCache 帖子详情变更时失效两级缓存。
 func InvalidatePostDetailCache(postID int) {

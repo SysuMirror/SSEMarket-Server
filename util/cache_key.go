@@ -64,31 +64,6 @@ func GetCommentListKey(postID int, postType string) string {
 	return PrefixCommentList + fmt.Sprintf("%d:%s", postID, postType)
 }
 
-// GetPostBrowseKey 生成帖子浏览列表缓存Key
-func GetPostBrowseKey(userID int, searchsort, partition, searchinfo, tag string) string {
-	// 对空值做默认处理，避免Key中出现空串导致的隐性问题
-	if partition == "" {
-		partition = "default"
-	}
-	if searchinfo == "" {
-		searchinfo = "empty"
-	}
-	if tag == "" {
-		tag = "empty"
-	}
-	return PrefixPostBrowse + fmt.Sprintf("%d:%s:%s:%s:%s", userID, searchsort, partition, searchinfo, tag)
-}
-
-// GetProductListKey 生成商品列表缓存Key
-// 参数：userID 登录用户ID，searchsort 筛选类型(home/个人商品)，searchinfo 搜索关键词
-// limit/offset不加入Key：分页参数单独处理，避免缓存Key爆炸
-func GetProductListKey(userID int, searchsort, searchinfo string) string {
-	if searchinfo == "" {
-		searchinfo = "empty"
-	}
-	return PrefixProductList + fmt.Sprintf("%d:%s:%s", userID, searchsort, searchinfo)
-}
-
 // PublicFeedGenKey 公共 Feed 缓存世代号 Redis Key。
 // 失效时 INCR 此 key，所有带 g{gen} 的旧列表 key 自动作废（无需 scan DEL）。
 const PublicFeedGenKey = PrefixPostBrowse + "public:gen"
@@ -96,31 +71,6 @@ const PublicFeedGenKey = PrefixPostBrowse + "public:gen"
 // GetHomeBrowsePage1Key 首页帖子列表第 1 页缓存 Key（旧方案，已由 PublicFeed 取代，保留兼容清理）。
 func GetHomeBrowsePage1Key() string {
 	return PrefixPostBrowse + "home:page1"
-}
-
-// GetPublicFeedCacheKey 生成公共 Feed 列表缓存 Key（不含 userID）。
-//
-// 示例：post:browse:public:g3:home:part:default:ord:default:off:0:lim:15
-// 维度：世代 gen + searchsort + partition + orderBy + offset + limit。
-func GetPublicFeedCacheKey(filter BrowseFeedKeyInput, generation int64) string {
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = 15
-	}
-	sort := filter.Searchsort
-	if sort == "" {
-		sort = "home"
-	}
-	partition := filter.Partition
-	if partition == "" {
-		partition = "default"
-	}
-	orderBy := filter.OrderBy
-	if orderBy == "" {
-		orderBy = "default"
-	}
-	return fmt.Sprintf("%spublic:g%d:%s:part:%s:ord:%s:off:%d:lim:%d",
-		PrefixPostBrowse, generation, sort, partition, orderBy, filter.Offset, limit)
 }
 
 // BrowseFeedKeyInput 公共 Feed 缓存 key 的筛选维度（刻意不含 ViewerUserID）。

@@ -30,11 +30,6 @@ func StatusOf(err error) int {
 	}
 }
 
-// CodeOf 将领域错误映射为业务 code（与 HTTP 状态码对齐）。
-func CodeOf(err error) int {
-	return StatusOf(err)
-}
-
 // Write 统一错误响应：HTTP 状态码与 body code 一致。
 func Write(c *gin.Context, err error) {
 	if err == nil {

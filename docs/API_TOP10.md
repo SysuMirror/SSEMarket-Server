@@ -407,7 +407,7 @@ curl -s -G "{BASE}/auth/getNotice" \
 login → browse(home, offset=0) → showDetails(HOT_POST_IDS) → showPcomments
 ```
 
-- 使用 `HOT_POST_IDS` 避免随机 postID 404（见 `SSE_market_server_test/scripts/export_hot_post_ids.sh`）。
+- 使用 `HOT_POST_IDS` 避免随机 postID 404（可从生产库直接导出热门 postID）。
 - browse / showDetails / showPcomments 为**直出 JSON**，判定成功用 HTTP 200 + JSON  parse，勿按 `code==200` 包装格式检查。
 
 ## 附录 B：完整调用示例（生产）

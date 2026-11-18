@@ -601,10 +601,6 @@ func buildRelevantUserJSON(ctx context.Context, userID int) ([]byte, error) {
 	}{relevantRespUsers})
 }
 
-func GetRelevantUser(userID int) ([]byte, error) {
-	return buildRelevantUserJSON(context.Background(), userID)
-}
-
 func LeaveChatView(c *gin.Context) {
 	chatQuery := ChatHistoryQuery{}
 	if err := c.ShouldBindQuery(&chatQuery); err != nil {

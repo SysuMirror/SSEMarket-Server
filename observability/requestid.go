@@ -13,17 +13,6 @@ type ctxKey struct{}
 
 const RequestIDHeader = "X-Request-ID"
 
-// RequestIDFromContext 从 context 读取 request id。
-func RequestIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if id, ok := ctx.Value(ctxKey{}).(string); ok {
-		return id
-	}
-	return ""
-}
-
 // WithRequestID 将 request id 写入 context。
 func WithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)

@@ -102,22 +102,6 @@ func defaultOtherCategoryID(db *gorm.DB) int {
 	return ensureOtherCategory(db)
 }
 
-// pruneRatingCategoriesToOtherOnly 仅保留「其他」，其余分类的帖子归入「其他」后删除。
-func pruneRatingCategoriesToOtherOnly(db *gorm.DB) {
-	otherID := ensureOtherCategory(db)
-	if otherID == 0 {
-		return
-	}
-	moved := db.Model(&model.RatingPost{}).
-		Where("category_id != ?", otherID).
-		Update("category_id", otherID).RowsAffected
-	deleted := db.Where("name != ?", "其他").Delete(&model.RatingCategory{}).RowsAffected
-	if moved > 0 || deleted > 0 {
-		log.Printf("[rating] pruned categories: moved_posts=%d deleted_categories=%d", moved, deleted)
-	}
-	recountRatingCategoryPosts(db)
-}
-
 func resolveCategoryID(db *gorm.DB, tag string) int {
 	_ = strings.TrimSpace(tag)
 	return defaultOtherCategoryID(db)

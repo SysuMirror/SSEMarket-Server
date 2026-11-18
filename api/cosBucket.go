@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/spf13/viper"
-	"github.com/tencentyun/cos-go-sdk-v5"
 	"io"
 	"log"
 	"mime/multipart"
@@ -16,6 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/viper"
+	"github.com/tencentyun/cos-go-sdk-v5"
 )
 
 // imagebedHTTPClient 复用连接，避免每次上传都重新建 TCP（图床经本机 frp 隧道）。
@@ -161,7 +162,6 @@ func ListObject(path string) (any, error) {
 		if err != nil {
 			fmt.Println(err)
 			return nil, err
-			break
 		}
 		log.Println("prefix:" + v.Prefix)
 		log.Println("parent" + getParentPath(v.Prefix))
@@ -233,7 +233,7 @@ func getParentPath(path string) string {
 		// 在window上会出现\，为了防止在不同平台的差异，采用ToSlash全换为“/”
 		parentDir = filepath.ToSlash(parentDir) + "/"
 	}
-	log.Printf("path:" + path + " dir:" + parentDir)
+	log.Printf("path:%s dir:%s", path, parentDir)
 	// 如果路径以斜杠结尾，需要再次获取上一级目录
 	//if parentDir != "." && parentDir[len(parentDir)-1] == '/' {
 	//	parentDir = filepath.Dir(parentDir)
@@ -292,44 +292,6 @@ func GetObject(key string) (io.ReadCloser, string, error) {
 		contentType = "application/octet-stream"
 	}
 	return resp.Body, contentType, nil
-}
-
-func attachmentContentDisposition(filename string) string {
-	ext := filepath.Ext(filename)
-	if ext == "" {
-		ext = ".bin"
-	}
-	fallback := "resume" + ext
-	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, fallback, url.PathEscape(filename))
-}
-
-func GetPresignedURL(key string, expire time.Duration, inline bool, attachmentFilename string) (string, error) {
-	client, _ := getClient()
-	secretID := viper.GetString("cos.secretId")
-	secretKey := viper.GetString("cos.secretKey")
-	opt := &cos.PresignedURLOptions{}
-	query := make(url.Values)
-	if inline {
-		query.Set("response-content-disposition", "inline")
-	} else if attachmentFilename != "" {
-		query.Set("response-content-disposition", attachmentContentDisposition(attachmentFilename))
-	}
-	if len(query) > 0 {
-		opt.Query = &query
-	}
-	presigned, err := client.Object.GetPresignedURL(
-		context.Background(),
-		http.MethodGet,
-		key,
-		secretID,
-		secretKey,
-		expire,
-		opt,
-	)
-	if err != nil {
-		return "", err
-	}
-	return presigned.String(), nil
 }
 
 // RequestUploadCredential 向图床换取一张短期上传凭证（前端直连 tus 用）。

@@ -101,15 +101,6 @@ func CoinLedgerDay(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-// CoinLedgerDayStart 某日 0 点（本地），用于「当日累计」查询。
-func CoinLedgerDayStart(day string) time.Time {
-	t, err := time.ParseInLocation("2006-01-02", day, time.Local)
-	if err != nil {
-		return time.Now().AddDate(0, 0, -1)
-	}
-	return t
-}
-
 // ---------------------------------------------------------------------------
 // dedup_key 构造：所有幂等键集中在这里，避免各处拼字符串口径不一致。
 // ---------------------------------------------------------------------------
