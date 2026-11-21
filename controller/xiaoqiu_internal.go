@@ -17,9 +17,10 @@ import (
 )
 
 type xqReplyInput struct {
-	PostID     int    `json:"post_id"`
-	PcommentID int    `json:"pcomment_id"`
-	Content    string `json:"content"`
+	PostID          int    `json:"post_id"`
+	PcommentID      int    `json:"pcomment_id"`
+	ReplyCcommentID int    `json:"reply_ccomment_id"`
+	Content         string `json:"content"`
 }
 
 func InternalXiaoqiuReply(c *gin.Context) {
@@ -52,11 +53,19 @@ func InternalXiaoqiuReply(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "comment_not_found"})
 			return
 		}
+		if in.ReplyCcommentID > 0 {
+			cc, err := service.Comments.FindCcomment(ctx, in.ReplyCcommentID)
+			if err != nil || cc.PcommentID != in.PcommentID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "reply_comment_not_found"})
+				return
+			}
+		}
 		_, err := service.Comments.CreateCcomment(ctx, domain.CcommentCreateInput{
-			UserID:     xqBotUID,
-			PostID:     in.PostID,
-			PcommentID: in.PcommentID,
-			Content:    content,
+			UserID:          xqBotUID,
+			PostID:          in.PostID,
+			PcommentID:      in.PcommentID,
+			ReplyCcommentID: in.ReplyCcommentID,
+			Content:         content,
 		})
 		if err != nil {
 			log.Printf("[xq-reply] Ccomment post=%d pc=%d failed: %v", in.PostID, in.PcommentID, err)
