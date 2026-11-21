@@ -10,12 +10,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
 var (
-	ragHookURL   = ragEnvStr("RAG_HOOK_URL", "http://host.docker.internal:8100")
-	ragHookToken = os.Getenv("RAG_HOOK_TOKEN")
+	ragHookURL   = ragEnvStr("RAG_HOOK_URL", "http://host.docker.internal:8119")
+	ragHookToken = strings.TrimSpace(ragEnvStr("RAG_HOOK_TOKEN", os.Getenv("INTERNAL_TOKEN")))
 )
 
 func ragEnvStr(key, def string) string {
