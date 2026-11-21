@@ -19,6 +19,7 @@ func CollectRoute(r *gin.Engine) *gin.Engine {
 	r.POST("/internal/mail", controller.InternalMail)
 	// 内部加精通道（秋坞 post-curator → 精华帖 is_high_quality，X-Internal-Token 守卫）
 	r.POST("/internal/featured", controller.InternalFeatured)
+	r.POST("/internal/xiaoqiu/reply", controller.InternalXiaoqiuReply)
 
 	r.Use(middleware.CORSMiddleware())
 	// Native forum MCP: PAT only, isolated from JWT login routes and the
