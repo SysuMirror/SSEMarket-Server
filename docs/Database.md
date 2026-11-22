@@ -21,7 +21,7 @@
 - 用户ID（用户的外键）userID int
 - 评论目标ID（帖子的外键）ptargetID int
 - 点赞数量 like_num int
-- 评论内容 pctext varchar(1000)
+- 评论内容 pctext varchar(4000)，发评论接口单条最多 4000 字
 - 评论时间 time datetime
 
 ## 评论的评论 ccomment
@@ -30,7 +30,7 @@
 - 用户ID（用户的外键）userID int
 - 评论目标ID（评论的外键）ctargetID int
 - 点赞数量 like_num bigint
-- 评论内容 cctext varchar(100)
+- 评论内容 cctext varchar(4000)，楼中楼单条最多 4000 字
 - 评论时间 time datetime
 - 回复用户ID usertargetID int
 

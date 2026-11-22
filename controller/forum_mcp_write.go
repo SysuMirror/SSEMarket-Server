@@ -57,7 +57,7 @@ func forumPublish(ctx context.Context, in forumPublishInput) (map[string]any, er
 			for _, url := range urls {
 				content += "\n\n![图片](" + url + ")"
 			}
-			if utf8.RuneCountInString(content) > 1000 {
+			if utf8.RuneCountInString(content) > config.CommentContentMaxRunes {
 				return nil, domain.ErrBadRequest
 			}
 		}
@@ -126,11 +126,11 @@ func validateForumPublication(in forumPublishInput) error {
 			return domain.ErrBadRequest
 		}
 	case "comment":
-		if in.PostID <= 0 || in.ParentCommentID != 0 || in.ReplyCommentID != 0 || utf8.RuneCountInString(in.Content) > 1000 {
+		if in.PostID <= 0 || in.ParentCommentID != 0 || in.ReplyCommentID != 0 || utf8.RuneCountInString(in.Content) > config.CommentContentMaxRunes {
 			return domain.ErrBadRequest
 		}
 	case "reply":
-		if in.PostID <= 0 || in.ParentCommentID <= 0 || utf8.RuneCountInString(in.Content) > 1000 {
+		if in.PostID <= 0 || in.ParentCommentID <= 0 || utf8.RuneCountInString(in.Content) > config.CommentContentMaxRunes {
 			return domain.ErrBadRequest
 		}
 	default:

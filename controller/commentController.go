@@ -6,6 +6,7 @@ import (
 	"log"
 	"loginTest/api"
 	"loginTest/apperr"
+	"loginTest/config"
 	"loginTest/domain"
 	"loginTest/mq"
 	"loginTest/response"
@@ -222,7 +223,7 @@ func PostPcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	if utf8.RuneCountInString(msg.Content) > 1000 {
+	if utf8.RuneCountInString(msg.Content) > config.CommentContentMaxRunes {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}
@@ -340,7 +341,7 @@ func PostCcomment(c *gin.Context) {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容不能为空")
 		return
 	}
-	if utf8.RuneCountInString(content) > 1000 {
+	if utf8.RuneCountInString(content) > config.CommentContentMaxRunes {
 		response.Response(c, http.StatusBadRequest, 400, nil, "评论内容过长")
 		return
 	}

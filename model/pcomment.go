@@ -12,7 +12,7 @@ type Pcomment struct {
 	PtargetID  int       `gorm:"index:pcommenttarget;column:ptargetID;type:int;not null"`
 	Post       Post      `gorm:"association_foreignkey:ptargetID;foreignkey:postID"`
 	LikeNum    int       `gorm:"column:like_num;type:int"`
-	DenyNum    int 		 `gorm:"column:deny_num;type:int"`
-	Pctext     string    `gorm:"column:pctext;type:varchar(1000)"`
+	DenyNum    int       `gorm:"column:deny_num;type:int"`
+	Pctext     string    `gorm:"column:pctext;type:varchar(4000)"`
 	Time       time.Time `gorm:"column:time;type:datetime"`
 }

@@ -38,7 +38,7 @@ const (
 	xqAtMarker        = "@小秋"
 	xqAtTaskTimeout   = 900 * time.Second // 比 agent 侧 840s 内部超时宽裕，留回程
 	xqAtActorCooldown = 60 * time.Second
-	xqAtReplyMaxRunes = 2800 // comment_service 对 bot 的放宽上限（DB varchar(3000)）
+	xqAtReplyMaxRunes = 2800 // comment_service 对 bot 的放宽上限（DB varchar(4000)）
 )
 
 var (
