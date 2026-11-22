@@ -18,7 +18,9 @@ type Post struct {
 	// CoinNum 被投币总数（展示用，不参与任何结算；投币明细见 coin_throws）。
 	CoinNum    int       `gorm:"column:coin_num;type:int;default:0"`
 	BrowseNum  int       `gorm:"column:browse_num;type:int"`
-	PostTime   time.Time `gorm:"column:post_time;type:datetime"`
+	// PostTime 首页 feed 按 post_time DESC 分页；建索引让 MySQL 反向扫描索引并提前
+	// 终止 LIMIT，避免高并发下全表扫描 + filesort 把 DB CPU 打满（YZ-0009）。
+	PostTime   time.Time `gorm:"column:post_time;type:datetime;index:idx_posts_post_time"`
 	Heat       float64   `gorm:"column:heat;type:double"`
 	Photos     string    `gorm:"column:photos;type:varchar(1000)"`
 	Tag        string    `gorm:"column:tag;type:varchar(100)"`

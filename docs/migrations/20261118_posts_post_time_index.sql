@@ -1,4 +1,6 @@
--- 2026-11-18 首页 Feed 全表扫描优化（手动兜底；代码 AutoMigrate 不会自动加索引）。
+-- 2026-11-18 首页 Feed 全表扫描优化。
+-- 2026-11-22 YZ-0009：model.Post.PostTime 已加 index:idx_posts_post_time，
+-- 新库由 AutoMigrate 自动建；本文件保留为存量库手动兜底/回滚参考。
 --
 -- 背景：50 并发压测下首页流 browse 只有 186 rps 封顶、p50 260ms，MySQL 吃满
 -- 230-270% CPU（机器共 4 核）。慢日志里的主犯是：
