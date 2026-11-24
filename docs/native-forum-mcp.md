@@ -59,7 +59,7 @@ SDK 的 `structuredContent` 返回 JSON，`content` 同时附等价 JSON 文本�
 ```
 
 - post：必填 title（最多30字）、partition、content（最多10000字）；不能置顶、代职位发言或绕过课程分区限制。
-- comment：必填 post_id、content（包括附图 Markdown 最多1000字）。
+- comment：必填 post_id、content（包括附图 Markdown 最多4000字）。
 - reply：额外必填 parent_comment_id；reply_comment_id 可选。先校验目标属于同一帖子/一级评论，再写入。
 - media_refs：最多4个，由相同 PAT 账号上传的媒体记录。帖子的 photos 沿用现有逗号分隔格式，评论附图沿用 Markdown `![图片](URL)`，前端实际渲染需在维护者发布后联调。
 

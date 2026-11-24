@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"loginTest/cache"
+	"loginTest/config"
 	"loginTest/domain"
 	"loginTest/dto"
 	"loginTest/repository"
@@ -20,14 +21,15 @@ import (
 
 const commentWeight = float64(6)
 
-// commentContentLimit 正文字符上限：普通用户 1000；小秋 bot 放宽到 2800——
-// @小秋 回帖是排好版的 markdown（可能带生图链接），1000 装不下；DB 列 varchar(3000)
-// 是硬顶，2800 给通知截断等下游留余量。XQ_BOT_UID 未配置时没有 bot，恒 1000。
+// commentContentLimit 正文字符上限：普通用户 4000（与前端评论输入框一致）；
+// 小秋 bot 为 2800——它的回帖是排好版的 markdown（可能带生图链接），无需放大到 4000，
+// 留出下游通知/邮件截断的余量。DB 列 varchar(4000) 是硬顶。
+// XQ_BOT_UID 未配置时没有 bot，恒为 config.CommentContentMaxRunes。
 func commentContentLimit(authorUID int) int {
 	if botUID, err := strconv.Atoi(strings.TrimSpace(os.Getenv("XQ_BOT_UID"))); err == nil && botUID > 0 && authorUID == botUID {
 		return 2800
 	}
-	return 1000
+	return config.CommentContentMaxRunes
 }
 
 type commentService struct {
