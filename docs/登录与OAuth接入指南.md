@@ -1005,6 +1005,7 @@ SMTP_HOST=<SMTP 主机名>
 - 读取位置：`SSE_market_server/config/emailConst.go` 的 `InitEmailConfig()`，使用 `godotenv.Load(".env")` 加载服务端工作目录下的 `.env`。
 - 发信人模板：`软工集市团队 <SMTP_EMAIL_USERNAME>`；验证邮件标题：`软工集市访问验证`。
 - 另一组 `SMTP_NOTICE_*` 只用于系统报警/通知，**不用于注册验证码**。
+- **SSO 模式下走邀请码注册时，集市这四项同样必填**：UniSSO 注册页在收到邀请码后会服务端调用 `POST /api/auth/validateEmail` 代发「集市验证码」。缺任意一项时发件人会退化成 `软工集市团队 <>`，接口报 `mail: invalid string`，用户在 SSO 注册页看到的就是这句话，注册直接中断。
 - 这些值是服务端机密，禁止写进前端、文档、日志或 Git。
 
 #### 3.5.2 完整流程

@@ -162,6 +162,12 @@ func main() {
 		log.Fatalf("[config] SSO enabled but SSO_CLIENT_ID / SSO_CLIENT_SECRET / SSO_DISCOVERY_URL is empty; refusing to start (check /root/SSE_Market/go_server.env)")
 	}
 	config.InitEmailConfig()
+	// 邮件配置自检：缺 SMTP_* 时验证码/通知会全部发不出去，且发件人地址会
+	// 退化成非法格式（mail: invalid string）。这里明确告警，便于线上排查；
+	// 不 Fatalf，避免因邮件故障拖垮登录等不依赖邮件的主流程。
+	if !config.EmailConfigured() {
+		log.Printf("[config] 警告：SMTP_EMAIL_USERNAME/PASSWORD/ADDR/HOST 未配置，注册验证码与邮件通知将不可用（检查 /root/SSE_Market/go_server.env）")
+	}
 	config.InitPprof()
 
 	obsCtx := context.Background()
