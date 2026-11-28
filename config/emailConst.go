@@ -42,3 +42,10 @@ func InitEmailConfig() {
 	NoticeAddr = os.Getenv("SMTP_NOTICE_ADDR")
 	NoticeHost = os.Getenv("SMTP_NOTICE_HOST")
 }
+
+// EmailConfigured 报告 SMTP 发信所需的四项配置是否齐全。
+// 验证码、评论/聊天通知都依赖它；缺任意一项时发件人模板会退化成
+// “软工集市团队 <>”，net/mail 解析失败并报 “mail: invalid string”。
+func EmailConfigured() bool {
+	return EmailUsername != "" && Password != "" && Addr != "" && Host != ""
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/mail"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ import (
 
 	"github.com/jordan-wright/email"
 	"github.com/redis/go-redis/v9"
-	"loginTest/core" 
+	"loginTest/core"
 	// 	"log"
 	"loginTest/config"
 )
@@ -26,8 +27,8 @@ func formVcode(ctx string) (string, string) {
 		if err != nil {
 			// 如果生成出错退回到时间戳拼接
 			/*
-			vcode += strconv.Itoa(int(time.Now().UnixNano()%10))
-			continue
+				vcode += strconv.Itoa(int(time.Now().UnixNano()%10))
+				continue
 			*/
 		}
 		vcode += strconv.Itoa(int(n.Int64()))
@@ -61,7 +62,26 @@ func saveVcode(vcode, receiver string) error {
 	return rds.Set(ctx, codeKey, vcode, 5*time.Minute).Err()
 }
 
+// ErrMailNotConfigured SMTP 配置缺失或发件人地址非法。
+// 调用方可用 errors.Is 区分「服务没配好」与「用户操作问题」，
+// 避免把 net/mail 的原始错误（mail: invalid string）直接甩给用户。
+var ErrMailNotConfigured = errors.New("邮件服务未配置（缺少 SMTP_EMAIL_USERNAME/SMTP_EMAIL_PASSWORD/SMTP_ADDR/SMTP_HOST），请联系管理员")
+
+func mailConfigError() error {
+	if !config.EmailConfigured() {
+		return ErrMailNotConfigured
+	}
+	sender := strings.Replace(config.Sender, "emailUsername", config.EmailUsername, -1)
+	if _, err := mail.ParseAddress(sender); err != nil {
+		return fmt.Errorf("%w: 发件人地址非法（%v）", ErrMailNotConfigured, err)
+	}
+	return nil
+}
+
 func SendEmail(receiver string, status int, msg string) error {
+	if err := mailConfigError(); err != nil {
+		return err
+	}
 	e := email.NewEmail()
 	senderString := config.Sender
 	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)
@@ -71,6 +91,9 @@ func SendEmail(receiver string, status int, msg string) error {
 	}
 	e.To = []string{receiver}
 	text := ""
+	// 验证码先落 Redis 再发信；若发信失败必须回收，否则 5 分钟内重试会被
+	// “验证码已发送”挡住，用户会以为注册坏了。
+	var rollbackVcode func()
 	if status == 0 {
 		rds := core.MyRedis
 		if rds == nil {
@@ -95,6 +118,11 @@ func SendEmail(receiver string, status int, msg string) error {
 		if err := saveVcode(vcode, receiver); err != nil {
 			return fmt.Errorf("保存验证码失败: %w", err)
 		}
+		rollbackVcode = func() {
+			if delErr := rds.Del(context.Background(), codeKey).Err(); delErr != nil {
+				fmt.Printf("回收未送达的验证码失败: %v\n", delErr)
+			}
+		}
 		e.HTML = []byte(text)
 	} else if status == 1 {
 		e.Subject = config.CommentTitle
@@ -113,6 +141,9 @@ func SendEmail(receiver string, status int, msg string) error {
 	auth := smtp.PlainAuth("", config.EmailUsername, config.Password, config.Host)
 	err := e.SendWithTLS(config.Addr, auth, &tls.Config{ServerName: config.Host})
 	if err != nil {
+		if rollbackVcode != nil {
+			rollbackVcode()
+		}
 		fmt.Println(err)
 		return err
 	}
@@ -122,6 +153,9 @@ func SendEmail(receiver string, status int, msg string) error {
 
 // SendPlainEmail 发送纯文本邮件(系统报警等内部用途,不走通知模板)。
 func SendPlainEmail(receiver, subject, body string) error {
+	if err := mailConfigError(); err != nil {
+		return err
+	}
 	e := email.NewEmail()
 	senderString := config.Sender
 	senderString = strings.Replace(senderString, "emailUsername", config.EmailUsername, -1)

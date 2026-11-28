@@ -661,6 +661,12 @@ func ValidateEmail(c *gin.Context) {
 		if msg == "" {
 			msg = "发送邮箱错误"
 		}
+		// 服务端 SMTP 未配置属于运维故障，不是用户输入问题：返回 503，
+		// 让前端/SSO 显示“邮件服务未配置”的明确提示，而不是 400。
+		if errors.Is(err, api.ErrMailNotConfigured) {
+			response.Response(c, http.StatusServiceUnavailable, http.StatusServiceUnavailable, gin.H{"data": email}, msg)
+			return
+		}
 		response.Response(c, http.StatusBadRequest, 400, gin.H{"data": email}, msg)
 		return
 	}
